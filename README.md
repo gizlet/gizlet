@@ -16,4 +16,6 @@ bazel test //tests:launcher_test --test_output=all
 
 In a foreground terminal, type `terminal` to open an interactive shell. Type `exit` in the shell to return to Gizlet Home. Type `quit` or press Ctrl-D at Home to close Gizlet. On Linux, select a BusyBox executable at a different absolute path with `bazel run //targets/cc_binary:gizlet -- --busybox /absolute/path/to/busybox`.
 
+If the Terminal shell suspends itself while Gizlet is a job of an outer interactive shell, the outer shell regains the terminal. Run `fg` there to resume Gizlet and the same Terminal shell. A direct foreground launch without an outer job closes the suspended shell and returns to Gizlet Home.
+
 The portable Home logic in [`launcher/`](launcher/) uses GizOS's public `libs/container/trie` library and PAL result codes to resolve exact selections into app actions. The POSIX adapter in [`targets/cc_binary/`](targets/cc_binary/) starts the shell with fixed arguments, waits for it, and restores terminal settings. The PTY test checks return to Home and verifies that the Linux shell process is the installed BusyBox executable.

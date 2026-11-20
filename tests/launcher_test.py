@@ -3,6 +3,7 @@
 import errno
 import os
 import pty
+import re
 import select
 import shlex
 import signal
@@ -22,19 +23,26 @@ class Session:
         self.fd = fd
         self.pending = b""
         self.transcript = b""
+        self.child_pids = set()
 
     def send(self, data):
         os.write(self.fd, data)
 
     def expect(self, text):
+        return self.expect_match(re.compile(re.escape(text)))
+
+    def expect_match(self, pattern):
         deadline = time.monotonic() + 5
-        while text not in self.pending:
+        while True:
+            match = pattern.search(self.pending)
+            if match:
+                self.pending = self.pending[match.end():]
+                return match
             chunk = self.read(deadline)
             if chunk is None:
-                raise AssertionError(f"timed out waiting for {text!r}: {self.transcript!r}")
+                raise AssertionError(f"timed out waiting for {pattern.pattern!r}: {self.transcript!r}")
             if not chunk:
                 raise EOFError(f"PTY closed: {self.transcript!r}")
-        self.pending = self.pending.split(text, 1)[1]
 
     def read(self, deadline):
         if not select.select([self.fd], [], [], max(0, deadline - time.monotonic()))[0]:
@@ -78,8 +86,30 @@ def launch(executable, *arguments):
     finally:
         os.close(fd)
         if session.pid is not None:
+            for child in session.child_pids:
+                try:
+                    os.kill(child, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
             os.kill(session.pid, signal.SIGKILL)
             os.waitpid(session.pid, 0)
+
+
+def track_shell(session):
+    session.send(b"printf 'INNER-PID:%s\\n' \"$$\"\n")
+    shell_pid = int(session.expect_match(re.compile(rb"\r\nINNER-PID:(\d+)\r\n"))[1])
+    session.child_pids.add(shell_pid)
+    session.expect(SHELL_PROMPT)
+    return shell_pid
+
+
+def expect_reaped(session, shell_pid):
+    try:
+        os.kill(shell_pid, 0)
+    except ProcessLookupError:
+        session.child_pids.remove(shell_pid)
+    else:
+        raise AssertionError("inner shell was not reaped")
 
 
 def check_shell(executable, busybox=None):
@@ -117,9 +147,89 @@ def check_shell(executable, busybox=None):
         session.send(b"kill -KILL $$\n")
         session.expect(b"Terminal ended on signal 9.")
         session.expect(HOME_PROMPT)
+        home_modes = termios.tcgetattr(session.fd)
+
+        session.send(b"terminal\n")
+        session.expect(SHELL_PROMPT)
+        shell_pid = track_shell(session)
+        session.send(b"stty -echo; kill -STOP $$\n")
+        session.expect(b"Terminal closed after its shell was suspended.")
+        session.expect(HOME_PROMPT)
+        expect_reaped(session, shell_pid)
+        assert termios.tcgetattr(session.fd) == home_modes
         session.send(b"quit\n")
         session.finish()
         print(session.transcript.decode(errors="replace"), end="")
+
+
+def foreground_group(pid):
+    result = subprocess.check_output(["/bin/ps", "-p", str(pid), "-o", "tpgid="])
+    return int(result)
+
+
+def wait_for_command(outer_pid, shell_group):
+    deadline = time.monotonic() + 5
+    while foreground_group(outer_pid) == shell_group:
+        assert time.monotonic() < deadline, "foreground command did not take the tty"
+        time.sleep(0.02)
+
+
+def check_nested_job_control(executable, busybox):
+    with launch("/bin/bash", "--noprofile", "--norc", "-i") as session:
+        session.expect(SHELL_PROMPT)
+        session.send(b"PS1='outer> '\n")
+        outer_prompt = b"\r\nouter> "
+        session.expect(outer_prompt)
+        outer_modes = termios.tcgetattr(session.fd)
+        session.send(f"PS1='gizlet-shell> ' {shlex.quote(executable)}\n".encode())
+        session.expect(HOME_PROMPT)
+        home_modes = termios.tcgetattr(session.fd)
+        home_group = foreground_group(session.pid)
+        assert home_group != session.pid
+        session.child_pids.add(home_group)
+
+        session.send(b"terminal\n")
+        session.expect(SHELL_PROMPT)
+        shell_pid = track_shell(session)
+        assert foreground_group(session.pid) == shell_pid
+
+        session.send(b"/bin/sleep 30\n")
+        wait_for_command(session.pid, shell_pid)
+        session.send(b"\x1a")  # Ctrl-Z stops sleep and returns to the inner shell.
+        session.expect(b"Stopped")
+        session.expect(SHELL_PROMPT)
+        assert foreground_group(session.pid) == shell_pid
+        session.send(b"fg\n")
+        wait_for_command(session.pid, shell_pid)
+        session.send(b"\x03")  # Ctrl-C interrupts the resumed sleep.
+        session.expect(SHELL_PROMPT)
+        assert foreground_group(session.pid) == shell_pid
+
+        stop = b"kill -STOP $$" if busybox else b"suspend"
+        session.send(b"stty -echo -icanon; saved_modes=$(stty -g); " + stop + b"\n")
+        session.expect(b"Stopped")
+        session.expect(outer_prompt)
+        assert foreground_group(session.pid) == session.pid
+        assert termios.tcgetattr(session.fd) == outer_modes
+        session.send(b"fg\n")
+        session.expect(SHELL_PROMPT)
+        assert foreground_group(session.pid) == shell_pid
+        session.send(b"test \"$(stty -g)\" = \"$saved_modes\" && printf '%s%s\\n' SHELL_MODES_ OK\n")
+        session.expect(b"SHELL_MODES_OK\r\n")
+        session.expect(SHELL_PROMPT)
+        session.send(b"stty tostop; kill -KILL $$\n")
+        session.expect(b"Terminal ended on signal 9.")
+        session.expect(HOME_PROMPT)
+        assert foreground_group(session.pid) == home_group
+        assert termios.tcgetattr(session.fd) == home_modes
+        expect_reaped(session, shell_pid)
+
+        session.send(b"quit\n")
+        session.expect(outer_prompt)
+        session.child_pids.remove(home_group)
+        session.send(b"exit 0\n")
+        session.finish()
+        print("Nested job control passed. Shell resumed with fg and restored its modes.")
 
 
 def check_launch_error(executable):
@@ -144,6 +254,7 @@ if __name__ == "__main__":
     result = subprocess.run([program], stdin=subprocess.DEVNULL, capture_output=True)
     assert result.returncode != 0 and b"needs a foreground terminal" in result.stderr
     busybox = "/bin/busybox" if sys.platform.startswith("linux") else None
+    check_nested_job_control(program, busybox)
     check_shell(program, busybox)
     if busybox:
         with launch(program, "--busybox", busybox) as session:
