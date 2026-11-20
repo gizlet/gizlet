@@ -19,5 +19,5 @@ cc_binary(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     visibility = ["//visibility:public"],
-    deps = ["@gizos//libs/container/trie"],
+    deps = ["//launcher"],
 )

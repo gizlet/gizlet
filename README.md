@@ -1,6 +1,8 @@
 # Gizlet
 
-Gizlet is a terminal prototype for an app launcher on Linux and macOS. Home lists app entry points. An app such as a future NES emulator owns its own game library. Gizlet will also host system features such as the Marketplace client and Wi-Fi settings. First-party apps can live in separate `gizlet/<app>` repositories.
+Gizlet Home lists app entry points. An app such as a future NES emulator owns its own game library. Gizlet will also host system features such as the Marketplace client and Wi-Fi settings. First-party apps can live in separate `gizlet/<app>` repositories.
+
+The initial product deliverables, in order, are an R36S Linux SD image, a macOS desktop app, and a Windows desktop app. iOS, Android, and RTOS targets are planned for later and may use separate repositories. This prototype runs in a terminal on Linux and macOS.
 
 ## Build and run
 
@@ -14,4 +16,4 @@ bazel test //tests:launcher_test --test_output=all
 
 In a foreground terminal, type `terminal` to open an interactive shell. Type `exit` in the shell to return to Gizlet Home. Type `quit` or press Ctrl-D at Home to close Gizlet. On Linux, select a BusyBox executable at a different absolute path with `bazel run //targets/cc_binary:gizlet -- --busybox /absolute/path/to/busybox`.
 
-Gizlet uses GizOS's public `libs/container/trie` library and PAL result codes to route exact Home selections. The POSIX launcher starts the shell with a fixed argument list, waits for it, and restores terminal settings when it exits. The PTY test exercises the launcher and interactive shell together and checks that the Linux shell process is the installed BusyBox executable.
+The portable Home logic in [`launcher/`](launcher/) uses GizOS's public `libs/container/trie` library and PAL result codes to resolve exact selections into app actions. The POSIX adapter in [`targets/cc_binary/`](targets/cc_binary/) starts the shell with fixed arguments, waits for it, and restores terminal settings. The PTY test checks return to Home and verifies that the Linux shell process is the installed BusyBox executable.
