@@ -1,0 +1,62 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//tools/r36s:sd_image.bzl", "r36s_sd_image")
+
+package(default_visibility = ["//visibility:public"])
+
+_BOARD = "//boards/gameconsole/r36s/rk3326:"
+
+r36s_sd_image(
+    name = "gizlet-r36s-panel0",
+    board_dts = _BOARD + "gizlet-r36s-panel0.dts",
+    boot_script = _BOARD + "boot.cmd",
+    busybox_config = _BOARD + "busybox.config",
+    exec_compatible_with = ["@platforms//os:linux"],
+    inittab = _BOARD + "inittab",
+    kernel_config = _BOARD + "kernel.config",
+    launcher = "//targets/cc_binary:gizlet",
+    layout = _BOARD + "sdcard.cfg",
+    rc_sysinit = _BOARD + "rcS",
+    target_compatible_with = [_BOARD + "r36s_panel0"],
+    upstream = "@r36s_sources//:inputs",
+)
+
+sh_test(
+    name = "image_test",
+    srcs = ["image_test.sh"],
+    args = [
+        "$(rootpath :gizlet-r36s-panel0)",
+        "$(rootpath :boot_chain_test.py)",
+        "$(rootpath @r36s_sources//:bl31.elf)",
+        "$(rootpath //third_party/r36s:trust.sha256)",
+        "$(rootpath //boards/gameconsole/r36s/rk3326:boot.cmd)",
+        "$(rootpath //targets/cc_binary:gizlet)",
+    ],
+    data = [
+        ":boot_chain_test.py",
+        ":gizlet-r36s-panel0",
+        _BOARD + "boot.cmd",
+        "//targets/cc_binary:gizlet",
+        "//third_party/r36s:trust.sha256",
+        "@r36s_sources//:bl31.elf",
+    ],
+    exec_compatible_with = ["@platforms//os:linux"],
+    tags = ["manual"],
+    target_compatible_with = [_BOARD + "r36s_panel0"],
+)
+
+sh_test(
+    name = "boot_test",
+    size = "medium",
+    srcs = ["boot_test.sh"],
+    args = [
+        "$(rootpath :boot_test.py)",
+        "$(rootpath :gizlet-r36s-panel0)",
+    ],
+    data = [
+        ":boot_test.py",
+        ":gizlet-r36s-panel0",
+    ],
+    exec_compatible_with = ["@platforms//os:linux"],
+    tags = ["manual"],
+    target_compatible_with = [_BOARD + "r36s_panel0"],
+)

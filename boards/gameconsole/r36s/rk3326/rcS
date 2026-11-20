@@ -1,0 +1,6 @@
+#!/bin/sh
+set -e
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t tmpfs tmpfs /run
+mount -t tmpfs -o mode=1777 tmpfs /tmp

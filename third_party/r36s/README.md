@@ -1,0 +1,13 @@
+# R36S upstream inputs
+
+[`repositories.bzl`](repositories.bzl) pins the source archives, board patches and binary firmware used by the Gizlet R36S card. Bazel checks each file's SHA-256 before building. Product wiring, console selection, mount policy and the TF1 partition map live with the [board](../../boards/gameconsole/r36s/rk3326/README.md).
+
+| Input | Role and license source |
+| --- | --- |
+| Linux 6.12.17 | ARM64 kernel and device tree, GPL-2.0 with the Linux syscall exception. [Kernel license](https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/tree/COPYING?h=v6.12.17) |
+| ROCKNIX Linux patches | R36S board DT, original panel initialization and joypad support. [Fixed downstream sources](https://github.com/ROCKNIX/distribution/tree/fec842b58559ee973a0100abd726370e4a032b77/projects/Rockchip/patches/linux/RK3326) |
+| Hardkernel U-Boot and ROCKNIX config | Legacy RK3326 `a` boot chain, GPL. [U-Boot source](https://github.com/ROCKNIX/hardkernel-uboot/tree/2492a3e467e332e2350d987234ce6123700b3392) · [Board recipe](https://github.com/ROCKNIX/distribution/tree/cefc14339a4ae18c02bb69888f27835e50664b60/projects/ROCKNIX/devices/RK3326/packages/u-boot-legacy) |
+| Rockchip rkbin | DDR init v2.11, miniloader v1.40 and BL31 v1.34. The card includes the upstream notice in `/usr/share/licenses/rockchip-rkbin`. [Rockchip license](https://github.com/rockchip-linux/rkbin/blob/74213af1e952c4683d2e35952507133b61394862/LICENSE) |
+| BusyBox 1.37.0 | Static init, shell and mount utilities, GPL-2.0. The card includes `/usr/share/licenses/BusyBox`. [BusyBox license](https://busybox.net/license.html) |
+
+The board build and tests derive from the reviewed GizOS R36S port, under the [GizOS Apache-2.0 license](GizOS-LICENSE). This adaptation packages Gizlet Home and defines the product's TF1 and console configuration. The board DTS retains its SPDX identifier. The included [trust packer patch](rk3326_trust.patch) uses physical ELF load addresses and padded sector counts. The [expected SHA-256](trust.sha256) covers the entire 4 MiB trust area from ROCKNIX `20261101-a`. [Port source](https://github.com/GizClaw/gizos/commit/027afa5f1e88bc359e30ae7da80bb85c18fd1655) · [ROCKNIX reference](https://github.com/ROCKNIX/distribution/releases/tag/20261101)

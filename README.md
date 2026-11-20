@@ -4,6 +4,14 @@ Gizlet Home lists app entry points. An app such as a future NES emulator owns it
 
 The initial product deliverables, in order, are an R36S Linux SD image, a macOS desktop app, and a Windows desktop app. iOS, Android, and RTOS targets are planned for later and may use separate repositories. This prototype runs in a terminal on Linux and macOS.
 
+## R36S system card
+
+Build the Gizlet TF1 image for the RK3326 R36S-V12 with original Panel 0 on Linux. It boots straight to Gizlet Home and includes BusyBox Terminal. The board guide describes the card layout, build prerequisites and QEMU tests. [R36S board guide](boards/gameconsole/r36s/rk3326/README.md)
+
+```sh
+bazel build --config=r36s //targets/sd_image/gameconsole/r36s:gizlet-r36s-panel0
+```
+
 ## Build and run
 
 Use Bazelisk or Bazel 9.2.0 and the host C toolchain (GCC on Linux or Xcode on macOS). On Linux, install BusyBox at `/bin/busybox`, for example with `sudo apt install busybox` on Ubuntu. On macOS, Terminal uses `/bin/sh`.

@@ -1,0 +1,5 @@
+::sysinit:/etc/rcS
+::respawn:/bin/cttyhack /usr/bin/gizlet
+tty1::respawn:-/usr/bin/gizlet
+::ctrlaltdel:/sbin/reboot
+::shutdown:/bin/sync
