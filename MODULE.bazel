@@ -1,0 +1,31 @@
+module(name = "gizlet")
+
+bazel_dep(name = "apple_support", version = "2.2.0")
+bazel_dep(name = "gizos", version = "0.0.0")
+bazel_dep(name = "hermetic_cc_toolchain", version = "4.2.0")
+bazel_dep(name = "platforms", version = "1.1.0")
+bazel_dep(name = "rules_cc", version = "0.2.17")
+bazel_dep(name = "rules_python", version = "2.2.0")
+
+git_override(
+    module_name = "gizos",
+    commit = "00d1bea9ed813c85cecb6df09fd1d5a66e6af7c6",
+    remote = "https://github.com/GizClaw/gizos.git",
+)
+
+# Match the GizOS downstream consumer's Xcode-aware host toolchain.
+apple_cc_configure = use_extension(
+    "@apple_support//crosstool:setup.bzl",
+    "apple_cc_configure_extension",
+)
+use_repo(apple_cc_configure, "local_config_apple_cc_toolchains")
+
+register_toolchains("@local_config_apple_cc_toolchains//:all")
+
+# GizOS imports zig_sdk, whose extension instantiates it for the root module.
+# Declare it here as in GizOS's downstream consumer fixture.
+zig_toolchains = use_extension("@hermetic_cc_toolchain//toolchain:ext.bzl", "toolchains")
+use_repo(zig_toolchains, "zig_sdk")
+
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.toolchain(python_version = "3.11")

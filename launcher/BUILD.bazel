@@ -1,0 +1,16 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "launcher",
+    srcs = ["src/home.c"],
+    hdrs = ["include/h2_gizlet_home.h"],
+    conlyopts = ["-std=c11"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+    includes = ["include"],
+    visibility = ["//targets:__subpackages__"],
+    deps = ["@gizos//libs/container/trie"],
+)
