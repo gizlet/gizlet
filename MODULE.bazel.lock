@@ -730,6 +730,26 @@
           }
         }
       },
+      "os:linux,arch:amd64": {
+        "bzlTransitiveDigest": "tUtpL4Cua3y5qTZDWZQ0S2aVaSC6KwRCR4kOaR1acIQ=",
+        "usagesDigest": "MgeGSkAzGARLzVXyqmA4pf31g9FkvX3AzcnMdNmd2dU=",
+        "recordedInputs": [
+          "REPO_MAPPING:gizos+,gizos_python_host gizos++managed_python_host+gizos_python_host",
+          "REPO_MAPPING:gizos+,rules_python rules_python+",
+          "REPO_MAPPING:rules_python+,rules_python rules_python+"
+        ],
+        "generatedRepoSpecs": {
+          "gizos_managed_python_toolchains": {
+            "repoRuleId": "@@rules_python+//python/private:local_runtime_toolchains_repo.bzl%local_runtime_toolchains_repo",
+            "attributes": {
+              "runtimes": [],
+              "exec_compatible_with": {},
+              "target_compatible_with": {},
+              "target_settings": {}
+            }
+          }
+        }
+      },
       "os:osx,arch:aarch64": {
         "bzlTransitiveDigest": "tUtpL4Cua3y5qTZDWZQ0S2aVaSC6KwRCR4kOaR1acIQ=",
         "usagesDigest": "MgeGSkAzGARLzVXyqmA4pf31g9FkvX3AzcnMdNmd2dU=",

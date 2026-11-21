@@ -1,6 +1,6 @@
 # R36S upstream inputs
 
-[`repositories.bzl`](repositories.bzl) pins the source archives, board patches and binary firmware used by the Gizlet R36S card. Bazel checks each file's SHA-256 before building. Product wiring, console selection, mount policy and the TF1 partition map live with the [board](../../boards/gameconsole/r36s/rk3326/README.md).
+[`repositories.bzl`](repositories.bzl) pins the source archives, board patches and binary firmware used by the Gizlet R36S card. Bazel verifies each file's SHA-256 and exports it as a separate label for the product's image target. The target passes those labels to the public Rockchip rules in GizOS. Product wiring, console selection, mount policy and the TF1 partition map live with the board. [Board](../../boards/gameconsole/r36s/rk3326/README.md) · [Image target](../../targets/sd_image/gameconsole/r36s/BUILD.bazel)
 
 | Input | Role and license source |
 | --- | --- |

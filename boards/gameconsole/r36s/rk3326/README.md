@@ -12,7 +12,9 @@ sudo apt-get install build-essential bc bison flex libssl-dev libelf-dev pkg-con
 bazel build --config=r36s //targets/sd_image/gameconsole/r36s:gizlet-r36s-panel0
 ```
 
-The build runs as a regular user and writes `bazel-bin/targets/sd_image/gameconsole/r36s/gizlet-r36s-panel0.img`. The `r36s` configuration builds the existing `//targets/cc_binary:gizlet` as a static AArch64 Linux executable and packages those exact bytes in `/usr/bin/gizlet`. Its Home menu uses the public trie library from the project's pinned GizOS dependency. U-Boot 2017.09, Linux 6.12.17 and BusyBox 1.37.0 are compiled from their pinned sources. The native stages rebuild on each invocation to account for host compiler, libc and image-tool changes. Identical host tool contents and source inputs support byte-for-byte reconstruction. [Bazel target](../../../../targets/sd_image/gameconsole/r36s/BUILD.bazel) · [Pinned inputs and credits](../../../../third_party/r36s/README.md)
+The build runs as a regular user and writes `bazel-bin/targets/sd_image/gameconsole/r36s/gizlet-r36s-panel0.img`. The `r36s` configuration builds `//targets/cc_binary:gizlet` as a static AArch64 executable and installs those exact bytes in `/usr/bin/gizlet`. Its Home menu uses the public GizOS trie library.
+
+The image target composes four public Rockchip rules from the pinned GizOS module to build Linux 6.12.17 and its DTB, legacy U-Boot 2017.09, the BusyBox 1.37.0 root filesystem and the raw card. Gizlet supplies the source pins, ordered patches, [BL31 packer configuration](trust.ini), boot parameters, filesystem contents and TF1 layout. The native stages rebuild on each invocation to account for host tool changes. Identical host tools and declared inputs support byte-for-byte reconstruction. [Image target](../../../../targets/sd_image/gameconsole/r36s/BUILD.bazel) · [GizOS rules](https://github.com/GizClaw/gizos/blob/81bde748fbbcc414ed32a7e52bffcd7b4e03076c/tools/bazel/native/rockchip/README.md) · [Pinned inputs and credits](../../../../third_party/r36s/README.md)
 
 ## TF1 layout and Home startup
 

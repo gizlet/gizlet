@@ -1,8 +1,0 @@
-exports_files([
-    "disk.sh",
-    "linux.sh",
-    "rootfs.sh",
-    "run.sh",
-    "sd_image.bzl",
-    "uboot.sh",
-])
