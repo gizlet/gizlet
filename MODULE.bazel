@@ -14,9 +14,15 @@ r36s_sources(name = "r36s_sources")
 
 git_override(
     module_name = "gizos",
-    commit = "81bde748fbbcc414ed32a7e52bffcd7b4e03076c",
+    commit = "a587fa187b752d7dd67f13d0a04ae24819e3c01f",
     remote = "https://github.com/GizClaw/gizos.git",
 )
+
+rockchip = use_extension(
+    "@gizos//tools/bazel/native/rockchip:repositories.bzl",
+    "rockchip_repositories",
+)
+use_repo(rockchip, "gizos_rk3326_legacy_rkbin")
 
 # Match the GizOS downstream consumer's Xcode-aware host toolchain.
 apple_cc_configure = use_extension(

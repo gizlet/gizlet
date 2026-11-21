@@ -7,6 +7,8 @@ _BOARD = "//boards/gameconsole/r36s/rk3326:"
 
 _SOURCE = "@r36s_sources//:"
 
+_RKBIN = "@gizos_rk3326_legacy_rkbin//:"
+
 _EPOCH = 1704067200
 
 _PANEL0 = [_BOARD + "r36s_panel0"]
@@ -34,14 +36,14 @@ rockchip_linux_kernel(
 rockchip_legacy_uboot(
     name = "bootloader",
     archive = _SOURCE + "uboot.tar.gz",
-    bl31 = _SOURCE + "bl31.elf",
+    bl31 = _RKBIN + "bl31.elf",
     boot_command = _BOARD + "boot.cmd",
     build_user = "gizlet",
-    ddr = _SOURCE + "ddr.bin",
+    ddr = _RKBIN + "ddr.bin",
     defconfig = _SOURCE + "rocknix_rk3326_defconfig",
     idbloader = "parts/idbloader.img",
     load_address = "0x00200000",
-    miniloader = _SOURCE + "miniloader.bin",
+    miniloader = _RKBIN + "miniloader.bin",
     mkimage_soc = "px30",
     patches = [
         _SOURCE + "uboot.patch",
@@ -78,7 +80,7 @@ busybox_squashfs(
     },
     files = {
         _BOARD + "inittab": "etc/inittab",
-        _SOURCE + "rkbin.LICENSE": "usr/share/licenses/rockchip-rkbin",
+        _RKBIN + "LICENSE": "usr/share/licenses/rockchip-rkbin",
         "//third_party/r36s:GizOS-LICENSE": "usr/share/licenses/GizOS",
     },
     source_date_epoch = _EPOCH,
@@ -110,7 +112,7 @@ sh_test(
     args = [
         "$(rootpath :gizlet-r36s-panel0)",
         "$(rootpath :boot_chain_test.py)",
-        "$(rootpath @r36s_sources//:bl31.elf)",
+        "$(rootpath @gizos_rk3326_legacy_rkbin//:bl31.elf)",
         "$(rootpath //third_party/r36s:trust.sha256)",
         "$(rootpath //boards/gameconsole/r36s/rk3326:boot.cmd)",
         "$(rootpath //targets/cc_binary:gizlet)",
@@ -121,7 +123,7 @@ sh_test(
         _BOARD + "boot.cmd",
         "//targets/cc_binary:gizlet",
         "//third_party/r36s:trust.sha256",
-        "@r36s_sources//:bl31.elf",
+        _RKBIN + "bl31.elf",
     ],
     exec_compatible_with = ["@platforms//os:linux"],
     tags = ["manual"],
