@@ -30,7 +30,7 @@ export interface Env {
   /** GitHub OAuth app; GitHub sign-in is off without it. */
   GITHUB_CLIENT_ID?: string;
   GITHUB_CLIENT_SECRET?: string;
-  /** Postmark server token; without it, account emails are only logged. */
+  /** Postmark server token; without it there is no password reset (local runs log the email). */
   POSTMARK_TOKEN?: string;
   MAIL_FROM: string;
 }

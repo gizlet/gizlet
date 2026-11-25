@@ -17,3 +17,13 @@ test("login return paths stay on this site", async () => {
     assert.equal(await nextPathFor(bad), "/account", JSON.stringify(bad));
   }
 });
+
+test("password reset needs Postmark, except on local runs", async () => {
+  const { authOptions } = await import("../../src/auth.ts");
+  const env = { SITE_ORIGIN: "https://gizlet.io", API_ORIGIN: "https://api.gizlet.io", GITHUB_API: "https://api.github.com", BETTER_AUTH_SECRET: "x", MAIL_FROM: "Gizlet <hello@gizlet.io>" };
+  const reset = (e: object) => authOptions({ ...env, ...e }, {} as never).emailAndPassword?.sendResetPassword;
+  assert.equal(reset({}), undefined);
+  assert.equal(reset({ DEV_HOST_OVERRIDE: "0" }), undefined);
+  assert.equal(typeof reset({ DEV_HOST_OVERRIDE: "1" }), "function");
+  assert.equal(typeof reset({ POSTMARK_TOKEN: "t" }), "function");
+});
