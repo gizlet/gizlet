@@ -126,26 +126,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Skips the deploy until the SOPS credentials (secrets/*.enc.yaml) are committed.
-      - name: Check for deploy credentials
-        id: creds
-        run: |
-          if [ -f secrets/deploy.enc.yaml ] && [ -f secrets/worker.enc.yaml ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::notice title=Not deployed::secrets/deploy.enc.yaml and secrets/worker.enc.yaml are not committed yet."
-          fi
-      - if: steps.creds.outputs.ready == 'true'
-        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - if: steps.creds.outputs.ready == 'true'
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
-      - if: steps.creds.outputs.ready == 'true'
-        run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile
       - name: Install sops and Hurl
-        if: steps.creds.outputs.ready == 'true'
         run: |
           base="https://github.com/getsops/sops/releases/download/${SOPS_VERSION}"
           curl -fsSLO "$base/sops-${SOPS_VERSION}.linux.amd64"
@@ -157,7 +144,6 @@ jobs:
           echo "$(cut -d' ' -f1 "hurl_${HURL_VERSION}_amd64.deb.sha256")  hurl_${HURL_VERSION}_amd64.deb" | sha256sum -c
           sudo apt-get install -y "./hurl_${HURL_VERSION}_amd64.deb"
       - name: Decrypt deploy credentials
-        if: steps.creds.outputs.ready == 'true'
         env:
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
         run: |
@@ -166,19 +152,17 @@ jobs:
             echo "$key=$value" >> "$GITHUB_ENV"
           done
       - name: Migrate D1
-        if: steps.creds.outputs.ready == 'true'
         run: pnpm exec wrangler d1 migrations apply gizlet --remote
       - name: Migrate Postgres
-        if: steps.creds.outputs.ready == 'true'
         run: node scripts/pg.ts migrate
-      - name: Update Worker secrets
-        if: steps.creds.outputs.ready == 'true'
+      # Secrets go up with the new version, so the first deploy needs no existing Worker.
+      - name: Deploy
         env:
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
-        run: sops decrypt --output-type json secrets/worker.enc.yaml | pnpm exec wrangler secret bulk
-      - name: Deploy
-        if: steps.creds.outputs.ready == 'true'
-        run: pnpm exec wrangler deploy
+        run: |
+          secrets="$RUNNER_TEMP/worker-secrets.json"
+          trap 'rm -f "$secrets"' EXIT
+          (umask 077 && sops decrypt --output-type json secrets/worker.enc.yaml > "$secrets")
+          pnpm exec wrangler deploy --secrets-file "$secrets"
       - name: Smoke test production
-        if: steps.creds.outputs.ready == 'true'
         run: hurl --test --variable "run=$(date +%s)" tests/prod/*.hurl
