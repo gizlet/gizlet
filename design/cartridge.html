@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Direction B · Cartridge</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root { --paper: #f2ede4; --paper-2: #e7e0d3; --ink: #1a1816; --dim: #6b645a; --accent: #ff5a1f; --blue: #2d5bff; --yellow: #ffd23f; }
+  * { box-sizing: border-box; margin: 0; }
+  body { font: 16px/1.5 Archivo, system-ui, sans-serif; color: var(--ink); background: var(--paper); background-image: radial-gradient(#1a181614 1px, transparent 1px); background-size: 12px 12px; }
+  a { color: inherit; text-decoration: none; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 0 32px; }
+  .mono { font-family: "Space Mono", monospace; }
+
+  nav { display: flex; align-items: center; height: 76px; gap: 28px; border-bottom: 3px solid var(--ink); }
+  .brand { font-weight: 900; font-size: 26px; letter-spacing: -0.03em; display: flex; align-items: center; gap: 10px; }
+  .brand .px { display: grid; grid-template-columns: repeat(3, 6px); gap: 2px; }
+  .brand .px i { width: 6px; height: 6px; background: var(--ink); }
+  .brand .px i:nth-child(2), .brand .px i:nth-child(4), .brand .px i:nth-child(6), .brand .px i:nth-child(8) { background: var(--accent); }
+  nav .links { margin-left: auto; display: flex; gap: 6px; }
+  nav .links a { font: 700 13px "Space Mono"; text-transform: uppercase; padding: 8px 14px; border: 2px solid transparent; border-radius: 6px; }
+  nav .links a.on { border-color: var(--ink); background: var(--yellow); }
+  nav .login { font: 700 13px "Space Mono"; text-transform: uppercase; padding: 10px 16px; background: var(--ink); color: var(--paper); border-radius: 6px; }
+
+  .hero { margin: 40px 0 56px; border: 3px solid var(--ink); border-radius: 18px; background: var(--paper-2); box-shadow: 8px 8px 0 var(--ink); display: grid; grid-template-columns: 1.2fr 1fr; overflow: hidden; }
+  .hero .copy { padding: 56px 48px; }
+  .stamp { display: inline-block; font: 700 12px "Space Mono"; text-transform: uppercase; background: var(--accent); color: #fff; padding: 6px 10px; border-radius: 4px; transform: rotate(-2deg); }
+  .hero h1 { font-weight: 900; font-size: 84px; line-height: .92; letter-spacing: -0.045em; margin: 22px 0 22px; text-transform: uppercase; }
+  .hero h1 em { font-style: normal; color: var(--accent); }
+  .hero p { font-size: 18px; color: var(--dim); max-width: 440px; }
+  .btns { display: flex; gap: 14px; margin-top: 32px; }
+  .btn { font: 700 14px "Space Mono"; text-transform: uppercase; padding: 16px 22px; border: 3px solid var(--ink); border-radius: 10px; box-shadow: 4px 4px 0 var(--ink); background: #fff; transition: transform .1s, box-shadow .1s; }
+  .btn:active { transform: translate(4px, 4px); box-shadow: none; }
+  .btn.go { background: var(--accent); color: #fff; }
+  .hero .art { border-left: 3px solid var(--ink); background: var(--blue); position: relative; display: grid; place-items: center; }
+  .hero .art::before { content: ""; position: absolute; inset: 0; background-image: linear-gradient(#ffffff22 2px, transparent 2px), linear-gradient(90deg, #ffffff22 2px, transparent 2px); background-size: 28px 28px; }
+  .bigcart { position: relative; width: 230px; height: 260px; background: #d9d2c4; border: 3px solid var(--ink); border-radius: 14px 14px 8px 8px; box-shadow: 6px 6px 0 var(--ink); transform: rotate(6deg); }
+  .bigcart::before { content: ""; position: absolute; top: 0; left: 30px; right: 30px; height: 14px; border: 3px solid var(--ink); border-top: 0; border-radius: 0 0 6px 6px; }
+  .bigcart .label { position: absolute; left: 18px; right: 18px; top: 34px; bottom: 54px; border: 3px solid var(--ink); border-radius: 8px; overflow: hidden; }
+  .bigcart .ribs { position: absolute; left: 30px; right: 30px; bottom: 14px; height: 22px; background: repeating-linear-gradient(90deg, var(--ink) 0 3px, transparent 3px 12px); }
+
+  .row-head { display: flex; align-items: end; justify-content: space-between; margin-bottom: 22px; }
+  .row-head h2 { font-weight: 900; font-size: 44px; text-transform: uppercase; letter-spacing: -0.03em; line-height: 1; }
+  .row-head a { font: 700 13px "Space Mono"; text-transform: uppercase; border-bottom: 3px solid var(--accent); }
+  .filters { display: flex; gap: 10px; margin-bottom: 26px; }
+  .filters span { font: 700 12px "Space Mono"; text-transform: uppercase; padding: 7px 12px; border: 2px solid var(--ink); border-radius: 999px; background: #fff; }
+  .filters span.on { background: var(--ink); color: var(--paper); }
+
+  .carts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 26px; padding-bottom: 64px; }
+  .cart { background: #d9d2c4; border: 3px solid var(--ink); border-radius: 14px 14px 8px 8px; padding: 22px 14px 14px; position: relative; box-shadow: 5px 5px 0 var(--ink); transition: transform .15s; }
+  .cart:hover { transform: translateY(-6px) rotate(-1deg); }
+  .cart::before { content: ""; position: absolute; top: 0; left: 40px; right: 40px; height: 10px; border: 3px solid var(--ink); border-top: 0; border-radius: 0 0 5px 5px; }
+  .cart .label { border: 3px solid var(--ink); border-radius: 8px; overflow: hidden; background: #fff; }
+  .cart .label .pic { aspect-ratio: 1; }
+  .cart .label .txt { padding: 10px 12px; border-top: 3px solid var(--ink); }
+  .cart .no { font: 700 11px "Space Mono"; color: var(--dim); }
+  .cart h3 { font-weight: 900; font-size: 18px; text-transform: uppercase; letter-spacing: -0.02em; line-height: 1.1; }
+  .cart .foot { display: flex; justify-content: space-between; margin-top: 12px; font: 700 12px "Space Mono"; text-transform: uppercase; }
+  .cart .price { background: var(--yellow); border: 2px solid var(--ink); padding: 2px 8px; border-radius: 4px; }
+
+  .ticker { border-top: 3px solid var(--ink); border-bottom: 3px solid var(--ink); background: var(--ink); color: var(--paper); font: 700 14px "Space Mono"; text-transform: uppercase; white-space: nowrap; overflow: hidden; padding: 12px 0; }
+  .ticker span { margin-right: 40px; } .ticker b { color: var(--accent); }
+  footer .wrap { display: flex; gap: 24px; padding: 24px 32px; font: 700 12px "Space Mono"; text-transform: uppercase; color: var(--dim); }
+
+  .p1 { background: radial-gradient(circle at 70% 30%, #ffd23f 0 14%, transparent 15%), linear-gradient(#1b2a6b, #0c1030); }
+  .p2 { background: radial-gradient(ellipse at 30% 110%, #2e7d32 0 50%, transparent 51%), #b9e4a8; }
+  .p3 { background: radial-gradient(circle, #ff5a1f 0 12%, transparent 13%), repeating-radial-gradient(circle, #2d5bff 0 6px, #f2ede4 6px 14px); }
+  .p4 { background: repeating-linear-gradient(45deg, #ff5a1f 0 14px, #ffd23f 14px 28px); }
+  .p5 { background: linear-gradient(170deg, transparent 55%, #1a1816 55.5%), linear-gradient(#7fd1ff, #fff); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <a class="brand" href="#"><span class="px"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>GIZLET</a>
+    <div class="links"><a class="on" href="#">Store</a><a href="#">Gizlet OS</a><a href="#">Download</a><a href="#">Make games</a></div>
+    <a class="login" href="#">Log in</a>
+  </nav>
+
+  <div class="hero">
+    <div class="copy">
+      <span class="stamp">New · Gizlet OS for R36S</span>
+      <h1>Play<br>anything.<br><em>Pocket</em> it.</h1>
+      <p>An open Linux system for handheld consoles, and a store where every game installs in one press.</p>
+      <div class="btns"><a class="btn go" href="#">Flash my card ▶</a><a class="btn" href="#">Browse store</a></div>
+    </div>
+    <div class="art"><div class="bigcart"><div class="label p1"></div><div class="ribs"></div></div></div>
+  </div>
+
+  <div class="row-head"><h2>Fresh carts</h2><a href="#">All 248 →</a></div>
+  <div class="filters"><span class="on">All</span><span>Games</span><span>Emulators</span><span>Tools</span><span>Media</span></div>
+  <div class="carts">
+    <a class="cart" href="#"><div class="label"><div class="pic p3"></div><div class="txt"><div class="no">NO.041</div><h3>Tiny Orbit</h3></div></div><div class="foot"><span>Arcade</span><span class="price">Free</span></div></a>
+    <a class="cart" href="#"><div class="label"><div class="pic p2"></div><div class="txt"><div class="no">NO.040</div><h3>Moss &amp; Mortar</h3></div></div><div class="foot"><span>Strategy</span><span class="price">$4.99</span></div></a>
+    <a class="cart" href="#"><div class="label"><div class="pic p4"></div><div class="txt"><div class="no">NO.039</div><h3>Night Market</h3></div></div><div class="foot"><span>Sim</span><span class="price">Free</span></div></a>
+    <a class="cart" href="#"><div class="label"><div class="pic p5"></div><div class="txt"><div class="no">NO.038</div><h3>Echo Valley</h3></div></div><div class="foot"><span>Adventure</span><span class="price">$2.99</span></div></a>
+  </div>
+</div>
+<div class="ticker"><span><b>★</b> Lantern Drift tops the charts</span><span><b>★</b> 12 new emulators this week</span><span><b>★</b> Gizlet OS 0.3 is out</span><span><b>★</b> Friends &amp; chat now in beta</span></div>
+<footer><div class="wrap"><span>© 2026 Gizlet</span><span>Privacy</span><span>Terms</span><span style="margin-left:auto">Ⓐ Select · Ⓑ Back</span></div></footer>
+</body>
+</html>

@@ -1,0 +1,64 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "gizlet",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-20",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": true,
+  "routes": [
+    { "pattern": "gizlet.io", "custom_domain": true },
+    { "pattern": "www.gizlet.io", "custom_domain": true },
+    { "pattern": "store.gizlet.io", "custom_domain": true },
+    { "pattern": "dl.gizlet.io", "custom_domain": true },
+    { "pattern": "api.gizlet.io", "custom_domain": true }
+  ],
+  "assets": {
+    "directory": "public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "gizlet",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations/d1"
+    }
+  ],
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "00000000000000000000000000000000",
+      "localConnectionString": "postgresql://postgres:postgres@127.0.0.1:18789/postgres?sslmode=disable"
+    }
+  ],
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "gizlet-assets" }],
+  "queues": {
+    "producers": [{ "binding": "MIRROR", "queue": "gizlet-mirror" }],
+    "consumers": [
+      {
+        "queue": "gizlet-mirror",
+        "max_batch_size": 1,
+        "max_retries": 5,
+        "retry_delay": 30,
+        "dead_letter_queue": "gizlet-mirror-dlq"
+      }
+    ]
+  },
+  "triggers": { "crons": ["*/10 * * * *", "17 */6 * * *"] },
+  "vars": {
+    "SITE_ORIGIN": "https://gizlet.io",
+    "DL_ORIGIN": "https://dl.gizlet.io",
+    "API_ORIGIN": "https://api.gizlet.io",
+    "GITHUB_WEB": "https://github.com",
+    "GITHUB_RAW": "https://raw.githubusercontent.com",
+    "GITHUB_API": "https://api.github.com",
+    "OIDC_ISSUER": "https://token.actions.githubusercontent.com",
+    "OIDC_AUDIENCE": "https://api.gizlet.io",
+    "KEEP_MIRRORED_RELEASES": "2",
+    "DEV_HOST_OVERRIDE": "0",
+    "MAIL_FROM": "Gizlet <hello@gizlet.io>"
+  },
+  "observability": { "enabled": true }
+}

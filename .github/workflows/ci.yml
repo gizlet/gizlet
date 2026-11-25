@@ -80,6 +80,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
+      - run: pnpm test:unit
       - name: Bundle the Worker
         run: pnpm exec wrangler deploy --dry-run --outdir "$RUNNER_TEMP/bundle"
       - name: Install Hurl
