@@ -15,10 +15,17 @@ export async function call(path, body) {
   return data;
 }
 
-/** A same-site path to return to, from ?next=. */
+/** A path on this site to return to, from ?next=; anything that resolves elsewhere is ignored. */
 export function nextPath(fallback) {
   const next = new URLSearchParams(location.search).get("next");
-  return next && next.startsWith("/") && !next.startsWith("//") ? next : fallback;
+  if (!next || !next.startsWith("/")) return fallback;
+  let url;
+  try {
+    url = new URL(next, location.origin);
+  } catch {
+    return fallback;
+  }
+  return url.origin === location.origin ? url.pathname + url.search + url.hash : fallback;
 }
 
 export function signIn(next) {

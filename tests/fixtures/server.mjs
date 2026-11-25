@@ -17,13 +17,24 @@ const jwk = { ...(await exportJWK(publicKey)), kid: "fixture", alg: "RS256", use
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
 const sha = (b) => createHash("sha256").update(b).digest("hex");
 
-/** A zip archive; entries are { name, data, mode, deflate }. Written as on Unix. */
+/** An Info-ZIP Unicode Path extra field (0x7075) that renames an entry from `from` to `to`. */
+function unicodePath(from, to) {
+  const data = Buffer.concat([Buffer.from([1]), Buffer.alloc(4), Buffer.from(to)]);
+  data.writeUInt32LE(crc32(Buffer.from(from)), 1);
+  const head = Buffer.alloc(4);
+  head.writeUInt16LE(0x7075, 0);
+  head.writeUInt16LE(data.length, 2);
+  return Buffer.concat([head, data]);
+}
+
+/** A zip archive; entries are { name, data, mode, deflate, extra }. Written as on Unix. */
 function zip(entries) {
   const locals = [];
   const centrals = [];
   let offset = 0;
   for (const e of entries) {
     const name = Buffer.from(e.name);
+    const extra = e.extra ?? Buffer.alloc(0);
     const data = e.deflate ? deflateRawSync(e.data) : e.data;
     const method = e.deflate ? 8 : 0;
     const crc = crc32(e.data);
@@ -36,7 +47,8 @@ function zip(entries) {
     local.writeUInt32LE(data.length, 18);
     local.writeUInt32LE(e.data.length, 22);
     local.writeUInt16LE(name.length, 26);
-    locals.push(local, name, data);
+    local.writeUInt16LE(extra.length, 28);
+    locals.push(local, name, extra, data);
     const central = Buffer.alloc(46);
     central.writeUInt32LE(0x02014b50, 0);
     central.writeUInt16LE((3 << 8) | 20, 4);
@@ -47,10 +59,11 @@ function zip(entries) {
     central.writeUInt32LE(data.length, 20);
     central.writeUInt32LE(e.data.length, 24);
     central.writeUInt16LE(name.length, 28);
+    central.writeUInt16LE(extra.length, 30);
     central.writeUInt32LE((e.mode << 16) >>> 0, 38);
     central.writeUInt32LE(offset, 42);
-    centrals.push(central, name);
-    offset += 30 + name.length + data.length;
+    centrals.push(central, name, extra);
+    offset += 30 + name.length + extra.length + data.length;
   }
   const dir = Buffer.concat(centrals);
   const end = Buffer.alloc(22);
@@ -81,7 +94,8 @@ function executable(target) {
 
 /**
  * A `.gzl` package. `problem` builds a broken one: symlink | setuid | wrong-arch | traversal |
- * alias (`./game`, an x86-64 build, after `game`) | case (`Game` after `game`).
+ * alias (`./game`, an x86-64 build, after `game`) | case (`Game` after `game`) |
+ * unicode-path (an x86-64 `other` that a Unicode Path extra field renames to `game`).
  * `literal` writes manifest.toml with TOML literal strings.
  */
 function gzl({ id, version, target, tier, problem, literal }) {
@@ -111,6 +125,7 @@ function gzl({ id, version, target, tier, problem, literal }) {
   if (problem === "symlink") entries.push({ name: "assets/passwd", data: Buffer.from("/etc/passwd"), mode: 0o120777 });
   if (problem === "traversal") entries.push({ name: "assets/../../escape", data: Buffer.from("x"), mode: 0o100644 });
   if (problem === "alias") entries.push({ name: "./game", data: executable("x86_64-unknown-linux-gnu"), mode: 0o100755 });
+  if (problem === "unicode-path") entries.push({ name: "other", data: executable("x86_64-unknown-linux-gnu"), mode: 0o100755, extra: unicodePath("other", "game") });
   if (problem === "case") entries.push({ name: "Game", data: executable("x86_64-unknown-linux-gnu"), mode: 0o100755 });
   return zip(entries);
 }
@@ -176,6 +191,7 @@ addRelease("fixture-org/setuid", "0.1.0", { problem: "setuid" });
 addRelease("fixture-org/wrong-arch", "0.1.0", { problem: "wrong-arch", targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 addRelease("fixture-org/traversal", "0.1.0", { problem: "traversal", targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 addRelease("fixture-org/alias", "0.1.0", { problem: "alias", targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+addRelease("fixture-org/unicode-path", "0.1.0", { problem: "unicode-path", targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 addRelease("fixture-org/case", "0.1.0", { problem: "case", targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 addRelease("fixture-org/literal-toml", "0.1.0", { literal: true, targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 repos.set("fixture-org/no-index", { tags: { "v1.0.0": { files: new Map([["other.zip", Buffer.from("x")]]) } }, latest: "v1.0.0" });

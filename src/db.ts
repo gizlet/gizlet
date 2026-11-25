@@ -58,6 +58,8 @@ export interface PackageRow {
   tier: Tier;
   size: number;
   sha256: string;
+  /** The release revision this row belongs to. */
+  revision: number;
 }
 
 export const parse = <T>(s: string | null, fallback: T): T => {
@@ -98,8 +100,16 @@ export function summary(env: Env, g: GizletRow) {
   };
 }
 
+/**
+ * A package's download URL names its sha256: a republished tag can change a file's bytes, and
+ * only a URL that pins them can be cached forever.
+ */
+export function packageUrl(env: Env, p: Pick<PackageRow, "repo" | "tag" | "file" | "sha256">): string {
+  return `${dlUrl(env, p.repo, p.tag, p.file)}?sha256=${p.sha256}`;
+}
+
 export function packageJson(env: Env, p: PackageRow) {
-  return { file: p.file, target: p.target, tier: p.tier, size: p.size, sha256: p.sha256, url: dlUrl(env, p.repo, p.tag, p.file) };
+  return { file: p.file, target: p.target, tier: p.tier, size: p.size, sha256: p.sha256, url: packageUrl(env, p) };
 }
 
 export async function getGizlet(env: Env, repo: string): Promise<GizletRow | null> {
@@ -154,7 +164,7 @@ export async function listReleases(env: Env, repo: string, limit = 50) {
 export async function pickInstall(env: Env, repo: string, target: string, tier: Tier) {
   const { results } = await env.DB.prepare(
     `SELECT p.*, r.version AS version, r.published_at AS published_at FROM packages p
-       JOIN releases r ON r.repo = p.repo AND r.tag = p.tag
+       JOIN releases r ON r.repo = p.repo AND r.tag = p.tag AND r.revision = p.revision
       WHERE p.repo = ? AND p.target = ? AND r.status = 'ready'`,
   )
     .bind(repo, target)

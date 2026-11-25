@@ -184,6 +184,20 @@ HTTP 200
 jsonpath "$.status" == "failed"
 jsonpath "$.error" contains "extract to the same place"
 
+GET {{base}}/v1/gizlets/github.com/fixture-org/unicode-path
+x-gizlet-host: api.gizlet.io
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/unicode-path/releases/v0.1.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "failed"
+jsonpath "$.error" contains "renames it (Unicode Path)"
+
 # A manifest.toml with TOML literal strings is valid.
 GET {{base}}/v1/gizlets/github.com/fixture-org/literal-toml
 x-gizlet-host: api.gizlet.io

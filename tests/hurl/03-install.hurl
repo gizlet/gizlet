@@ -8,7 +8,7 @@ sha: jsonpath "$.package.sha256"
 [Asserts]
 jsonpath "$.version" == "0.2.0"
 jsonpath "$.package.tier" == "lite"
-jsonpath "$.package.url" == "https://dl.gizlet.io/github.com/fixture-org/hello-gizlet/v0.2.0/dev.fixture.hellogizlet-0.2.0-aarch64-unknown-linux-gnu-lite.gzl"
+jsonpath "$.package.url" == "https://dl.gizlet.io/github.com/fixture-org/hello-gizlet/v0.2.0/dev.fixture.hellogizlet-0.2.0-aarch64-unknown-linux-gnu-lite.gzl?sha256={{sha}}"
 
 # A full desktop prefers its own tier.
 GET {{base}}/v1/gizlets/github.com/fixture-org/hello-gizlet/install?target=aarch64-apple-darwin&tier=full
@@ -27,13 +27,28 @@ GET {{base}}/v1/gizlets/github.com/fixture-org/hello-gizlet/install?target=nope
 x-gizlet-host: api.gizlet.io
 HTTP 400
 
-# Packages come from R2, immutable, with their checksum, and resume with Range.
-GET {{base}}/github.com/fixture-org/hello-gizlet/v0.2.0/dev.fixture.hellogizlet-0.2.0-aarch64-unknown-linux-gnu-lite.gzl
+# Packages come from R2 with their checksum, and resume with Range. A URL that names the
+# sha256 is immutable; a plain one, whose bytes a republished tag can change, is not.
+GET {{base}}/github.com/fixture-org/hello-gizlet/v0.2.0/dev.fixture.hellogizlet-0.2.0-aarch64-unknown-linux-gnu-lite.gzl?sha256={{sha}}
 x-gizlet-host: dl.gizlet.io
 HTTP 200
 [Asserts]
 header "content-type" == "application/vnd.gizlet.package+zip"
 header "cache-control" contains "immutable"
+header "x-checksum-sha256" == "{{sha}}"
+
+GET {{base}}/github.com/fixture-org/hello-gizlet/v0.2.0/dev.fixture.hellogizlet-0.2.0-aarch64-unknown-linux-gnu-lite.gzl?sha256=0000000000000000000000000000000000000000000000000000000000000000
+x-gizlet-host: dl.gizlet.io
+HTTP 404
+[Asserts]
+body contains "has changed"
+
+GET {{base}}/github.com/fixture-org/hello-gizlet/v0.2.0/dev.fixture.hellogizlet-0.2.0-aarch64-unknown-linux-gnu-lite.gzl
+x-gizlet-host: dl.gizlet.io
+HTTP 200
+[Asserts]
+header "content-type" == "application/vnd.gizlet.package+zip"
+header "cache-control" == "public, max-age=300"
 header "x-checksum-sha256" == "{{sha}}"
 sha256 toHex == "{{sha}}"
 

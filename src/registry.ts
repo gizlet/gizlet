@@ -52,7 +52,9 @@ export async function indexRelease(env: Env, ref: RepoRef, tag: string, opts: In
       ).bind(ref.key, tag, index.version, indexJson, now, now),
       env.DB.prepare("DELETE FROM packages WHERE repo = ? AND tag = ?").bind(ref.key, tag),
       ...index.packages.map((p) =>
-        env.DB.prepare("INSERT INTO packages (repo, tag, file, target, tier, size, sha256) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(ref.key, tag, p.file, p.target, p.tier, p.size, p.sha256),
+        env.DB.prepare(
+          "INSERT INTO packages (repo, tag, file, target, tier, size, sha256, revision) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, (SELECT revision FROM releases WHERE repo = ?1 AND tag = ?2))",
+        ).bind(ref.key, tag, p.file, p.target, p.tier, p.size, p.sha256),
       ),
     );
   }

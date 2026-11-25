@@ -116,8 +116,7 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
   const g = await env.DB.prepare("SELECT owner, name_repo FROM gizlets WHERE repo = ?").bind(job.repo).first<{ owner: string; name_repo: string }>();
   if (!g) return;
   const index = JSON.parse(rel.index_json) as ReleaseIndex;
-  // The index and its package rows are written together, so they belong to this revision.
-  const { results: pkgs } = await env.DB.prepare("SELECT * FROM packages WHERE repo = ? AND tag = ?").bind(job.repo, job.tag).all<PackageRow>();
+  const { results: pkgs } = await env.DB.prepare("SELECT * FROM packages WHERE repo = ? AND tag = ? AND revision = ?").bind(job.repo, job.tag, job.revision).all<PackageRow>();
   const warnings: string[] = [];
   try {
     if (!(await setStatus(env, job, "mirroring", null))) throw new Superseded();

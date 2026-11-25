@@ -49,6 +49,8 @@ const ELF_MACHINE: Record<string, number> = {
 
 interface Entry {
   name: string;
+  /** The name exactly as stored in the central directory. */
+  raw: Uint8Array;
   flags: number;
   method: number;
   compressed: number;
@@ -59,6 +61,82 @@ interface Entry {
 }
 
 class Bad extends Error {}
+
+/** Extra fields that give an entry a different name (Info-ZIP Unicode Path). */
+const NAME_OVERRIDES = new Set([0x7075]);
+const UTF8_FLAG = 1 << 11;
+/** Local headers are read in windows of this size, at most MAX_LOCAL_READS of them. */
+const LOCAL_WINDOW = 1024 * 1024;
+const MAX_LOCAL_READS = 2000;
+
+/** The ids of the extra fields in an extra block; null when the block is malformed. */
+function extraIds(extra: Uint8Array): number[] | null {
+  const v = view(extra);
+  const ids: number[] = [];
+  let p = 0;
+  while (p + 4 <= extra.length) {
+    ids.push(v.getUint16(p, true));
+    p += 4 + v.getUint16(p + 2, true);
+  }
+  return p === extra.length ? ids : null;
+}
+
+/**
+ * An entry's name as every extractor reads it, or why it cannot be read one way: names must be
+ * ASCII, or UTF-8 with the UTF-8 flag set (without it extractors read CP437), and no extra
+ * field may give the entry another name.
+ */
+function entryName(raw: Uint8Array, flags: number, extra: Uint8Array): { name: string } | { problem: string } {
+  const ids = extraIds(extra);
+  if (!ids) return { problem: "has a damaged extra field" };
+  if (ids.some((id) => NAME_OVERRIDES.has(id))) return { problem: "has an extra field that renames it (Unicode Path)" };
+  if (raw.some((b) => b >= 0x80) && !(flags & UTF8_FLAG)) return { problem: "has a non-ASCII name without the UTF-8 flag" };
+  try {
+    return { name: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(raw) };
+  } catch {
+    return { problem: "has a name that is not valid UTF-8" };
+  }
+}
+
+const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
+
+/**
+ * Every local header must match its central directory entry: same name bytes, and no extra
+ * field that renames it. Extractors that read local headers then see the names checked here.
+ */
+async function checkLocalHeaders(env: Env, key: string, size: number, entries: Entry[]): Promise<void> {
+  const sorted = [...entries].sort((a, b) => a.offset - b.offset);
+  let reads = 0;
+  let i = 0;
+  while (i < sorted.length) {
+    const start = sorted[i]!.offset;
+    if (++reads > MAX_LOCAL_READS) throw new Bad("has too many large files to check");
+    const buf = await range(env, key, start, Math.min(LOCAL_WINDOW, size - start));
+    while (i < sorted.length) {
+      const e = sorted[i]!;
+      const o = e.offset - start;
+      if (o + 30 > buf.length) {
+        if (o > 0) break;
+        throw new Bad(`has a damaged entry for ${JSON.stringify(e.name.slice(0, 120))}`);
+      }
+      const shown = JSON.stringify(e.name.slice(0, 120));
+      const l = view(buf);
+      if (l.getUint32(o, true) !== LOCAL) throw new Bad(`has a damaged entry for ${shown}`);
+      const nameLength = l.getUint16(o + 26, true);
+      const extraLength = l.getUint16(o + 28, true);
+      // A header is at most 30 + 2 × 65535 bytes, well within one window from its start.
+      if (o + 30 + nameLength + extraLength > buf.length) {
+        if (o > 0) break;
+        throw new Bad(`has a damaged entry for ${shown}`);
+      }
+      if (!sameBytes(buf.subarray(o + 30, o + 30 + nameLength), e.raw)) throw new Bad(`has a local header for ${shown} with another name`);
+      const ids = extraIds(buf.subarray(o + 30 + nameLength, o + 30 + nameLength + extraLength));
+      if (!ids) throw new Bad(`has a damaged extra field for ${shown}`);
+      if (ids.some((id) => NAME_OVERRIDES.has(id))) throw new Bad(`has a local header for ${shown} with an extra field that renames it (Unicode Path)`);
+      i++;
+    }
+  }
+}
 
 async function range(env: Env, key: string, offset: number, length: number): Promise<Uint8Array> {
   if (length <= 0) return new Uint8Array();
@@ -97,10 +175,15 @@ async function readDirectory(env: Env, key: string, size: number): Promise<Entry
     const extraLength = d.getUint16(p + 30, true);
     const commentLength = d.getUint16(p + 32, true);
     const external = d.getUint32(p + 38, true);
-    if (p + 46 + nameLength > dir.length) break;
+    if (p + 46 + nameLength + extraLength > dir.length) break;
+    const raw = dir.slice(p + 46, p + 46 + nameLength);
+    const flags = d.getUint16(p + 8, true);
+    const named = entryName(raw, flags, dir.subarray(p + 46 + nameLength, p + 46 + nameLength + extraLength));
+    if ("problem" in named) throw new Bad(`has an entry that ${named.problem}`);
     entries.push({
-      name: new TextDecoder().decode(dir.subarray(p + 46, p + 46 + nameLength)),
-      flags: d.getUint16(p + 8, true),
+      name: named.name,
+      raw,
+      flags,
       method: d.getUint16(p + 10, true),
       compressed: d.getUint32(p + 20, true),
       size: d.getUint32(p + 24, true),
@@ -243,6 +326,12 @@ export async function checkPackage(env: Env, key: string, file: string, size: nu
   }
   if (unpacked > MAX_UNPACKED) fail("unpacks to more than 4 GiB");
   if (errors.length) return { errors, warnings };
+  try {
+    await checkLocalHeaders(env, key, size, entries);
+  } catch (e) {
+    if (e instanceof Bad) return { errors: [`${file} ${e.message}`], warnings };
+    throw e;
+  }
 
   const manifestEntry = names.get("manifest.toml");
   if (!manifestEntry) return { errors: [`${file} has no manifest.toml`], warnings };

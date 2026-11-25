@@ -61,6 +61,7 @@ CREATE TABLE packages (
   tier TEXT NOT NULL,
   size INTEGER NOT NULL,
   sha256 TEXT NOT NULL,
+  revision INTEGER NOT NULL,     -- the release revision this row belongs to
   PRIMARY KEY (repo, tag, file)
 );
 
