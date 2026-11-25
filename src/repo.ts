@@ -19,7 +19,8 @@ export function repoRef(owner: string, name: string): RepoRef | null {
 /**
  * Parse any common way of writing a GitHub repository:
  * `github.com/o/r`, `https://github.com/o/r/...`, `git@github.com:o/r.git`, `o/r`,
- * and store or download URLs on gizlet.io.
+ * and share, API or download URLs: any `<host>/.../github.com/o/r`, such as
+ * `gizlet.io/github.com/o/r` or a self-hosted or local copy of the site.
  */
 export function parseRepoAddress(input: string): RepoRef | null {
   let s = input.trim();
@@ -28,10 +29,9 @@ export function parseRepoAddress(input: string): RepoRef | null {
   const ssh = /^(?:ssh:\/\/)?git@github\.com[:/]([^/]+)\/([^/#?]+)/i.exec(s);
   if (ssh) return repoRef(ssh[1]!, ssh[2]!);
   s = s.replace(/^[a-z]+:\/\//i, "");
-  s = s.replace(/^(?:www\.|store\.|dl\.|api\.)?gizlet\.io\/(?:v1\/gizlets\/)?/i, "");
-  s = s.replace(/^www\./i, "");
   const parts = s.split(/[?#]/)[0]!.split("/").filter(Boolean);
-  if (parts[0]?.toLowerCase() === "github.com") parts.shift();
+  const at = parts.findIndex((p) => /^(?:www\.)?github\.com$/i.test(p));
+  if (at >= 0) parts.splice(0, at + 1);
   else if (parts.length !== 2 || parts[0]!.includes(".")) return null;
   if (parts.length < 2) return null;
   return repoRef(parts[0]!, parts[1]!);

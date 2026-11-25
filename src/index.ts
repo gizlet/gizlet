@@ -5,15 +5,30 @@ import { mirrorRelease } from "./mirror";
 import { refreshStale } from "./registry";
 import { site } from "./site";
 
-/** One Worker serves every gizlet.io host; the host picks the app. */
-function hostOf(req: Request, env: Env): string {
-  const host = new URL(req.url).hostname;
-  if (env.DEV_HOST_OVERRIDE === "1") return req.headers.get("x-gizlet-host") ?? host;
-  return host;
+const HOST_PREFIX = /^\/_host\/([a-z0-9.-]+)(\/.*)?$/;
+
+/**
+ * One Worker serves every gizlet.io host; the host picks the app. Local runs
+ * (DEV_HOST_OVERRIDE=1) pick it with an X-Gizlet-Host header, or with a /_host/<host>/ path
+ * prefix that browsers can follow, since every local host is localhost.
+ */
+function route(req: Request, env: Env): { host: string; req: Request } {
+  const url = new URL(req.url);
+  if (env.DEV_HOST_OVERRIDE !== "1") return { host: url.hostname, req };
+  const m = HOST_PREFIX.exec(url.pathname);
+  if (m) {
+    url.pathname = m[2] ?? "/";
+    return { host: m[1]!, req: new Request(url, req) };
+  }
+  return { host: req.headers.get("x-gizlet-host") ?? url.hostname, req };
 }
 
+/** Account routes the site's own pages call, served on gizlet.io as on api.gizlet.io. */
+const isAccountPath = (path: string) => path.startsWith("/v1/auth/") || path === "/v1/me" || path.startsWith("/v1/me/");
+
 export default {
-  async fetch(req, env, ctx) {
+  async fetch(request, env, ctx) {
+    const { host, req } = route(request, env);
     const url = new URL(req.url);
     if (url.pathname.startsWith("/static/")) {
       const res = await env.ASSETS.fetch(req);
@@ -21,7 +36,7 @@ export default {
       out.headers.set("cache-control", "public, max-age=3600");
       return out;
     }
-    switch (hostOf(req, env)) {
+    switch (host) {
       case "api.gizlet.io":
         return api.fetch(req, env, ctx);
       case "dl.gizlet.io":
@@ -31,6 +46,7 @@ export default {
         // The store moved to gizlet.io; old share links keep working.
         return Response.redirect(`${env.SITE_ORIGIN}${url.pathname}${url.search}`, 301);
       default:
+        if (isAccountPath(url.pathname)) return api.fetch(req, env, ctx);
         return site.fetch(req, env, ctx);
     }
   },

@@ -5,7 +5,6 @@
 import { Hono } from "hono";
 import { html, raw } from "hono/html";
 import type { HtmlEscapedString } from "hono/utils/html";
-import { authHandler } from "./api";
 import { gizletDetail } from "./db";
 import type { Env } from "./env";
 import { ensureGizlet } from "./registry";
@@ -14,7 +13,8 @@ import { repoRef } from "./repo";
 type App = { Bindings: Env };
 export const site = new Hono<App>();
 
-const CSP = "default-src 'self'; img-src 'self' https:; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://github.com";
+const csp = (env: Env) =>
+  `default-src 'self'; img-src 'self' https: ${env.DL_ORIGIN}; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://github.com`;
 
 function page(title: string, body: HtmlEscapedString | Promise<HtmlEscapedString>, script?: string) {
   return html`<!doctype html>
@@ -37,13 +37,11 @@ ${script ? raw(`<script type="module" src="/static/${script}"></script>`) : ""}
 site.use("*", async (c, next) => {
   await next();
   if ((c.res.headers.get("content-type") ?? "").startsWith("text/html")) {
-    c.res.headers.set("content-security-policy", CSP);
+    c.res.headers.set("content-security-policy", csp(c.env));
     c.res.headers.set("x-content-type-options", "nosniff");
     c.res.headers.set("referrer-policy", "strict-origin-when-cross-origin");
   }
 });
-
-site.on(["GET", "POST"], "/v1/auth/*", authHandler);
 
 site.get("/", (c) =>
   c.html(

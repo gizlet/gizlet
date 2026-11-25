@@ -159,6 +159,8 @@ addRelease("fixture-org/hello-gizlet", "0.1.0");
 addRelease("fixture-org/hello-gizlet", "0.2.0");
 // Fine to install, but no icon or description: stays unlisted.
 addRelease("fixture-org/on-demand", "1.0.0", { category: "app", page: false, icon: false, description: false, targets: [["x86_64-unknown-linux-gnu", "full"]] });
+// Used only by the device simulation (tests/sim/device.mjs).
+addRelease("fixture-org/pocket-sim", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 addRelease("fixture-org/bad-sum", "0.1.0", { lie: true });
 addRelease("fixture-org/symlink", "0.1.0", { problem: "symlink" });
 addRelease("fixture-org/setuid", "0.1.0", { problem: "setuid" });

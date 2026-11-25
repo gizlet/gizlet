@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Run the Hurl suite in tests/hurl against `wrangler dev`, with a fake GitHub
-# (tests/fixtures/server.mjs) and an in-memory Postgres (PGlite) for accounts.
+# Run the Hurl suite in tests/hurl and the device simulation in tests/sim against
+# `wrangler dev`, with a fake GitHub (tests/fixtures/server.mjs) and an in-memory
+# Postgres (PGlite) for accounts.
 #
 #   pnpm test:hurl            # all files
-#   pnpm test:hurl 05-auth    # files matching a pattern
+#   pnpm test:hurl 05-auth    # Hurl files matching a pattern
+#   pnpm test:hurl sim        # the device simulation only
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -64,15 +66,24 @@ for _ in $(seq 1 120); do
 done
 curl -fsS -H 'x-gizlet-host: api.gizlet.io' "http://127.0.0.1:$DEV_PORT/v1/healthz" >/dev/null || { cat "$STATE/dev.log"; exit 1; }
 
-files=(tests/hurl/*${1:-}*.hurl)
+pattern=${1:-}
 status=0
-hurl --test --jobs 1 \
-  --variable "base=http://127.0.0.1:$DEV_PORT" \
-  --variable "site=$SITE" \
-  --variable "fixture=$FIXTURE" \
-  --variable "admin_token=$ADMIN_TOKEN" \
-  --variable "run=$(date +%s)" \
-  "${files[@]}" || status=$?
+shopt -s nullglob
+files=(tests/hurl/*${pattern}*.hurl)
+if [[ ${#files[@]} -gt 0 ]]; then
+  hurl --test --jobs 1 \
+    --variable "base=http://127.0.0.1:$DEV_PORT" \
+    --variable "site=$SITE" \
+    --variable "fixture=$FIXTURE" \
+    --variable "admin_token=$ADMIN_TOKEN" \
+    --variable "run=$(date +%s)" \
+    "${files[@]}" || status=$?
+fi
+# The device simulation runs with the full suite, or alone with `pnpm test:hurl sim`.
+if [[ $status -eq 0 && ( -z $pattern || $pattern == sim ) ]]; then
+  echo "--- device simulation (tests/sim/device.mjs) ---"
+  BASE="http://127.0.0.1:$DEV_PORT" FIXTURE="$FIXTURE" SITE="$SITE" node tests/sim/device.mjs || status=$?
+fi
 if [[ $status -ne 0 ]]; then
   echo "--- wrangler dev log (tail) ---"
   tail -80 "$STATE/dev.log"

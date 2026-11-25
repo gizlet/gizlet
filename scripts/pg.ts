@@ -2,7 +2,7 @@
 //
 //   node scripts/pg.ts migrate            # apply pending migrations to $DATABASE_URL
 //   node scripts/pg.ts generate <name>    # write the next migration for changes to src/auth.ts
-//   node scripts/pg.ts serve <port>       # a throwaway in-memory Postgres (PGlite) for local tests
+//   node scripts/pg.ts serve <port> [dir] # Postgres (PGlite) for local runs: in memory, or kept in <dir>
 //
 // `generate` applies the existing migrations to an in-memory database and asks Better Auth
 // what its options in src/auth.ts still need.
@@ -39,8 +39,8 @@ async function migrate(pool: pg.Pool): Promise<string[]> {
   return applied;
 }
 
-async function serve(port: number, maxConnections = 8): Promise<{ url: string; stop: () => Promise<void> }> {
-  const db = await PGlite.create();
+async function serve(port: number, maxConnections = 8, dataDir?: string): Promise<{ url: string; stop: () => Promise<void> }> {
+  const db = await PGlite.create(dataDir);
   const server = new PGLiteSocketServer({ db, port, host: "127.0.0.1", maxConnections });
   await server.start();
   return {
@@ -52,7 +52,7 @@ async function serve(port: number, maxConnections = 8): Promise<{ url: string; s
   };
 }
 
-const [command, arg] = process.argv.slice(2);
+const [command, arg, dir] = process.argv.slice(2);
 if (command === "migrate") {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL is not set");
@@ -85,7 +85,7 @@ if (command === "migrate") {
     await db.stop();
   }
 } else if (command === "serve") {
-  const db = await serve(Number(arg ?? 54320));
+  const db = await serve(Number(arg ?? 54320), 8, dir);
   console.log(db.url);
   const stop = () => db.stop().then(() => process.exit(0));
   process.on("SIGTERM", stop);

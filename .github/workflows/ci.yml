@@ -1,31 +1,72 @@
 name: CI
 
+# Pull requests reach this workflow only when triage.yml dispatches it (on
+# every push to a pull request, or a writer's `/test` comment). It runs from
+# main and reports the required `CI` check on the pull-request head. Do not add
+# a pull_request trigger: the pull request could then rewrite its own check.
+# Pushes to main also deploy to gizlet.io once the tests pass.
+
 on:
-  pull_request:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: Pull request to test; leave empty to test the selected branch.
+        required: false
+        default: ''
+        type: string
+      head_sha:
+        description: Expected pull-request head, set by triage.
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   HURL_VERSION: 8.1.0
   SOPS_VERSION: v3.13.3
 
-# Jobs run on the self-hosted x86-64 Linux runner that the RUNNERS organization
+# Triage, Codex review and the check start/finish jobs run on GitHub-hosted
+# runners. Build, test and deploy run on the runner the RUNNERS organization
 # variable maps to linux-x64 (Hurl and sops are amd64 builds), falling back to
 # GitHub's Ubuntu runner.
 jobs:
+  start:
+    if: github.event_name == 'workflow_dispatch' && inputs.pull_request_number != ''
+    permissions:
+      checks: write
+      contents: read
+      pull-requests: write
+    uses: gizlet/.github/.github/workflows/pr-check-start.yml@latest
+    with:
+      check-name: CI
+      command: /test
+      pull_request_number: ${{ inputs.pull_request_number }}
+      head_sha: ${{ inputs.head_sha }}
+
   test:
+    name: Build and test
+    needs: start
+    if: >-
+      !cancelled() && (
+        needs.start.outputs.run == 'true'
+        || needs.start.result == 'skipped')
     runs-on: ${{ fromJSON(vars.RUNNERS || '{}')['linux-x64'] || 'ubuntu-24.04' }}
     timeout-minutes: 20
+    # The job runs pull-request code: read-only token and no secrets.
+    permissions:
+      contents: read
+    concurrency:
+      group: ci-${{ needs.start.outputs.number || github.ref }}
+      cancel-in-progress: ${{ needs.start.outputs.number != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.start.outputs.head_sha || github.sha }}
+          persist-credentials: false
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -33,19 +74,36 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
+      - name: Bundle the Worker
+        run: pnpm exec wrangler deploy --dry-run --outdir "$RUNNER_TEMP/bundle"
       - name: Install Hurl
         run: |
           curl -fsSLO "https://github.com/Orange-OpenSource/hurl/releases/download/${HURL_VERSION}/hurl_${HURL_VERSION}_amd64.deb"
           curl -fsSLO "https://github.com/Orange-OpenSource/hurl/releases/download/${HURL_VERSION}/hurl_${HURL_VERSION}_amd64.deb.sha256"
           echo "$(cut -d' ' -f1 "hurl_${HURL_VERSION}_amd64.deb.sha256")  hurl_${HURL_VERSION}_amd64.deb" | sha256sum -c
           sudo apt-get install -y "./hurl_${HURL_VERSION}_amd64.deb"
-      - name: Hurl suite against wrangler dev, a fake GitHub and PGlite
+      # wrangler dev with a fake GitHub and PGlite: the Hurl suite, then the device
+      # simulation (a developer publishes, a player approves a console, the console
+      # signs in and installs).
+      - name: Hurl suite and device simulation
         run: pnpm test:hurl
+
+  finish:
+    needs: [start, test]
+    if: always() && needs.start.outputs.run == 'true'
+    permissions:
+      checks: write
+      contents: read
+      pull-requests: write
+    uses: gizlet/.github/.github/workflows/pr-check-finish.yml@latest
+    with:
+      check_run_id: ${{ needs.start.outputs.check_run_id }}
+      comment_id: ${{ needs.start.outputs.comment_id }}
+      result: ${{ needs.test.result }}
 
   deploy:
     needs: test
-    # Waits for the deploy credentials (secrets/*.enc.yaml) to be added.
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && hashFiles('secrets/deploy.enc.yaml') != ''
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ${{ fromJSON(vars.RUNNERS || '{}')['linux-x64'] || 'ubuntu-24.04' }}
     timeout-minutes: 20
     environment:
@@ -56,13 +114,28 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          persist-credentials: false
+      # Skips the deploy until the SOPS credentials (secrets/*.enc.yaml) are committed.
+      - name: Check for deploy credentials
+        id: creds
+        run: |
+          if [ -f secrets/deploy.enc.yaml ] && [ -f secrets/worker.enc.yaml ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=Not deployed::secrets/deploy.enc.yaml and secrets/worker.enc.yaml are not committed yet."
+          fi
+      - if: steps.creds.outputs.ready == 'true'
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - if: steps.creds.outputs.ready == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - if: steps.creds.outputs.ready == 'true'
+        run: pnpm install --frozen-lockfile
       - name: Install sops and Hurl
+        if: steps.creds.outputs.ready == 'true'
         run: |
           base="https://github.com/getsops/sops/releases/download/${SOPS_VERSION}"
           curl -fsSLO "$base/sops-${SOPS_VERSION}.linux.amd64"
@@ -74,6 +147,7 @@ jobs:
           echo "$(cut -d' ' -f1 "hurl_${HURL_VERSION}_amd64.deb.sha256")  hurl_${HURL_VERSION}_amd64.deb" | sha256sum -c
           sudo apt-get install -y "./hurl_${HURL_VERSION}_amd64.deb"
       - name: Decrypt deploy credentials
+        if: steps.creds.outputs.ready == 'true'
         env:
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
         run: |
@@ -82,14 +156,19 @@ jobs:
             echo "$key=$value" >> "$GITHUB_ENV"
           done
       - name: Migrate D1
+        if: steps.creds.outputs.ready == 'true'
         run: pnpm exec wrangler d1 migrations apply gizlet --remote
       - name: Migrate Postgres
+        if: steps.creds.outputs.ready == 'true'
         run: node scripts/pg.ts migrate
       - name: Update Worker secrets
+        if: steps.creds.outputs.ready == 'true'
         env:
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
         run: sops decrypt --output-type json secrets/worker.enc.yaml | pnpm exec wrangler secret bulk
       - name: Deploy
+        if: steps.creds.outputs.ready == 'true'
         run: pnpm exec wrangler deploy
       - name: Smoke test production
+        if: steps.creds.outputs.ready == 'true'
         run: hurl --test --variable "run=$(date +%s)" tests/prod/*.hurl

@@ -26,6 +26,23 @@ HTTP 200
 [Asserts]
 jsonpath "$.repo" == "github.com/fixture-org/hello-gizlet"
 
+# Share links on any copy of the site, and API and download URLs, resolve too.
+GET {{base}}/v1/resolve?url={{site}}/github.com/fixture-org/hello-gizlet
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.repo" == "github.com/fixture-org/hello-gizlet"
+
+GET {{base}}/v1/resolve?url=https://dl.gizlet.io/github.com/Fixture-Org/hello-gizlet/v0.2.0/x.gzl
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.repo" == "github.com/fixture-org/hello-gizlet"
+
+GET {{base}}/v1/resolve?url=example.com/hello-gizlet
+x-gizlet-host: api.gizlet.io
+HTTP 400
+
 GET {{base}}/v1/resolve?url=not%20a%20repo
 x-gizlet-host: api.gizlet.io
 HTTP 400

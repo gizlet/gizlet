@@ -47,16 +47,20 @@ Errors are `{"error": {"code", "message"}}`. The release index `gizlet.json` (sc
 
 ## Development
 
-Requires Node 24, pnpm (`corepack enable pnpm`) and [Hurl](https://hurl.dev). No Docker: tests use [PGlite](https://pglite.dev) as Postgres.
+Requires Node 24, pnpm (`corepack enable pnpm`) and [Hurl](https://hurl.dev). No Docker: Postgres is [PGlite](https://pglite.dev).
 
 ```sh
 pnpm install
+pnpm dev                  # a local Gizlet with sample gizlets at http://localhost:8787
 pnpm typecheck
-pnpm test:hurl            # the full suite against wrangler dev
-pnpm test:hurl 05-auth    # files matching a pattern
+pnpm test:hurl            # the Hurl suite, then the device simulation
+pnpm test:hurl 05-auth    # Hurl files matching a pattern
+pnpm test:hurl sim        # the device simulation only
 ```
 
-`pnpm test:hurl` starts the fixture server (`tests/fixtures/server.mjs`: a fake github.com and OIDC issuer serving real `.gzl` zips, good and broken), an in-memory Postgres on port 18789 (`hyperdrive.localConnectionString` in `wrangler.jsonc`) and `wrangler dev` on 18787, applies both sets of migrations and runs `tests/hurl/*.hurl`. The `X-Gizlet-Host` header selects the host (`DEV_HOST_OVERRIDE=1`).
+`pnpm dev` (`scripts/dev.sh`) needs no network or credentials: GitHub is the fixture server, Postgres is in memory, and a few sample gizlets (one listed, one unlisted, one that fails its checks) are published on start. Every start is fresh. The other hosts are under path prefixes, since every local host is `localhost`: `localhost:8787/_host/api.gizlet.io/v1`, `localhost:8787/_host/dl.gizlet.io/...`. The admin token is `dev-admin`.
+
+`pnpm test:hurl` starts the fixture server (`tests/fixtures/server.mjs`: a fake github.com and OIDC issuer serving real `.gzl` zips, good and broken), an in-memory Postgres on port 18789 (`hyperdrive.localConnectionString` in `wrangler.jsonc`) and `wrangler dev` on 18787, applies both sets of migrations and runs `tests/hurl/*.hurl`, where the `X-Gizlet-Host` header selects the host. Then `tests/sim/device.mjs` plays the whole loop as Gizlet OS will: a developer publishes, a player signs up and approves a console's code, and the console signs in with the device flow, opens the share link, downloads the package with a dropped connection and a Range resume, verifies its sha256 and unpacks it.
 
 | Path | Holds |
 | --- | --- |
@@ -67,7 +71,8 @@ pnpm test:hurl 05-auth    # files matching a pattern
 | `migrations/d1/` | The registry (D1) |
 | `migrations/pg/` | Accounts (Postgres); `node scripts/pg.ts generate <name>` writes the next one after changing `src/auth.ts` |
 | `public/static/` | Stylesheet and scripts of the account pages |
-| `tests/hurl/`, `tests/prod/` | Local suite and production smoke checks |
+| `tests/hurl/`, `tests/sim/`, `tests/prod/` | Local suite, device simulation, production smoke checks |
+| `scripts/dev.sh` | `pnpm dev` |
 
 ## Credentials and deployment
 
@@ -86,7 +91,15 @@ pnpm cf deploy        # wrangler with the decrypted token
 pnpm cf tail
 ```
 
-GitHub Actions (`.github/workflows/ci.yml`) runs the typecheck and the Hurl suite on every pull request. On `main` it decrypts the credentials, applies the D1 and Postgres migrations, updates Worker secrets, deploys and runs `tests/prod`.
+CI follows the [gizlet/.github](https://github.com/gizlet/.github) setup, as in gizlet/os:
+
+| Workflow | Does |
+| --- | --- |
+| `triage.yml` | On every pull-request push, dispatches CI and Codex review from `main` for its head (`/test` and `/codex-review` comments run them again). GitHub-hosted, never checks out PR code. |
+| `codex-review.yml` | The `Codex Code Review` check. GitHub-hosted. |
+| `ci.yml` | The `CI` check: typecheck, a Worker bundle, the Hurl suite and the device simulation, with no secrets. On `main`, then the deploy: decrypt the credentials, apply the D1 and Postgres migrations, update Worker secrets, deploy and run `tests/prod`. It is skipped until the SOPS files are committed. |
+
+Build, test and deploy run on the runner the `RUNNERS` organization variable maps to `linux-x64`, falling back to GitHub's Ubuntu runner. Workflows dispatched by triage run their copy on `main`, so a pull request that changes them is tested by the old ones.
 
 Cloudflare resources: Worker `gizlet` with custom domains for the five hosts, D1 `gizlet`, R2 bucket `gizlet-assets`, Queues `gizlet-mirror` and `gizlet-mirror-dlq`, Hyperdrive config for the Neon database (Workers Paid plan). The GitHub OAuth app's callback URL is `https://gizlet.io/v1/auth/callback/github`.
 

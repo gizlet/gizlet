@@ -1,0 +1,49 @@
+name: Codex review
+
+# Reviews the pull-request diff with Codex and reports the `Codex Code Review`
+# check. triage.yml dispatches it. Runs on GitHub-hosted runners and never
+# executes pull-request code. See https://github.com/gizlet/.github.
+
+on:
+  workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: Open pull request to review.
+        required: true
+        type: string
+      head_sha:
+        description: Expected pull-request head, set by triage.
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    concurrency:
+      group: codex-review-${{ inputs.pull_request_number }}
+      cancel-in-progress: false
+    permissions:
+      checks: write
+      contents: read
+      issues: write
+      pull-requests: write
+    uses: gizlet/.github/.github/workflows/codex-review.yml@latest
+    with:
+      pull_request_number: ${{ inputs.pull_request_number }}
+      head_sha: ${{ inputs.head_sha }}
+      review-instructions: >-
+        Gizlet is one public Cloudflare Worker (Hono, TypeScript) serving gizlet.io,
+        api.gizlet.io and dl.gizlet.io: a registry of native programs indexed from
+        GitHub releases, published with GitHub Actions OIDC, mirrored into R2 and
+        statically checked, plus accounts with Better Auth on Postgres through
+        Hyperdrive (email, GitHub and the OAuth device flow for consoles). Pay
+        particular attention to authentication and session handling, CORS and CSRF,
+        OIDC claim checks, anything that could serve a package from a failed or
+        blocked release, zip parsing in src/check.ts, SQL in D1 and Postgres
+        queries, migrations that cannot run on existing data, and secrets leaking
+        into logs or responses.
+    secrets:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

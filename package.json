@@ -8,7 +8,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "bash scripts/dev.sh",
     "typecheck": "tsc --noEmit",
     "test:hurl": "bash tests/run-local.sh",
     "auth:schema": "node scripts/auth-schema.ts",
