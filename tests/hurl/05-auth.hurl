@@ -36,7 +36,7 @@ HTTP 200
 [Asserts]
 jsonpath "$.user.email" == "player-{{run}}@example.com"
 jsonpath "$.user.github_login" == null
-jsonpath "$.sign_in_methods" includes "email"
+jsonpath "$.sign_in_methods" contains "email"
 header "cache-control" == "no-store"
 
 GET {{base}}/v1/me

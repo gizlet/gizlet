@@ -176,7 +176,7 @@ retry-interval: 250ms
 HTTP 200
 [Asserts]
 jsonpath "$.status" == "ready"
-jsonpath "$.warnings" includes "gizlet.json names no icon"
+jsonpath "$.warnings" contains "gizlet.json names no icon"
 jsonpath "$.visibility" == "unlisted"
 jsonpath "$.visibility_reason" contains "no description"
 
