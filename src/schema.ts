@@ -156,11 +156,16 @@ export function parseIndex(raw: unknown): ReleaseIndex {
   };
 }
 
-/** Compare versions like 1.2.3 / 1.2.3-rc.1; non-numeric parts compare as strings. */
+/**
+ * Compare versions by SemVer precedence: 1.2.3 < 1.2.4-rc.2 < 1.2.4-rc.10 < 1.2.4.
+ * A leading `v` and build metadata (`+...`) are ignored; missing or non-numeric core parts count as 0.
+ */
 export function compareVersions(a: string, b: string): number {
   const split = (v: string) => {
-    const [core, pre] = v.replace(/^v/, "").split("-", 2) as [string, string | undefined];
-    return { core: core.split(".").map((x) => Number.parseInt(x, 10) || 0), pre };
+    const s = v.replace(/^v/, "").split("+", 1)[0]!;
+    const dash = s.indexOf("-");
+    const core = dash < 0 ? s : s.slice(0, dash);
+    return { core: core.split(".").map((x) => Number.parseInt(x, 10) || 0), pre: dash < 0 ? null : s.slice(dash + 1).split(".") };
   };
   const x = split(a);
   const y = split(b);
@@ -168,10 +173,22 @@ export function compareVersions(a: string, b: string): number {
     const d = (x.core[i] ?? 0) - (y.core[i] ?? 0);
     if (d) return Math.sign(d);
   }
-  if (x.pre === y.pre) return 0;
-  if (x.pre === undefined) return 1;
-  if (y.pre === undefined) return -1;
-  return x.pre < y.pre ? -1 : 1;
+  // A release ranks above its prereleases.
+  if (!x.pre || !y.pre) return x.pre === y.pre ? 0 : x.pre ? -1 : 1;
+  const numeric = /^\d+$/;
+  for (let i = 0; i < Math.max(x.pre.length, y.pre.length); i++) {
+    const p = x.pre[i];
+    const q = y.pre[i];
+    if (p === undefined || q === undefined) return p === undefined ? -1 : 1;
+    if (p === q) continue;
+    const pn = numeric.test(p);
+    const qn = numeric.test(q);
+    // Numeric identifiers compare as numbers and rank below alphanumeric ones.
+    if (pn && qn) return Math.sign(Number(p) - Number(q)) || (p < q ? -1 : 1);
+    if (pn !== qn) return pn ? -1 : 1;
+    return p < q ? -1 : 1;
+  }
+  return 0;
 }
 
 /** `lite` runs on lite and full devices; `full` only on full. */

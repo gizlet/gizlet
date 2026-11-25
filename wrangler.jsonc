@@ -46,7 +46,7 @@
       }
     ]
   },
-  "triggers": { "crons": ["17 */6 * * *"] },
+  "triggers": { "crons": ["*/10 * * * *", "17 */6 * * *"] },
   "vars": {
     "SITE_ORIGIN": "https://gizlet.io",
     "DL_ORIGIN": "https://dl.gizlet.io",

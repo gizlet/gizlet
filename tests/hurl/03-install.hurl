@@ -58,6 +58,15 @@ HTTP 302
 [Asserts]
 header "Location" == "{{site}}/github.com/fixture-org/hello-gizlet"
 
+# Files the release index does not name are never served, though they are in the GitHub release.
+GET {{base}}/github.com/fixture-org/hello-gizlet/v0.2.0/unsafe.gzl
+x-gizlet-host: dl.gizlet.io
+HTTP 404
+
+GET {{base}}/github.com/fixture-org/hello-gizlet/v0.2.0/gizlet.json
+x-gizlet-host: dl.gizlet.io
+HTTP 404
+
 # Packages of failed releases are never served, not even from GitHub.
 GET {{base}}/github.com/fixture-org/symlink/v0.1.0/dev.fixture.symlink-0.1.0-aarch64-unknown-linux-gnu-lite.gzl
 x-gizlet-host: dl.gizlet.io

@@ -40,6 +40,8 @@ export interface ReleaseRow {
   tag: string;
   version: string;
   status: "pending" | "mirroring" | "checking" | "ready" | "failed";
+  /** Bumped each time the release is indexed again; mirror jobs carry the one they were queued for. */
+  revision: number;
   error: string | null;
   warnings: string;
   index_json: string;

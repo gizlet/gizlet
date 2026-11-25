@@ -3,6 +3,7 @@
  * range requests so a package is never loaded whole. Errors fail the release: it is not
  * served, not even by link. Warnings keep the gizlet out of search and featured lists.
  */
+import { parse as parseToml } from "smol-toml";
 import type { Env } from "./env";
 
 export interface Findings {
@@ -151,26 +152,38 @@ async function readHead(env: Env, key: string, e: Entry, max: number): Promise<U
   return inflateHead(await range(env, key, start, Math.min(e.compressed, Math.max(max * 2, 256 * 1024))), max);
 }
 
-/** Top-level `key = "string"` pairs of a TOML document (TOML basic strings use JSON's escapes). */
+/** The top-level string values of a TOML document; throws on invalid TOML. */
 export function manifestFields(text: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (line.startsWith("[")) break;
-    const m = /^([A-Za-z0-9_-]+)\s*=\s*("(?:[^"\\]|\\.)*")\s*(?:#.*)?$/.exec(line);
-    if (!m) continue;
-    try {
-      out[m[1]!] = JSON.parse(m[2]!) as string;
-    } catch {
-      // Not a basic string; ignore.
-    }
+  let doc: Record<string, unknown>;
+  try {
+    doc = parseToml(text);
+  } catch (e) {
+    throw new Bad(`has a manifest.toml that is not valid TOML: ${(e instanceof Error ? e.message : String(e)).split("\n")[0]}`);
   }
-  return out;
+  return Object.fromEntries(Object.entries(doc).filter((kv): kv is [string, string] => typeof kv[1] === "string"));
 }
 
-function unsafePath(name: string): boolean {
-  if (!name || name.startsWith("/") || name.includes("\\") || name.includes("\0") || /^[A-Za-z]:/.test(name)) return true;
-  return name.split("/").some((s) => s === "..");
+/**
+ * Why a zip entry name is not a canonical relative path, or null when it is: slash-separated
+ * segments with no empty, `.` or `..` segment (a directory may end in one `/`), no backslash,
+ * drive letter or control character. Canonical names cannot alias each other through
+ * an extractor's path normalization.
+ */
+export function pathProblem(name: string): string | null {
+  if (!name) return "is empty";
+  if (name.includes("\\") || /^[A-Za-z]:/.test(name)) return "is not a relative POSIX path";
+  if (/[\u0000-\u001f\u007f]/.test(name)) return "has a control character";
+  const segments = (name.endsWith("/") ? name.slice(0, -1) : name).split("/");
+  if (segments.some((s) => s === "" || s === "." || s === "..")) return "is not canonical (empty, . or .. segment)";
+  return null;
+}
+
+/**
+ * The name an entry lands at on any filesystem: without a directory's trailing slash,
+ * Unicode NFC and case-folded, so `game` and `Game` (or a file and a directory) collide.
+ */
+export function landingName(name: string): string {
+  return name.replace(/\/$/, "").normalize("NFC").toLowerCase();
 }
 
 function executableProblem(target: string, head: Uint8Array): string | null {
@@ -206,10 +219,15 @@ export async function checkPackage(env: Env, key: string, file: string, size: nu
     throw e;
   }
   const names = new Map<string, Entry>();
+  const landed = new Map<string, string>();
   let unpacked = 0;
   for (const e of entries) {
-    if (unsafePath(e.name)) fail(`has an unsafe path ${JSON.stringify(e.name.slice(0, 120))}`);
-    if (names.has(e.name)) fail(`lists ${JSON.stringify(e.name.slice(0, 120))} twice`);
+    const shown = JSON.stringify(e.name.slice(0, 120));
+    const problem = pathProblem(e.name);
+    if (problem) fail(`has an unsafe path ${shown}: it ${problem}`);
+    const other = landed.get(landingName(e.name));
+    if (other !== undefined) fail(other === e.name ? `lists ${shown} twice` : `has ${shown} and ${JSON.stringify(other.slice(0, 120))}, which extract to the same place`);
+    landed.set(landingName(e.name), e.name);
     names.set(e.name, e);
     if (e.flags & 1) fail(`has an encrypted file ${JSON.stringify(e.name.slice(0, 120))}`);
     if (e.method !== 0 && e.method !== 8) fail(`uses compression method ${e.method} for ${JSON.stringify(e.name.slice(0, 120))}; only stored and deflate are allowed`);

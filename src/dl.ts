@@ -1,12 +1,12 @@
 /** dl.gizlet.io: package and art downloads, from R2 or else GitHub. */
 import { Hono, type Context } from "hono";
-import { dlUrl, pickInstall, type ReleaseRow } from "./db";
+import { dlUrl, pickInstall, type PackageRow, type ReleaseRow } from "./db";
 import type { Env } from "./env";
 import { assetUrl } from "./github";
-import { contentType, r2Key } from "./mirror";
+import { artKey, contentType, indexedFiles, packageKey } from "./mirror";
 import { ensureGizlet } from "./registry";
 import { repoRef } from "./repo";
-import { isAssetName, type Tier } from "./schema";
+import { isAssetName, type ReleaseIndex, type Tier } from "./schema";
 
 type App = { Bindings: Env };
 export const dl = new Hono<App>();
@@ -67,21 +67,36 @@ dl.on(["GET", "HEAD"], "/github.com/:owner/:repo/:tag/:file", async (c) => {
   if (!r || !TAG.test(tag) || !isAssetName(file)) return c.text("Not found", 404);
   const [g, rel] = await Promise.all([
     c.env.DB.prepare("SELECT owner, name_repo, visibility FROM gizlets WHERE repo = ?").bind(r.key).first<{ owner: string; name_repo: string; visibility: string }>(),
-    c.env.DB.prepare("SELECT status FROM releases WHERE repo = ? AND tag = ?").bind(r.key, tag).first<Pick<ReleaseRow, "status">>(),
+    c.env.DB.prepare("SELECT status, index_json FROM releases WHERE repo = ? AND tag = ?").bind(r.key, tag).first<Pick<ReleaseRow, "status" | "index_json">>(),
   ]);
   if (!g || !rel) return c.text("Not found", 404);
   if (g.visibility === "blocked") return c.text(`${r.key} is blocked`, 403);
-  const isPackage = file.endsWith(".gzl");
-  // Packages are served only once their release has passed its checks.
-  if (isPackage && rel.status !== "ready") return c.text(rel.status === "failed" ? `${r.key} ${tag} failed its checks` : `${r.key} ${tag} is still being checked`, rel.status === "failed" ? 410 : 409);
+  // Only files the release index names are served: its checked packages and its store art.
+  const files = indexedFiles(JSON.parse(rel.index_json) as ReleaseIndex);
+  let key: string;
+  if (files.packages.has(file)) {
+    // Packages are served only once their release has passed its checks.
+    if (rel.status !== "ready") {
+      return rel.status === "failed" ? c.text(`${r.key} ${tag} failed its checks`, 410) : c.text(`${r.key} ${tag} is still being checked`, 409);
+    }
+    const pkg = await c.env.DB.prepare("SELECT sha256 FROM packages WHERE repo = ? AND tag = ? AND file = ?").bind(r.key, tag, file).first<Pick<PackageRow, "sha256">>();
+    if (!pkg) return c.text("Not found", 404);
+    key = packageKey(r.key, tag, pkg.sha256, file);
+  } else if (files.art.has(file)) {
+    key = artKey(r.key, tag, file);
+  } else {
+    return c.text("Not found", 404);
+  }
+  const isPackage = files.packages.has(file);
   const countDownload = () => {
     if (isPackage && c.req.method === "GET" && !c.req.header("range")) {
       c.executionCtx.waitUntil(c.env.DB.prepare("UPDATE gizlets SET downloads = downloads + 1 WHERE repo = ?").bind(r.key).run());
     }
   };
-  const res = await fromR2(c, r2Key(r.key, tag, file), file, countDownload);
+  const res = await fromR2(c, key, file, countDownload);
   if (res) return res;
-  // Not mirrored (an older release): hand off to GitHub.
+  // Not mirrored (an older ready release, pruned from R2): hand off to GitHub. The client
+  // checks the package against the sha256 the API gave it.
   countDownload();
   return c.redirect(assetUrl(c.env, g.owner, g.name_repo, tag, file), 302);
 });

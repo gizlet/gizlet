@@ -2,6 +2,7 @@
 import { parse, type GizletRow, type ReleaseRow } from "./db";
 import type { Env, Waiter } from "./env";
 import { fetchIndex, latestTag, NotFound } from "./github";
+import { queueMirror } from "./mirror";
 import type { RepoRef } from "./repo";
 import { compareVersions, IndexError, type ReleaseIndex } from "./schema";
 
@@ -47,7 +48,7 @@ export async function indexRelease(env: Env, ref: RepoRef, tag: string, opts: In
         `INSERT INTO releases (repo, tag, version, status, error, warnings, index_json, mirrored, published_at, updated_at)
          VALUES (?, ?, ?, 'pending', NULL, '[]', ?, 0, ?, ?)
          ON CONFLICT (repo, tag) DO UPDATE SET version = excluded.version, status = 'pending', error = NULL, warnings = '[]',
-           index_json = excluded.index_json, mirrored = 0, updated_at = excluded.updated_at`,
+           index_json = excluded.index_json, mirrored = 0, updated_at = excluded.updated_at, revision = releases.revision + 1`,
       ).bind(ref.key, tag, index.version, indexJson, now, now),
       env.DB.prepare("DELETE FROM packages WHERE repo = ? AND tag = ?").bind(ref.key, tag),
       ...index.packages.map((p) =>
@@ -57,8 +58,11 @@ export async function indexRelease(env: Env, ref: RepoRef, tag: string, opts: In
   }
   await env.DB.batch(stmts);
   await refreshLatest(env, ref.key);
-  if (!unchanged) await env.MIRROR.send({ repo: ref.key, tag });
-  return (await env.DB.prepare("SELECT * FROM releases WHERE repo = ? AND tag = ?").bind(ref.key, tag).first<ReleaseRow>())!;
+  const rel = (await env.DB.prepare("SELECT * FROM releases WHERE repo = ? AND tag = ?").bind(ref.key, tag).first<ReleaseRow>())!;
+  // A new revision needs a job. So does a publish of a release still waiting for one: its job
+  // may have been lost (the cron requeues those too). Jobs for one revision are idempotent.
+  if (!unchanged || (opts.retryFailed && rel.status === "pending")) await queueMirror(env, ref.key, tag, rel.revision);
+  return rel;
 }
 
 /**

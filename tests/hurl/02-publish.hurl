@@ -155,6 +155,49 @@ HTTP 200
 jsonpath "$.status" == "failed"
 jsonpath "$.error" contains "unsafe path"
 
+# Paths that alias another entry once extracted fail too.
+GET {{base}}/v1/gizlets/github.com/fixture-org/alias
+x-gizlet-host: api.gizlet.io
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/alias/releases/v0.1.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "failed"
+jsonpath "$.error" contains "\"./game\": it is not canonical"
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/case
+x-gizlet-host: api.gizlet.io
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/case/releases/v0.1.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "failed"
+jsonpath "$.error" contains "extract to the same place"
+
+# A manifest.toml with TOML literal strings is valid.
+GET {{base}}/v1/gizlets/github.com/fixture-org/literal-toml
+x-gizlet-host: api.gizlet.io
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/literal-toml/releases/v0.1.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "ready"
+
 # Failed gizlets have nothing to install.
 GET {{base}}/v1/gizlets/github.com/fixture-org/symlink/install?target=aarch64-unknown-linux-gnu
 x-gizlet-host: api.gizlet.io

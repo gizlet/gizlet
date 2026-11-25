@@ -41,6 +41,7 @@ CREATE TABLE releases (
   tag TEXT NOT NULL,
   version TEXT NOT NULL,
   status TEXT NOT NULL,          -- pending | mirroring | checking | ready | failed
+  revision INTEGER NOT NULL DEFAULT 1, -- bumped on each re-index; mirror jobs carry it
   error TEXT,
   warnings TEXT NOT NULL DEFAULT '[]', -- check findings that keep the gizlet unlisted
   index_json TEXT NOT NULL,
@@ -50,6 +51,7 @@ CREATE TABLE releases (
   PRIMARY KEY (repo, tag)
 );
 CREATE INDEX releases_recent ON releases (repo, published_at DESC);
+CREATE INDEX releases_status ON releases (status, updated_at);
 
 CREATE TABLE packages (
   repo TEXT NOT NULL,

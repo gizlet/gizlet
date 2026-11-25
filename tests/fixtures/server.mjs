@@ -79,17 +79,22 @@ function executable(target) {
   return Buffer.concat([head, randomBytes(8192)]);
 }
 
-/** A `.gzl` package. `problem` builds a broken one: symlink | setuid | wrong-arch | traversal. */
-function gzl({ id, version, target, tier, problem }) {
+/**
+ * A `.gzl` package. `problem` builds a broken one: symlink | setuid | wrong-arch | traversal |
+ * alias (`./game`, an x86-64 build, after `game`) | case (`Game` after `game`).
+ * `literal` writes manifest.toml with TOML literal strings.
+ */
+function gzl({ id, version, target, tier, problem, literal }) {
+  const str = (v) => (literal ? `'${v}'` : JSON.stringify(v));
   const manifest = [
     "# Written by the fixture server.",
-    `id = ${JSON.stringify(id)}`,
-    `name = "Fixture"`,
-    `version = ${JSON.stringify(version)}`,
-    `tier = ${JSON.stringify(tier)}`,
-    `target = ${JSON.stringify(target)}`,
-    `entry = "game"`,
-    `icon = "icon.png"`,
+    `id = ${str(id)}`,
+    `name = ${str("Fixture")}`,
+    `version = ${str(version)}`,
+    `tier = ${str(tier)}`,
+    `target = ${str(target)}`,
+    `entry = ${str("game")}`,
+    `icon = ${str("icon.png")}`,
     "",
     "[names]",
     `"zh-CN" = "示例"`,
@@ -105,13 +110,15 @@ function gzl({ id, version, target, tier, problem }) {
   ];
   if (problem === "symlink") entries.push({ name: "assets/passwd", data: Buffer.from("/etc/passwd"), mode: 0o120777 });
   if (problem === "traversal") entries.push({ name: "assets/../../escape", data: Buffer.from("x"), mode: 0o100644 });
+  if (problem === "alias") entries.push({ name: "./game", data: executable("x86_64-unknown-linux-gnu"), mode: 0o100755 });
+  if (problem === "case") entries.push({ name: "Game", data: executable("x86_64-unknown-linux-gnu"), mode: 0o100755 });
   return zip(entries);
 }
 
 /** repo -> { latest, tags: { tag -> { files: Map<name, Buffer> } } } */
 const repos = new Map();
 
-function addRelease(repo, version, { category = "game", lie = false, targets, page = true, problem, icon = true, description = true } = {}) {
+function addRelease(repo, version, { category = "game", lie = false, targets, page = true, problem, literal, extra = [], icon = true, description = true } = {}) {
   const tag = `v${version}`;
   const id = `dev.fixture.${repo.split("/")[1].replace(/[^a-z0-9]/g, "")}`;
   const files = new Map();
@@ -122,7 +129,7 @@ function addRelease(repo, version, { category = "game", lie = false, targets, pa
     ["aarch64-apple-darwin", "full"],
   ]) {
     const file = `${id}-${version}-${target}-${tier}.gzl`;
-    const body = gzl({ id, version, target, tier, problem });
+    const body = gzl({ id, version, target, tier, problem, literal });
     files.set(file, body);
     packages.push({ file, target, tier, size: body.length, sha256: lie ? sha(Buffer.from("not this")) : sha(body) });
   }
@@ -149,6 +156,8 @@ function addRelease(repo, version, { category = "game", lie = false, targets, pa
     packages,
   };
   files.set("gizlet.json", Buffer.from(JSON.stringify(index, null, 2)));
+  // Release assets gizlet.json does not name; never served.
+  for (const name of extra) files.set(name, gzl({ id, version, target: "x86_64-unknown-linux-gnu", tier: "lite" }));
   const r = repos.get(repo) ?? { tags: {}, latest: null };
   r.tags[tag] = { files };
   r.latest = tag;
@@ -156,7 +165,7 @@ function addRelease(repo, version, { category = "game", lie = false, targets, pa
 }
 
 addRelease("fixture-org/hello-gizlet", "0.1.0");
-addRelease("fixture-org/hello-gizlet", "0.2.0");
+addRelease("fixture-org/hello-gizlet", "0.2.0", { extra: ["unsafe.gzl"] });
 // Fine to install, but no icon or description: stays unlisted.
 addRelease("fixture-org/on-demand", "1.0.0", { category: "app", page: false, icon: false, description: false, targets: [["x86_64-unknown-linux-gnu", "full"]] });
 // Used only by the device simulation (tests/sim/device.mjs).
@@ -166,6 +175,9 @@ addRelease("fixture-org/symlink", "0.1.0", { problem: "symlink" });
 addRelease("fixture-org/setuid", "0.1.0", { problem: "setuid" });
 addRelease("fixture-org/wrong-arch", "0.1.0", { problem: "wrong-arch", targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 addRelease("fixture-org/traversal", "0.1.0", { problem: "traversal", targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+addRelease("fixture-org/alias", "0.1.0", { problem: "alias", targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+addRelease("fixture-org/case", "0.1.0", { problem: "case", targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+addRelease("fixture-org/literal-toml", "0.1.0", { literal: true, targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 repos.set("fixture-org/no-index", { tags: { "v1.0.0": { files: new Map([["other.zip", Buffer.from("x")]]) } }, latest: "v1.0.0" });
 
 async function token(repo, ref) {

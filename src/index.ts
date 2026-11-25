@@ -1,9 +1,12 @@
 import { api } from "./api";
 import { dl } from "./dl";
 import type { Env, MirrorJob } from "./env";
-import { mirrorRelease } from "./mirror";
+import { mirrorRelease, requeueStuck } from "./mirror";
 import { refreshStale } from "./registry";
 import { site } from "./site";
+
+/** Must match the second cron in wrangler.jsonc. */
+const REFRESH_CRON = "17 */6 * * *";
 
 const HOST_PREFIX = /^\/_host\/([a-z0-9.-]+)(\/.*)?$/;
 
@@ -63,7 +66,9 @@ export default {
     }
   },
 
-  async scheduled(_event, env, ctx) {
-    ctx.waitUntil(refreshStale(env));
+  async scheduled(event, env, ctx) {
+    // Every 10 minutes: recover releases whose mirror job was lost. Every 6 hours: new releases.
+    ctx.waitUntil(requeueStuck(env));
+    if (event.cron === REFRESH_CRON) ctx.waitUntil(refreshStale(env));
   },
 } satisfies ExportedHandler<Env & { ASSETS: Fetcher }, MirrorJob>;

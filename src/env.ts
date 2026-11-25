@@ -38,6 +38,8 @@ export interface Env {
 export interface MirrorJob {
   repo: string;
   tag: string;
+  /** The release revision the job was queued for; jobs for older revisions do nothing. */
+  revision: number;
 }
 
 /** The part of ExecutionContext the Worker uses (Hono's and workers-types' differ). */
