@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  HURL_VERSION: 8.1.0
+  SOPS_VERSION: v3.13.3
+
+# Jobs run on the self-hosted x86-64 Linux runner that the RUNNERS organization
+# variable maps to linux-x64 (Hurl and sops are amd64 builds), falling back to
+# GitHub's Ubuntu runner.
+jobs:
+  test:
+    runs-on: ${{ fromJSON(vars.RUNNERS || '{}')['linux-x64'] || 'ubuntu-24.04' }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - name: Install Hurl
+        run: |
+          curl -fsSLO "https://github.com/Orange-OpenSource/hurl/releases/download/${HURL_VERSION}/hurl_${HURL_VERSION}_amd64.deb"
+          curl -fsSLO "https://github.com/Orange-OpenSource/hurl/releases/download/${HURL_VERSION}/hurl_${HURL_VERSION}_amd64.deb.sha256"
+          echo "$(cut -d' ' -f1 "hurl_${HURL_VERSION}_amd64.deb.sha256")  hurl_${HURL_VERSION}_amd64.deb" | sha256sum -c
+          sudo apt-get install -y "./hurl_${HURL_VERSION}_amd64.deb"
+      - name: Hurl suite against wrangler dev, a fake GitHub and PGlite
+        run: pnpm test:hurl
+
+  deploy:
+    needs: test
+    # Waits for the deploy credentials (secrets/*.enc.yaml) to be added.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && hashFiles('secrets/deploy.enc.yaml') != ''
+    runs-on: ${{ fromJSON(vars.RUNNERS || '{}')['linux-x64'] || 'ubuntu-24.04' }}
+    timeout-minutes: 20
+    environment:
+      name: production
+      url: https://gizlet.io
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install sops and Hurl
+        run: |
+          base="https://github.com/getsops/sops/releases/download/${SOPS_VERSION}"
+          curl -fsSLO "$base/sops-${SOPS_VERSION}.linux.amd64"
+          curl -fsSLO "$base/sops-${SOPS_VERSION}.checksums.txt"
+          grep " sops-${SOPS_VERSION}.linux.amd64\$" "sops-${SOPS_VERSION}.checksums.txt" | sha256sum -c
+          sudo install -m 0755 "sops-${SOPS_VERSION}.linux.amd64" /usr/local/bin/sops
+          curl -fsSLO "https://github.com/Orange-OpenSource/hurl/releases/download/${HURL_VERSION}/hurl_${HURL_VERSION}_amd64.deb"
+          curl -fsSLO "https://github.com/Orange-OpenSource/hurl/releases/download/${HURL_VERSION}/hurl_${HURL_VERSION}_amd64.deb.sha256"
+          echo "$(cut -d' ' -f1 "hurl_${HURL_VERSION}_amd64.deb.sha256")  hurl_${HURL_VERSION}_amd64.deb" | sha256sum -c
+          sudo apt-get install -y "./hurl_${HURL_VERSION}_amd64.deb"
+      - name: Decrypt deploy credentials
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+        run: |
+          sops decrypt --output-type dotenv secrets/deploy.enc.yaml | while IFS='=' read -r key value; do
+            echo "::add-mask::$value"
+            echo "$key=$value" >> "$GITHUB_ENV"
+          done
+      - name: Migrate D1
+        run: pnpm exec wrangler d1 migrations apply gizlet --remote
+      - name: Migrate Postgres
+        run: node scripts/pg.ts migrate
+      - name: Update Worker secrets
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+        run: sops decrypt --output-type json secrets/worker.enc.yaml | pnpm exec wrangler secret bulk
+      - name: Deploy
+        run: pnpm exec wrangler deploy
+      - name: Smoke test production
+        run: hurl --test --variable "run=$(date +%s)" tests/prod/*.hurl

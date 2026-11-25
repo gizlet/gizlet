@@ -1,0 +1,19 @@
+:root { color-scheme: light dark; --ink: #1a1816; --paper: #f2ede4; --accent: #ff5a1f; font: 16px/1.5 system-ui, sans-serif; }
+body { margin: 0 auto; max-width: 720px; padding: 0 20px; background: var(--paper); color: var(--ink); }
+header, footer { display: flex; justify-content: space-between; align-items: center; padding: 18px 0; }
+header { border-bottom: 3px solid var(--ink); }
+footer { border-top: 1px solid #0002; margin-top: 48px; font-size: 14px; }
+.brand { font-weight: 900; font-size: 22px; text-transform: uppercase; letter-spacing: -0.02em; color: var(--ink); text-decoration: none; }
+a { color: inherit; }
+.card { display: grid; gap: 12px; padding: 20px; border: 3px solid var(--ink); border-radius: 12px; background: #fff; box-shadow: 5px 5px 0 var(--ink); margin: 20px 0; max-width: 420px; }
+label { display: grid; gap: 4px; font-weight: 600; }
+input { font: inherit; padding: 10px; border: 2px solid var(--ink); border-radius: 8px; }
+button { font: inherit; font-weight: 700; padding: 10px 16px; border: 3px solid var(--ink); border-radius: 10px; background: var(--accent); color: #fff; cursor: pointer; }
+button.secondary { background: #fff; color: var(--ink); }
+button.link { border: 0; background: none; color: var(--ink); text-decoration: underline; padding: 0; font-weight: 500; }
+.signup, [hidden] { display: none; }
+form.signing-up .signup { display: grid; }
+.gizlet .icon { border-radius: 20px; border: 3px solid var(--ink); }
+.meta { color: #6b645a; }
+code { background: #0001; padding: 1px 5px; border-radius: 4px; }
+@media (prefers-color-scheme: dark) { :root { --ink: #f2ede4; --paper: #1a1816; } .card, input, button.secondary { background: #262320; color: var(--ink); } }
