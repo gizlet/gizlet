@@ -1,0 +1,31 @@
+name: PR triage
+
+# The only entry point for pull-request CI and Codex review. Opening, pushing
+# to, reopening or readying a pull request from a branch in this repository
+# dispatches CI and Codex review on main for its head; a writer's `/test` or
+# `/codex-review` comment line runs one again. Runs on a GitHub-hosted runner
+# and never checks out pull-request code.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  triage:
+    if: >-
+      github.event_name == 'pull_request_target'
+      || (github.event.issue.pull_request && contains(github.event.comment.body, '/'))
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: write
+    uses: gizlet/.github/.github/workflows/pr-triage.yml@latest
+    with:
+      commands: |
+        /test=ci.yml
+        /codex-review=codex-review.yml
