@@ -269,22 +269,68 @@ export function landingName(name: string): string {
   return name.replace(/\/$/, "").normalize("NFC").toLowerCase();
 }
 
-function executableProblem(target: string, head: Uint8Array): string | null {
+/** Bytes of an entry executable read for its headers. */
+export const EXECUTABLE_HEAD_BYTES = 4096;
+
+/** Mach-O CPU types per target architecture. */
+const MACHO_CPU: Record<string, number> = { aarch64: 0x0100000c, arm64: 0x0100000c, arm64e: 0x0100000c, x86_64: 0x01000007, x86_64h: 0x01000007 };
+/** PE/COFF machine types per target architecture. */
+const PE_MACHINE: Record<string, number> = { x86_64: 0x8664, aarch64: 0xaa64, i686: 0x14c, i586: 0x14c, thumbv7a: 0x1c4 };
+const MH_EXECUTE = 2;
+const ET_EXEC = 2;
+const ET_DYN = 3;
+
+/**
+ * Why `head` (the first EXECUTABLE_HEAD_BYTES of the entry) is not an executable for `target`,
+ * or null. Checks the format's header and that the architecture matches: the ELF machine and
+ * type on Linux; on macOS a thin Mach-O executable of that CPU type, or a universal binary with
+ * a slice for it; on Windows a PE image of that machine type.
+ */
+export function executableProblem(target: string, head: Uint8Array): string | null {
   const [arch = ""] = target.split("-");
+  const v = view(head);
   if (target.includes("-linux")) {
     if (head.length < 20 || head[0] !== 0x7f || head[1] !== 0x45 || head[2] !== 0x4c || head[3] !== 0x46) return "is not an ELF executable";
-    const machine = head[5] === 2 ? (head[18]! << 8) | head[19]! : head[18]! | (head[19]! << 8);
+    const little = head[5] !== 2;
+    const type = v.getUint16(16, little);
+    if (type !== ET_EXEC && type !== ET_DYN) return `is an ELF file of type ${type}, not an executable`;
+    const machine = v.getUint16(18, little);
     const want = ELF_MACHINE[arch];
     if (want !== undefined && machine !== want) return `is built for ELF machine ${machine}, not ${arch}`;
     return null;
   }
   if (target.includes("-apple-")) {
-    const magic = head.length >= 4 ? view(head).getUint32(0, false) : 0;
-    if (![0xfeedface, 0xfeedfacf, 0xcefaedfe, 0xcffaedfe, 0xcafebabe].includes(magic)) return "is not a Mach-O executable";
-    return null;
+    const want = MACHO_CPU[arch];
+    if (want === undefined) return `targets ${arch}, which macOS does not run`;
+    if (head.length < 16) return "is not a Mach-O executable";
+    const le = v.getUint32(0, true);
+    if (le === 0xfeedfacf || le === 0xfeedface) {
+      const cpu = v.getUint32(4, true);
+      if (cpu !== want) return `is a Mach-O executable for CPU type 0x${cpu.toString(16)}, not ${arch}`;
+      if (v.getUint32(12, true) !== MH_EXECUTE) return "is a Mach-O file that is not an executable";
+      return null;
+    }
+    const be = v.getUint32(0, false);
+    if (be === 0xcafebabe || be === 0xcafebabf) {
+      const count = v.getUint32(4, false);
+      const stride = be === 0xcafebabf ? 32 : 20;
+      // Java class files share this magic; their "count" (the class file version) is far larger.
+      if (count < 1 || count > 16 || 8 + count * stride > head.length) return "is not a Mach-O executable";
+      for (let i = 0; i < count; i++) if (v.getUint32(8 + i * stride, false) === want) return null;
+      return `is a universal binary with no ${arch} slice`;
+    }
+    return "is not a Mach-O executable";
   }
   if (target.includes("-windows")) {
-    if (head[0] !== 0x4d || head[1] !== 0x5a) return "is not a Windows executable";
+    const want = PE_MACHINE[arch];
+    if (want === undefined) return `targets ${arch}, which has no known Windows machine type`;
+    if (head.length < 0x40 || head[0] !== 0x4d || head[1] !== 0x5a) return "is not a Windows executable";
+    const pe = v.getUint32(0x3c, true);
+    if (pe < 0x40 || pe + 24 > head.length || v.getUint32(pe, true) !== 0x00004550) return "is not a Windows executable (no PE header in its first 4 KiB)";
+    const machine = v.getUint16(pe + 4, true);
+    if (machine !== want) return `is a Windows executable for machine 0x${machine.toString(16)}, not ${arch}`;
+    if (!(v.getUint16(pe + 22, true) & 0x0002)) return "is a PE file that is not an executable image";
+    return null;
   }
   return null;
 }
@@ -352,7 +398,7 @@ export async function checkPackage(env: Env, key: string, file: string, size: nu
   else if (!exe) fail(`has no entry file ${JSON.stringify(entry.slice(0, 120))}`);
   else {
     try {
-      const problem = executableProblem(expected.target, await readHead(env, key, exe, 64));
+      const problem = executableProblem(expected.target, await readHead(env, key, exe, EXECUTABLE_HEAD_BYTES));
       if (problem) fail(`entry ${JSON.stringify(entry.slice(0, 120))} ${problem}`);
     } catch (e) {
       if (e instanceof Bad) fail(e.message);

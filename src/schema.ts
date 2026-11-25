@@ -45,7 +45,9 @@ const ID = /^[a-z0-9_-]+(\.[a-z0-9_-]+)+$/;
 const TARGET = /^[a-z0-9_]+(-[a-z0-9_.]+){2,3}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 const COLOR = /^#[0-9a-fA-F]{6}$/;
-export const MAX_PACKAGE_BYTES = 2 * 1024 * 1024 * 1024;
+/** The largest package the registry accepts and mirrors. */
+export const MAX_PACKAGE_BYTES = 1024 * 1024 * 1024;
+const IMAGE = /\.(png|jpe?g|webp)$/i;
 
 export function isAssetName(s: string): boolean {
   return ASSET.test(s) && !s.includes("..");
@@ -71,6 +73,13 @@ function langMap(v: unknown, field: string, max: number): Record<string, string>
     out[k] = str(val, `${field}.${k}`, max);
   }
   return out;
+}
+
+/** A release asset that is a PNG, JPEG or WebP image. */
+function image(v: unknown, field: string): string {
+  const s = asset(v, field);
+  if (!IMAGE.test(s)) throw new IndexError(`${field} must name a .png, .jpg or .webp release asset`);
+  return s;
 }
 
 function asset(v: unknown, field: string): string {
@@ -115,7 +124,7 @@ export function parseIndex(raw: unknown): ReleaseIndex {
   const color = optStr(o.color, "color", 7);
   if (color && !COLOR.test(color)) throw new IndexError("color must be #RRGGBB");
   const tags = Array.isArray(o.tags) ? o.tags.slice(0, 12).map((t, i) => str(t, `tags[${i}]`, 32).toLowerCase()) : [];
-  const screenshots = Array.isArray(o.screenshots) ? o.screenshots.slice(0, 8).map((s, i) => asset(s, `screenshots[${i}]`)) : [];
+  const screenshots = Array.isArray(o.screenshots) ? o.screenshots.slice(0, 8).map((s, i) => image(s, `screenshots[${i}]`)) : [];
   if (!Array.isArray(o.packages) || o.packages.length === 0 || o.packages.length > 32) {
     throw new IndexError("packages must list 1 to 32 packages");
   }
@@ -131,7 +140,7 @@ export function parseIndex(raw: unknown): ReleaseIndex {
     if (!TARGET.test(target)) throw new IndexError(`packages[${i}].target is not a target triple`);
     if (q.tier !== "lite" && q.tier !== "full") throw new IndexError(`packages[${i}].tier must be lite or full`);
     if (typeof q.size !== "number" || !Number.isSafeInteger(q.size) || q.size <= 0 || q.size > MAX_PACKAGE_BYTES) {
-      throw new IndexError(`packages[${i}].size must be a positive byte count up to 2 GiB`);
+      throw new IndexError(`packages[${i}].size must be a positive byte count up to 1 GiB`);
     }
     if (typeof q.sha256 !== "string" || !HEX64.test(q.sha256)) throw new IndexError(`packages[${i}].sha256 must be 64 lowercase hex digits`);
     return { file, target, tier: q.tier, size: q.size, sha256: q.sha256 };
@@ -147,8 +156,8 @@ export function parseIndex(raw: unknown): ReleaseIndex {
     category,
     tags,
     color,
-    icon: o.icon === undefined || o.icon === null ? null : asset(o.icon, "icon"),
-    cover: o.cover === undefined || o.cover === null ? null : asset(o.cover, "cover"),
+    icon: o.icon === undefined || o.icon === null ? null : image(o.icon, "icon"),
+    cover: o.cover === undefined || o.cover === null ? null : image(o.cover, "cover"),
     screenshots,
     about: aboutMap(o.about),
     controls: controlList(o.controls),

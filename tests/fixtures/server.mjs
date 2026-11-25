@@ -82,7 +82,11 @@ function executable(target) {
   const arch = target.split("-")[0];
   let head;
   if (target.includes("-apple-")) {
-    head = Buffer.from([0xcf, 0xfa, 0xed, 0xfe]);
+    // mach_header_64: magic, cputype, cpusubtype, filetype MH_EXECUTE.
+    head = Buffer.alloc(32);
+    head.writeUInt32LE(0xfeedfacf, 0);
+    head.writeUInt32LE(arch === "x86_64" ? 0x01000007 : 0x0100000c, 4);
+    head.writeUInt32LE(2, 12);
   } else {
     head = Buffer.alloc(64);
     head.set([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1], 0);
@@ -133,7 +137,7 @@ function gzl({ id, version, target, tier, problem, literal }) {
 /** repo -> { latest, tags: { tag -> { files: Map<name, Buffer> } } } */
 const repos = new Map();
 
-function addRelease(repo, version, { category = "game", lie = false, targets, page = true, problem, literal, extra = [], icon = true, description = true } = {}) {
+function addRelease(repo, version, { category = "game", lie = false, targets, page = true, problem, literal, extra = [], icon = true, iconName = "icon.png", description = true } = {}) {
   const tag = `v${version}`;
   const id = `dev.fixture.${repo.split("/")[1].replace(/[^a-z0-9]/g, "")}`;
   const files = new Map();
@@ -163,7 +167,7 @@ function addRelease(repo, version, { category = "game", lie = false, targets, pa
     category,
     tags: ["fixture", "arcade"],
     color: "#2fa37a",
-    icon: icon ? "icon.png" : null,
+    icon: icon ? iconName : null,
     screenshots: ["screenshot-1.png"],
     cover: page ? "cover.png" : null,
     about: page ? { en: "about.en.md" } : {},
@@ -192,6 +196,8 @@ addRelease("fixture-org/wrong-arch", "0.1.0", { problem: "wrong-arch", targets: 
 addRelease("fixture-org/traversal", "0.1.0", { problem: "traversal", targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 addRelease("fixture-org/alias", "0.1.0", { problem: "alias", targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 addRelease("fixture-org/unicode-path", "0.1.0", { problem: "unicode-path", targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+// Names an extra, unchecked package as its icon; refused at publish.
+addRelease("fixture-org/gzl-icon", "0.1.0", { iconName: "unchecked.gzl", extra: ["unchecked.gzl"], targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 addRelease("fixture-org/case", "0.1.0", { problem: "case", targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 addRelease("fixture-org/literal-toml", "0.1.0", { literal: true, targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 repos.set("fixture-org/no-index", { tags: { "v1.0.0": { files: new Map([["other.zip", Buffer.from("x")]]) } }, latest: "v1.0.0" });

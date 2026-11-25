@@ -24,6 +24,7 @@ async function fromR2(c: Context<App>, key: string, file: string, cacheControl: 
   obj.writeHttpMetadata(headers);
   headers.set("etag", obj.httpEtag);
   headers.set("accept-ranges", "bytes");
+  headers.set("x-content-type-options", "nosniff");
   headers.set("cache-control", cacheControl);
   headers.set("access-control-allow-origin", "*");
   if (!headers.has("content-type")) headers.set("content-type", contentType(file));
@@ -78,15 +79,15 @@ dl.on(["GET", "HEAD"], "/github.com/:owner/:repo/:tag/:file", async (c) => {
   ]);
   if (!g || !rel) return c.text("Not found", 404);
   if (g.visibility === "blocked") return c.text(`${r.key} is blocked`, 403);
-  // Only files the release index names are served: its checked packages and its store art.
+  // Nothing of a failed release is served. Of the others, only files the index names: its
+  // packages once checked, and its art (images and about pages, never packages: see parseIndex).
+  if (rel.status === "failed") return c.text(`${r.key} ${tag} failed its checks`, 410);
   const files = indexedFiles(JSON.parse(rel.index_json) as ReleaseIndex);
   let key: string;
   let cacheControl: string;
   if (files.packages.has(file)) {
     // Packages are served only once their release has passed its checks.
-    if (rel.status !== "ready") {
-      return rel.status === "failed" ? c.text(`${r.key} ${tag} failed its checks`, 410) : c.text(`${r.key} ${tag} is still being checked`, 409);
-    }
+    if (rel.status !== "ready") return c.text(`${r.key} ${tag} is still being checked`, 409);
     if (!rel.sha256) return c.text("Not found", 404);
     const pinned = c.req.query("sha256");
     // A URL for bytes this tag no longer has: the client should ask the API again.

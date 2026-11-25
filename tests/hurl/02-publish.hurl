@@ -84,6 +84,21 @@ HTTP 404
 [Asserts]
 jsonpath "$.error.message" contains "no gizlet.json"
 
+# Art must be images: an index that names a package as its icon is refused.
+GET {{fixture}}/token?repo=fixture-org/gzl-icon&ref=refs/tags/v0.1.0
+HTTP 200
+[Captures]
+token4: jsonpath "$.value"
+
+POST {{base}}/v1/publish
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{token4}}
+{}
+HTTP 422
+[Asserts]
+jsonpath "$.error.code" == "invalid_index"
+jsonpath "$.error.message" contains "icon must name a .png, .jpg or .webp"
+
 # Broken releases fail their checks and are not served.
 GET {{base}}/v1/gizlets/github.com/fixture-org/bad-sum
 x-gizlet-host: api.gizlet.io

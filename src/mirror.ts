@@ -12,10 +12,9 @@ import type { PackageRow, ReleaseRow } from "./db";
 import type { Env, MirrorJob } from "./env";
 import { assetUrl, ghFetch, readCapped, UpstreamError } from "./github";
 import { refreshLatest } from "./registry";
-import { compareVersions, type ReleaseIndex } from "./schema";
+import { compareVersions, MAX_PACKAGE_BYTES, type ReleaseIndex } from "./schema";
 
 const MAX_ART_BYTES = 10 * 1024 * 1024;
-const MAX_DOWNLOAD_BYTES = 1024 * 1024 * 1024;
 const MAX_ATTEMPTS = 5;
 /** A release this long in pending, mirroring or checking has lost its job; queue it again. */
 export const STUCK_AFTER_MS = 30 * 60 * 1000;
@@ -45,10 +44,9 @@ export function contentType(file: string): string {
 
 /** Asset names a release index names: its packages and store art. Nothing else is served. */
 export function indexedFiles(index: ReleaseIndex): { packages: Set<string>; art: Set<string> } {
-  return {
-    packages: new Set(index.packages.map((p) => p.file)),
-    art: new Set([index.icon, index.cover, ...index.screenshots, ...Object.values(index.about)].filter((f): f is string => !!f)),
-  };
+  const packages = new Set(index.packages.map((p) => p.file));
+  const art = [index.icon, index.cover, ...index.screenshots, ...Object.values(index.about)].filter((f): f is string => !!f && !packages.has(f));
+  return { packages, art: new Set(art) };
 }
 
 /** A release that can never become ready as published. */
@@ -67,9 +65,9 @@ async function copyToR2(env: Env, url: string, key: string, file: string, sha256
     await res.body?.cancel();
     throw new UpstreamError(`GitHub answered ${res.status} for ${file}`);
   }
-  if (size > MAX_DOWNLOAD_BYTES) {
+  if (size > MAX_PACKAGE_BYTES) {
     await res.body.cancel();
-    throw new Rejected(`${file} is larger than ${MAX_DOWNLOAD_BYTES} bytes`);
+    throw new Rejected(`${file} is larger than ${MAX_PACKAGE_BYTES} bytes`);
   }
   const fixed = new FixedLengthStream(size);
   const piping = res.body.pipeTo(fixed.writable).catch((e: unknown) => {
@@ -112,7 +110,9 @@ async function setStatus(env: Env, job: MirrorJob, status: ReleaseRow["status"],
 
 export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): Promise<void> {
   const rel = await env.DB.prepare("SELECT * FROM releases WHERE repo = ? AND tag = ?").bind(job.repo, job.tag).first<ReleaseRow>();
-  if (!rel || rel.revision !== job.revision || rel.status === "ready" || rel.status === "failed") return;
+  if (!rel || rel.revision !== job.revision) return;
+  // Already decided: a retry (the follow-up work threw last time) redoes only that work.
+  if (rel.status === "ready" || rel.status === "failed") return settle(env, job, rel.status);
   const g = await env.DB.prepare("SELECT owner, name_repo FROM gizlets WHERE repo = ?").bind(job.repo).first<{ owner: string; name_repo: string }>();
   if (!g) return;
   const index = JSON.parse(rel.index_json) as ReleaseIndex;
@@ -149,10 +149,7 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
     if (e instanceof Superseded) return;
     if (e instanceof Rejected || attempt >= MAX_ATTEMPTS) {
       if (!(await setStatus(env, job, "failed", e instanceof Error ? e.message : String(e)))) return;
-      // Nothing of a failed release is served, so its packages need not stay in R2.
-      await Promise.all(pkgs.map((p) => env.BUCKET.delete(packageKey(job.repo, job.tag, p.sha256, p.file))));
-      await refreshLatest(env, job.repo);
-      return;
+      return settle(env, job, "failed");
     }
     await setStatus(env, job, "pending", null);
     throw e;
@@ -160,8 +157,24 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
   if (!index.icon) warnings.push("gizlet.json names no icon");
   if (!index.description) warnings.push("gizlet.json has no description");
   if (!(await setStatus(env, job, "ready", null, warnings, true))) return;
+  await settle(env, job, "ready");
+}
+
+/**
+ * The work that follows a release's verdict: point the gizlet at its newest release and update
+ * its visibility, then prune old mirrors, or drop a failed release's packages from R2. Every
+ * step is idempotent; if one throws, the queue retries the job, which comes back here.
+ */
+async function settle(env: Env, job: MirrorJob, status: "ready" | "failed"): Promise<void> {
+  if (status === "failed") {
+    // Nothing of a failed release is served, so its packages need not stay in R2.
+    const { results } = await env.DB.prepare("SELECT file, sha256 FROM packages WHERE repo = ? AND tag = ? AND revision = ?")
+      .bind(job.repo, job.tag, job.revision)
+      .all<Pick<PackageRow, "file" | "sha256">>();
+    await Promise.all(results.map((p) => env.BUCKET.delete(packageKey(job.repo, job.tag, p.sha256, p.file))));
+  }
   await refreshLatest(env, job.repo);
-  await pruneMirrors(env, job.repo);
+  if (status === "ready") await pruneMirrors(env, job.repo);
 }
 
 /**
