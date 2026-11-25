@@ -97,11 +97,11 @@ CI follows the [gizlet/.github](https://github.com/gizlet/.github) setup, as in 
 
 | Workflow | Does |
 | --- | --- |
-| `triage.yml` | On every pull-request push, dispatches CI and Codex review from `main` for its head (`/test` and `/codex-review` comments run them again). GitHub-hosted, never checks out PR code. |
+| `triage.yml` | On every pull-request push, gizlet-bot comments `/ci` and `/codex-review` for the head, which starts the two workflows below. A writer's comment with either command runs it again. GitHub-hosted, never checks out PR code. |
 | `codex-review.yml` | The `Codex Code Review` check. GitHub-hosted. |
 | `ci.yml` | The `CI` check: typecheck, a Worker bundle, the Hurl suite and the device simulation, with no secrets. On `main`, then the deploy: decrypt the credentials, apply the D1 and Postgres migrations, update Worker secrets, deploy and run `tests/prod`. It is skipped until the SOPS files are committed. |
 
-Build, test and deploy run on the runner the `RUNNERS` organization variable maps to `linux-x64`, falling back to GitHub's Ubuntu runner. Workflows dispatched by triage run their copy on `main`, so a pull request that changes them is tested by the old ones.
+Build, test and deploy run on the runner the `RUNNERS` organization variable maps to `linux-x64`, falling back to GitHub's Ubuntu runner. Comment-triggered workflows run their copy on `main`, so a pull request that changes them is tested by the old ones.
 
 Cloudflare resources: Worker `gizlet` with custom domains for the five hosts, D1 `gizlet`, R2 bucket `gizlet-assets`, Queues `gizlet-mirror` and `gizlet-mirror-dlq`, Hyperdrive config for the Neon database (Workers Paid plan). The GitHub OAuth app's callback URL is `https://gizlet.io/v1/auth/callback/github`.
 
