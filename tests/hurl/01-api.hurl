@@ -20,12 +20,6 @@ jsonpath "$.repo" == "github.com/fixture-org/hello-gizlet"
 jsonpath "$.share_url" == "{{site}}/github.com/fixture-org/hello-gizlet"
 jsonpath "$.api_url" == "https://api.gizlet.io/v1/gizlets/github.com/fixture-org/hello-gizlet"
 
-GET {{base}}/v1/resolve?url=store.gizlet.io/github.com/fixture-org/hello-gizlet
-x-gizlet-host: api.gizlet.io
-HTTP 200
-[Asserts]
-jsonpath "$.repo" == "github.com/fixture-org/hello-gizlet"
-
 # Share links on any copy of the site, and API and download URLs, resolve too.
 GET {{base}}/v1/resolve?url={{site}}/github.com/fixture-org/hello-gizlet
 x-gizlet-host: api.gizlet.io

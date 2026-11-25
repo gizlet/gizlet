@@ -110,7 +110,10 @@ jobs:
 
   deploy:
     needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # `start` is skipped on push, so the default success() would skip this job too.
+    if: >-
+      !cancelled() && needs.test.result == 'success'
+      && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ${{ fromJSON(vars.RUNNERS || '{}')['linux-x64'] || 'ubuntu-24.04' }}
     timeout-minutes: 20
     environment:

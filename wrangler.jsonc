@@ -9,7 +9,6 @@
   "routes": [
     { "pattern": "gizlet.io", "custom_domain": true },
     { "pattern": "www.gizlet.io", "custom_domain": true },
-    { "pattern": "store.gizlet.io", "custom_domain": true },
     { "pattern": "dl.gizlet.io", "custom_domain": true },
     { "pattern": "api.gizlet.io", "custom_domain": true }
   ],
@@ -22,7 +21,7 @@
     {
       "binding": "DB",
       "database_name": "gizlet",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "aea72ef2-aafb-4a5a-b6dc-047c9953788f",
       "migrations_dir": "migrations/d1"
     }
   ],
