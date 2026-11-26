@@ -59,7 +59,8 @@ entry = "bin/rocket-snail"
 | `id` | yes | Reverse-DNS, lowercase: `io.gizlet.rocket-snail`. Never changes; a device keeps saves under it |
 | `name` | yes | At most 80 characters |
 | `version` | yes | The release tag must be `v<version>` |
-| `category` | no | `game` or `app`; `app` if left out |
+| `kind` | no | `app` or `service`; `app` if left out. See [Kinds](#kinds) |
+| `category` | no | For apps only: `game` or `app`, how the store presents it; `app` if left out. A service has none, and naming one is an error |
 | `description` | no | One or two sentences, at most 500 characters. Without one the gizlet stays unlisted |
 | `tags` | no | At most 12, each at most 32 characters, stored lowercase |
 | `color` | no | `#RRGGBB`: the gizlet's own colour, for its cartridge on the store's shelves, its page and the launcher. Without one, the store picks one of five shell colours per repository |
@@ -78,6 +79,17 @@ entry = "bin/rocket-snail"
 Unknown keys are refused, so a misspelt field is an error rather than silently ignored.
 
 Repository paths are relative to the repository root, `/`-separated, with no empty, `.` or `..` parts, and each part made of letters, digits and `._+-`. The registry reads them at the release tag and mirrors them, at most 10 MiB each. Art may be anywhere in the repository; `store/` is the convention.
+
+### Kinds
+
+`kind` says what a gizlet's packages are, and so how a device treats them:
+
+| Kind | Is | On a device |
+| --- | --- | --- |
+| `app` | A program the player opens: a game (`category = "game"`) or any other foreground program (`category = "app"`) | Installed and shown on the launcher's shelf; it takes the screen while it runs |
+| `service` | A background program with no screen of its own | Recognized, never shown or started as an app. Installing and supervising services is not part of Gizlet OS yet, so the launcher refuses to install one for now |
+
+Every gizlet published before kinds existed is an app. ROM packages and platform categories for ROMs are not part of this format.
 
 ### Packages
 
@@ -104,7 +116,18 @@ for example `io.gizlet.rocket-snail-0.1.0-aarch64-unknown-linux-gnu-lite.gzl`. T
 
 ## manifest.json
 
-The build writes it at the root of each `.gzl`, beside `CHECKSUMS` (the SHA-256 of every other file in the package, one `<hex>  <path>` line each). It is `gizlet.toml`'s device-facing fields plus the package's own `target`, `tier` and `entry`:
+The build writes it at the root of each `.gzl`, beside `CHECKSUMS` (the SHA-256 of every other file in the package, one `<hex>  <path>` line each). It is `gizlet.toml`'s device-facing fields plus the package's own `target`, `tier` and `entry`, under a `schema` number that says how to read it.
+
+### Schemas
+
+| `schema` | `kind` | Means |
+| --- | --- | --- |
+| `1`, or left out | Not needed; if present, it must be `app` | An app. Every package built before schema 2 is one, and stays valid |
+| `2` | Required: `app` or `service` | The kind it names |
+
+A build writes schema 1 for an app (schema 2 with `"kind": "app"` is equally valid) and must write schema 2 for a service. Readers refuse any other schema, a schema 2 manifest without `kind`, and a schema 1 manifest whose `kind` is not `app`. The kind must match `gizlet.toml`'s.
+
+An app, schema 1:
 
 ```json
 {
@@ -124,6 +147,26 @@ The build writes it at the root of each `.gzl`, beside `CHECKSUMS` (the SHA-256 
 }
 ```
 
+A service, schema 2:
+
+```json
+{
+  "schema": 2,
+  "kind": "service",
+  "id": "io.gizlet.clock-sync",
+  "name": "Clock Sync",
+  "version": "1.0.0",
+  "runtime": 1,
+  "target": "aarch64-unknown-linux-gnu",
+  "tier": "lite",
+  "entry": "bin/clock-sync"
+}
+```
+
 `icon` is a path inside the package (the build copies `gizlet.toml`'s icon there); the other fields have the same names and rules as in `gizlet.toml`. Store-only fields (`category`, `tags`, `cover`, `screenshots`, `about`, `controls`, `license`) are left out.
 
-The registry fails a package whose `manifest.json` is missing, is not a JSON object, or differs from `gizlet.toml` in `id`, `name`, `version`, `runtime`, `target`, `tier` or `entry`, and one whose `entry` is not an executable for its target.
+The registry fails a package whose `manifest.json` is missing, is not a JSON object, has a schema or kind it cannot read (above), or differs from `gizlet.toml` in `kind`, `id`, `name`, `version`, `runtime`, `target`, `tier` or `entry`, and one whose `entry` is not an executable for its target.
+
+## Listing
+
+Passing the checks makes a release installable by its link, by anyone, on any device. Listing it in search, Explore and the featured lists is an editorial decision: an admin lists it through `POST /v1/admin/gizlets/github.com/{owner}/{repo}/visibility` (see the [README](../README.md#api)). Until then the API gives it `visibility` `unlisted` and a `visibility_reason`: its check warnings, or `awaiting editorial approval`.

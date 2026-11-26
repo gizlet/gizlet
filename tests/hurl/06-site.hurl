@@ -44,6 +44,15 @@ retry-interval: 250ms
 HTTP 200
 [Asserts]
 jsonpath "$.status" == "ready"
+jsonpath "$.visibility" == "unlisted"
+jsonpath "$.visibility_reason" == "awaiting editorial approval"
+
+POST {{base}}/v1/admin/gizlets/github.com/fixture-org/rocket-snail/visibility
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{admin_token}}
+{"visibility": "listed"}
+HTTP 200
+[Asserts]
 jsonpath "$.visibility" == "listed"
 
 GET {{base}}/github.com/fixture-org/rocket-snail

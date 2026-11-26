@@ -5,7 +5,12 @@
 import { parse as parseToml } from "smol-toml";
 
 export type Tier = "lite" | "full";
+/** What a gizlet's packages are: `app`, a foreground program (games included), or `service`, a background one. */
+export type Kind = "app" | "service";
+export const KINDS: readonly Kind[] = ["app", "service"];
+/** How an app is presented in the store. Services have none. */
 export type Category = "game" | "app";
+export const CATEGORIES: readonly Category[] = ["game", "app"];
 
 export interface PackageSpec {
   target: string;
@@ -23,6 +28,9 @@ export interface GizletToml {
   version: string;
   description: string | null;
   descriptions: Record<string, string>;
+  /** `app` for apps, and for every release indexed before kinds existed. */
+  kind: Kind;
+  /** `app` for a service, which has no category of its own; the API shows none for it. */
   category: Category;
   tags: string[];
   color: string | null;
@@ -192,7 +200,7 @@ export function isPackagePath(s: string): boolean {
   return s.length > 0 && s.length <= 200 && !/[\\:\0]/.test(s) && s.split("/").every((p) => p !== "" && p !== "." && p !== "..");
 }
 
-const FIELDS = ["id", "name", "names", "version", "description", "descriptions", "category", "tags", "color", "license", "runtime", "links", "icon", "cover", "pattern", "screenshots", "about", "controls", "packages"] as const;
+const FIELDS = ["id", "name", "names", "version", "description", "descriptions", "kind", "category", "tags", "color", "license", "runtime", "links", "icon", "cover", "pattern", "screenshots", "about", "controls", "packages"] as const;
 
 /** Parse and validate gizlet.toml. */
 export function parseGizletToml(text: string): GizletToml {
@@ -211,8 +219,11 @@ export function parseSpec(o: Table): GizletToml {
   if (!ID.test(id)) throw new IndexError("id must be reverse-DNS (lowercase)");
   const version = str(o.version, "version", 64);
   if (!VERSION.test(version)) throw new IndexError("version may only use letters, digits and . + -");
+  const kind = o.kind ?? "app";
+  if (!KINDS.includes(kind as Kind)) throw new IndexError(`kind must be ${KINDS.join(" or ")}`);
+  if (kind === "service" && o.category !== undefined) throw new IndexError("category is for apps; a service has none");
   const category = o.category ?? "app";
-  if (category !== "game" && category !== "app") throw new IndexError("category must be game or app");
+  if (!CATEGORIES.includes(category as Category)) throw new IndexError("category must be game or app");
   const color = optStr(o.color, "color", 7);
   if (color && !COLOR.test(color)) throw new IndexError("color must be #RRGGBB");
   const runtime = o.runtime ?? 1;
@@ -246,7 +257,8 @@ export function parseSpec(o: Table): GizletToml {
     version,
     description: optStr(o.description, "description", 500),
     descriptions: langMap(o.descriptions, "descriptions", 500),
-    category,
+    kind: kind as Kind,
+    category: category as Category,
     tags: list(o.tags, "tags", 12).map((t, i) => str(t, `tags[${i}]`, 32).toLowerCase()),
     color,
     license: optStr(o.license, "license", 64),
@@ -260,6 +272,26 @@ export function parseSpec(o: Table): GizletToml {
     controls: controlList(o.controls),
     packages,
   };
+}
+
+/** A release's stored gizlet.toml, with what releases indexed before kinds existed leave out. */
+export function storedSpec(json: string): GizletToml {
+  const spec = JSON.parse(json) as Partial<GizletToml>;
+  return { ...spec, kind: spec.kind ?? "app" } as GizletToml;
+}
+
+/**
+ * Whether a stored release describes the same gizlet.toml as a freshly parsed one. A release
+ * indexed before kinds existed was an app, so it is not indexed again just for that.
+ */
+export function sameSpec(storedJson: string, spec: GizletToml): boolean {
+  if (storedJson === JSON.stringify(spec)) return true;
+  try {
+    const stored = JSON.parse(storedJson) as Partial<GizletToml>;
+    return stored.kind === undefined && spec.kind === "app" && JSON.stringify(stored) === JSON.stringify({ ...spec, kind: undefined });
+  } catch {
+    return false;
+  }
 }
 
 /**

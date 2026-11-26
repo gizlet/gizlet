@@ -149,20 +149,26 @@ function gizletToml(spec, literal = false) {
   return [...lines, ...tables, ""].join("\n");
 }
 
-/** The manifest.json a build writes into a package (docs/gizlet-toml.md). */
-function manifestJson(spec, pkg) {
-  const m = { schema: 1, id: spec.id, name: spec.name, names: spec.names ?? {}, version: spec.version, description: spec.description, descriptions: spec.descriptions ?? {} };
-  return { ...m, color: spec.color, runtime: spec.runtime ?? 1, target: pkg.target, tier: pkg.tier, entry: pkg.entry, icon: "icon.png" };
+/**
+ * The manifest.json a build writes into a package (docs/gizlet-toml.md): schema 1 for an app,
+ * schema 2 with its kind for a service. `manifest` overrides fields, `undefined` leaving one out.
+ */
+function manifestJson(spec, pkg, manifest = {}) {
+  const kind = spec.kind ?? "app";
+  const head = kind === "app" ? { schema: 1 } : { schema: 2, kind };
+  const m = { ...head, id: spec.id, name: spec.name, names: spec.names ?? {}, version: spec.version, description: spec.description, descriptions: spec.descriptions ?? {} };
+  return { ...m, color: spec.color, runtime: spec.runtime ?? 1, target: pkg.target, tier: pkg.tier, entry: pkg.entry, icon: "icon.png", ...manifest };
 }
 
 /**
  * A `.gzl` package for one [[packages]] entry. `problem` builds a broken one: symlink | setuid |
  * wrong-arch | traversal | alias (`./<entry>`, an x86-64 build, after the entry) | case (the
  * entry's name capitalized, after it) | unicode-path (an x86-64 `other` that a Unicode Path extra
- * field renames to the entry) | mismatch (manifest.json says another tier).
+ * field renames to the entry) | mismatch (manifest.json says another tier). `manifest` overrides
+ * manifest.json fields.
  */
-function gzl(spec, pkg, { problem, files = {} } = {}) {
-  const manifest = manifestJson(spec, pkg);
+function gzl(spec, pkg, { problem, files = {}, manifest: fields } = {}) {
+  const manifest = manifestJson(spec, pkg, fields);
   if (problem === "mismatch") manifest.tier = pkg.tier === "lite" ? "full" : "lite";
   const exeTarget = problem === "wrong-arch" ? "x86_64-unknown-linux-gnu" : pkg.target;
   const other = executable("x86_64-unknown-linux-gnu");
@@ -206,7 +212,7 @@ function addTag(repo, tag, assets, files, spec = null) {
 }
 
 /** A release of a generated fixture gizlet: gizlet.toml and its art in the repository, packages in the release. */
-function addRelease(repo, version, { category = "game", targets, page = true, problem, literal, extra = [], icon = true, iconPath = "store/icon.png", description = true, missing = false } = {}) {
+function addRelease(repo, version, { kind, category = kind === "service" ? undefined : "game", targets, page = true, problem, manifest, literal, extra = [], icon = true, iconPath = "store/icon.png", description = true, missing = false } = {}) {
   const hello = repo === "fixture-org/hello-gizlet";
   const files = new Map();
   if (icon) files.set("store/icon.png", PNG);
@@ -217,6 +223,7 @@ function addRelease(repo, version, { category = "game", targets, page = true, pr
     id: `dev.fixture.${repo.split("/")[1].replace(/[^a-z0-9]/g, "")}`,
     name: hello ? "Hello Gizlet" : repo.split("/")[1],
     version,
+    kind,
     category,
     description: description ? "A fixture gizlet for the tests." : undefined,
     tags: ["fixture", "arcade"],
@@ -237,7 +244,7 @@ function addRelease(repo, version, { category = "game", targets, page = true, pr
   files.set("gizlet.toml", Buffer.from(gizletToml(spec, literal)));
   const assets = new Map();
   // `missing`: the first package listed in gizlet.toml was never uploaded.
-  for (const p of spec.packages.slice(missing ? 1 : 0)) assets.set(packageFile(spec, p), gzl(spec, p, { problem }));
+  for (const p of spec.packages.slice(missing ? 1 : 0)) assets.set(packageFile(spec, p), gzl(spec, p, { problem, manifest }));
   // Release assets gizlet.toml does not name; never served.
   for (const name of extra) assets.set(name, gzl(spec, { target: "x86_64-unknown-linux-gnu", tier: "lite", entry: "game" }));
   addTag(repo, `v${version}`, assets, files, spec);
@@ -282,6 +289,16 @@ addRelease("fixture-org/mismatch", "0.1.0", { problem: "mismatch", targets: [["a
 addRelease("fixture-org/gzl-icon", "0.1.0", { iconPath: "store/unchecked.gzl", targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 addRelease("fixture-org/case", "0.1.0", { problem: "case", targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 addRelease("fixture-org/literal-toml", "0.1.0", { literal: true, targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+// Kinds and manifest schemas (tests/hurl/10-kinds.hurl): a schema 2 service, a schema 2 app, an
+// app whose manifest.json leaves out its schema, and packages whose manifest.json disagrees.
+const handheld = [["aarch64-unknown-linux-gnu", "lite"]];
+addRelease("fixture-org/clock-service", "1.0.0", { kind: "service", targets: handheld });
+addRelease("fixture-org/v2-app", "1.0.0", { category: "app", manifest: { schema: 2, kind: "app" }, targets: handheld });
+addRelease("fixture-org/no-schema", "1.0.0", { manifest: { schema: undefined }, targets: handheld });
+addRelease("fixture-org/service-as-v1", "1.0.0", { kind: "service", manifest: { schema: 1, kind: undefined }, targets: handheld });
+addRelease("fixture-org/v2-no-kind", "1.0.0", { manifest: { schema: 2 }, targets: handheld });
+addRelease("fixture-org/v1-service-kind", "1.0.0", { manifest: { kind: "service" }, targets: handheld });
+addRelease("fixture-org/schema-3", "1.0.0", { manifest: { schema: 3, kind: "app" }, targets: handheld });
 addTag("fixture-org/no-index", "v1.0.0", new Map([["other.zip", Buffer.from("x")]]), new Map());
 // Visited by tests/hurl/07-index.hurl, which adds releases while it runs.
 addRelease("fixture-org/refresh-me", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });

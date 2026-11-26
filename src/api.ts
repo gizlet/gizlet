@@ -10,9 +10,9 @@ import { AuthError, verifyActionsToken } from "./oidc";
 import { ensureGizlet, indexRelease, setVisibility } from "./registry";
 import { ADMIN_MARKS, MARKS, ratingAverage, rescore, type Mark } from "./score";
 import { parseRepoAddress, repoRef, type RepoRef } from "./repo";
-import { IndexError, type Tier } from "./schema";
+import { CATEGORIES, IndexError, KINDS, type Category, type Kind, type Tier } from "./schema";
 
-export const VERSION = "2.0.0";
+export const VERSION = "2.1.0";
 
 type App = { Bindings: Env };
 type C = Context<App>;
@@ -80,7 +80,7 @@ api.get("/v1", (c) =>
     source: "https://github.com/gizlet/gizlet",
     endpoints: [
       "GET /v1/featured",
-      "GET /v1/gizlets?q=&category=&target=&tier=&mark=&sort=&limit=&cursor=",
+      "GET /v1/gizlets?q=&kind=&category=&target=&tier=&mark=&sort=&limit=&cursor=",
       "GET /v1/gizlets/github.com/{owner}/{repo}",
       "GET /v1/gizlets/github.com/{owner}/{repo}/releases",
       "GET /v1/gizlets/github.com/{owner}/{repo}/releases/{tag}",
@@ -116,6 +116,7 @@ api.get("/v1/featured", async (c) => c.json(await featured(c.env)));
 
 api.get("/v1/gizlets", async (c) => {
   const q = c.req.query("q")?.trim().slice(0, 100) || undefined;
+  const kind = (c.req.query("kind") || undefined) as Kind | undefined;
   const category = c.req.query("category") || undefined;
   const target = c.req.query("target") || undefined;
   const tier = c.req.query("tier") || undefined;
@@ -123,12 +124,14 @@ api.get("/v1/gizlets", async (c) => {
   const sort = (c.req.query("sort") || "updated") as ListSort;
   if (mark && !MARKS.includes(mark as Mark)) return apiError(c, 400, "bad_request", `mark must be ${MARKS.join(" or ")}`);
   if (!LIST_SORTS.includes(sort)) return apiError(c, 400, "bad_request", `sort must be ${LIST_SORTS.join(", ")}`);
-  if (category && category !== "game" && category !== "app") return apiError(c, 400, "bad_request", "category must be game or app");
+  if (kind && !KINDS.includes(kind)) return apiError(c, 400, "bad_request", `kind must be ${KINDS.join(" or ")}`);
+  if (category && !CATEGORIES.includes(category as Category)) return apiError(c, 400, "bad_request", "category must be game or app");
+  if (category && kind === "service") return apiError(c, 400, "bad_request", "category is for apps; services have none");
   if (tier && tier !== "lite" && tier !== "full") return apiError(c, 400, "bad_request", "tier must be lite or full");
   if (target && !TARGET.test(target)) return apiError(c, 400, "bad_request", "target must be a target triple");
   const limit = Math.min(Math.max(Number.parseInt(c.req.query("limit") ?? "24", 10) || 24, 1), 100);
   const offset = Math.max(Number.parseInt(c.req.query("cursor") ?? "0", 10) || 0, 0);
-  const rows = await listGizlets(c.env, { q, category, target, tier, mark, sort, limit: limit + 1, offset });
+  const rows = await listGizlets(c.env, { q, kind, category, target, tier, mark, sort, limit: limit + 1, offset });
   return c.json({ gizlets: rows.slice(0, limit).map((g) => summary(c.env, g)), next_cursor: rows.length > limit ? String(offset + limit) : null });
 });
 
@@ -187,7 +190,7 @@ api.get(`${GIZLET}/install`, async (c) => {
     if (pending) return apiError(c, 409, "not_ready", `${r.gizlet.name} is still being checked; try again in a minute`);
     return apiError(c, 404, "no_compatible_package", `${r.gizlet.name} has no package for ${target} (${tier})`);
   }
-  return c.json({ repo: r.gizlet.repo, id: r.gizlet.app_id, name: r.gizlet.name, version: pkg.version, tag: pkg.tag, package: packageJson(c.env, pkg) }, 200, { "cache-control": "no-store" });
+  return c.json({ repo: r.gizlet.repo, id: r.gizlet.app_id, name: r.gizlet.name, kind: r.gizlet.kind, version: pkg.version, tag: pkg.tag, package: packageJson(c.env, pkg) }, 200, { "cache-control": "no-store" });
 });
 
 api.get("/v1/resolve", (c) => {

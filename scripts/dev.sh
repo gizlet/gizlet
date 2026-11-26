@@ -5,7 +5,8 @@
 #
 # GitHub is the test fixture server (tests/fixtures/server.mjs) and Postgres is in-memory
 # PGlite, so nothing touches the network and every start is fresh. A few fixture gizlets are
-# published on start, among them tests/fixtures/repos/rocket-snail; the admin token is `dev-admin`.
+# published on start, among them tests/fixtures/repos/rocket-snail and a service, and approved for
+# listing; the admin token is `dev-admin`.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -45,7 +46,12 @@ APP_KEY=$(curl -fsS "$FIXTURE/_fixture/app-key" | awk '{printf "%s\\n", $0}')
   publish fixture-org/rocket-snail v0.1.0
   publish fixture-org/hello-gizlet v0.1.0
   publish fixture-org/hello-gizlet v0.2.0
-  for repo in on-demand symlink; do curl -fsS -o /dev/null -H 'x-gizlet-host: api.gizlet.io' "$API/v1/gizlets/github.com/fixture-org/$repo" || true; done
+  for repo in on-demand symlink clock-service v2-app; do curl -fsS -o /dev/null -H 'x-gizlet-host: api.gizlet.io' "$API/v1/gizlets/github.com/fixture-org/$repo" || true; done
+  # Listing takes an editor's approval; on-demand stays link-only.
+  for repo in rocket-snail hello-gizlet clock-service v2-app; do
+    curl -fsS -o /dev/null -X POST -H 'x-gizlet-host: api.gizlet.io' -H 'authorization: Bearer dev-admin' \
+      "$API/v1/admin/gizlets/github.com/fixture-org/$repo/visibility" -d '{"visibility": "listed"}' || true
+  done
   echo "==> Sample gizlets published: http://localhost:$PORT/github.com/fixture-org/rocket-snail"
 ) &
 pids+=($!)

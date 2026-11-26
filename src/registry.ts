@@ -4,7 +4,7 @@ import type { Env, Waiter } from "./env";
 import { fetchGizletToml, NotFound, reader, type Reader, type RepoInfo } from "./github";
 import { queueMirror } from "./mirror";
 import type { RepoRef } from "./repo";
-import { compareVersions, IndexError, type GizletToml } from "./schema";
+import { compareVersions, IndexError, sameSpec, storedSpec } from "./schema";
 import { rescore } from "./score";
 
 const MISS_TTL_MS = 10 * 60 * 1000;
@@ -44,8 +44,8 @@ export async function indexRelease(env: Env, ref: RepoRef, tag: string, opts: In
   // Browsing re-indexes a release only when its gizlet.toml changed, and never re-checks a failed
   // one. A publish always does, since the packages may have been rebuilt; bytes a malware scan
   // found infected fail again when they are mirrored (src/mirror.ts), whatever the release.
-  if (existing?.status === "failed" && existing.spec_json === specJson && !opts.force) return existing;
-  const unchanged = existing && existing.spec_json === specJson && !opts.force;
+  if (existing?.status === "failed" && sameSpec(existing.spec_json, spec) && !opts.force) return existing;
+  const unchanged = existing && sameSpec(existing.spec_json, spec) && !opts.force;
   const display = opts.display ?? (opts.info ? { owner: opts.info.owner, name: opts.info.name } : undefined);
   const owner = display?.owner ?? ref.owner;
   const name = display?.name ?? ref.name;
@@ -101,11 +101,11 @@ export async function refreshLatest(env: Env, repo: string): Promise<void> {
   if (!latest) {
     await env.DB.prepare("UPDATE gizlets SET latest_tag = NULL, version = NULL WHERE repo = ?").bind(repo).run();
   } else {
-    const idx = JSON.parse(latest.spec_json) as GizletToml;
+    const idx = storedSpec(latest.spec_json);
     const targets = [...new Set(idx.packages.map((p) => p.target))].sort();
     const tiers = [...new Set(idx.packages.map((p) => p.tier))].sort();
     await env.DB.prepare(
-      `UPDATE gizlets SET app_id = ?, name = ?, names = ?, description = ?, descriptions = ?, category = ?, tags = ?, color = ?, license = ?, links = ?,
+      `UPDATE gizlets SET app_id = ?, name = ?, names = ?, description = ?, descriptions = ?, kind = ?, category = ?, tags = ?, color = ?, license = ?, links = ?,
          icon = ?, cover = ?, pattern = ?, screenshots = ?, about = ?, controls = ?, targets = ?, tiers = ?, version = ?,
          updated_at = CASE WHEN latest_tag IS ? THEN updated_at ELSE ? END, latest_tag = ?
        WHERE repo = ?`,
@@ -116,6 +116,7 @@ export async function refreshLatest(env: Env, repo: string): Promise<void> {
         JSON.stringify(idx.names),
         idx.description,
         JSON.stringify(idx.descriptions),
+        idx.kind,
         idx.category,
         JSON.stringify(idx.tags),
         idx.color,
@@ -142,21 +143,22 @@ export async function refreshLatest(env: Env, repo: string): Promise<void> {
 }
 
 /**
- * A gizlet is listed when its newest ready release passed every check without warnings,
- * and unlisted otherwise. A visibility set by an admin is left alone.
+ * Listing is an editorial decision: the checks never list a gizlet, they only say why it is not
+ * listed yet. An admin lists it (`setVisibility`), which locks the visibility, so later releases
+ * leave it alone until an admin hands it back with `auto`. Unlisted gizlets still install by link.
  */
+export const AWAITING_APPROVAL = "awaiting editorial approval";
+
 async function updateVisibility(env: Env, repo: string, newestReady: ReleaseRow | null): Promise<void> {
-  let visibility: "listed" | "unlisted" = "unlisted";
-  let reason: string | null = "no release has passed its checks yet";
+  let reason = "no release has passed its checks yet";
   if (newestReady) {
     const warnings = parse<string[]>(newestReady.warnings, []);
-    visibility = warnings.length ? "unlisted" : "listed";
-    reason = warnings.length ? `${newestReady.tag}: ${warnings.join("; ")}` : null;
+    reason = warnings.length ? `${newestReady.tag}: ${warnings.join("; ")}` : AWAITING_APPROVAL;
   }
-  await env.DB.prepare("UPDATE gizlets SET visibility = ?, visibility_reason = ? WHERE repo = ? AND visibility_locked = 0").bind(visibility, reason, repo).run();
+  await env.DB.prepare("UPDATE gizlets SET visibility = 'unlisted', visibility_reason = ? WHERE repo = ? AND visibility_locked = 0").bind(reason, repo).run();
 }
 
-/** Set by an admin, or `auto` to hand the visibility back to the checks. */
+/** Set by an admin (`listed` is the editorial approval), or `auto` to hand the visibility back to the checks, which leave it unlisted. */
 export async function setVisibility(env: Env, repo: string, visibility: "listed" | "unlisted" | "blocked" | "auto", reason: string | null): Promise<void> {
   if (visibility === "auto") {
     await env.DB.prepare("UPDATE gizlets SET visibility_locked = 0 WHERE repo = ?").bind(repo).run();

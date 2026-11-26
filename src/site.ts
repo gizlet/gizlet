@@ -124,7 +124,7 @@ site.get("/open", async (c) => {
 });
 
 site.get("/explore", async (c) =>
-  c.html(page(c, `${tr(c).explore.title} · Gizlet`, await explorePage(c.env, langOf(c), { q: c.req.query("q"), category: c.req.query("category"), cursor: c.req.query("cursor") }), { wide: true })),
+  c.html(page(c, `${tr(c).explore.title} · Gizlet`, await explorePage(c.env, langOf(c), { q: c.req.query("q"), kind: c.req.query("kind"), category: c.req.query("category"), cursor: c.req.query("cursor") }), { wide: true })),
 );
 
 /** The page was called Devices first; keep old links working. */

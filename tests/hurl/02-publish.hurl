@@ -31,8 +31,26 @@ jsonpath "$.mirrored" == true
 jsonpath "$.packages" count == 3
 jsonpath "$.packages[0].sha256" matches /^[0-9a-f]{64}$/
 jsonpath "$.packages[0].size" > 0
-jsonpath "$.visibility" == "listed"
+jsonpath "$.visibility" == "unlisted"
+jsonpath "$.visibility_reason" == "awaiting editorial approval"
 header "cache-control" == "no-store"
+
+# Passing the checks is not enough to be listed: an editor approves it first.
+GET {{base}}/v1/gizlets?q=hello
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.gizlets" count == 0
+
+POST {{base}}/v1/admin/gizlets/github.com/fixture-org/hello-gizlet/visibility
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{admin_token}}
+{"visibility": "listed"}
+HTTP 200
+[Asserts]
+jsonpath "$.visibility" == "listed"
+jsonpath "$.visibility_reason" == null
+jsonpath "$.locked" == true
 
 # The newer release, published by tag in the body.
 GET {{fixture}}/token?repo=fixture-org/hello-gizlet&ref=refs/heads/main
@@ -66,12 +84,14 @@ jsonpath "$.packages" count == 3
 jsonpath "$.icon_url" == "https://dl.gizlet.io/github.com/fixture-org/hello-gizlet/v0.2.0/store/icon.png"
 jsonpath "$.packages[0].entry" == "game"
 
-# Listed gizlets are searchable.
+# Approved gizlets stay listed through new releases, and are searchable.
 GET {{base}}/v1/gizlets?q=hello
 x-gizlet-host: api.gizlet.io
 HTTP 200
 [Asserts]
 jsonpath "$.gizlets[0].repo" == "github.com/fixture-org/hello-gizlet"
+jsonpath "$.gizlets[0].kind" == "app"
+jsonpath "$.gizlets[0].category" == "game"
 
 # A tag with no gizlet.toml is refused.
 GET {{fixture}}/token?repo=fixture-org/hello-gizlet&ref=refs/tags/v9.9.9

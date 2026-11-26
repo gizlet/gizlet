@@ -1,5 +1,5 @@
 import type { Env } from "./env";
-import { compareVersions, tierRunsOn, type Control, type Tier } from "./schema";
+import { compareVersions, tierRunsOn, type Control, type Kind, type Tier } from "./schema";
 import { ratingAverage } from "./score";
 
 export type Visibility = "unlisted" | "listed" | "blocked";
@@ -15,6 +15,8 @@ export interface GizletRow {
   names: string;
   description: string | null;
   descriptions: string;
+  kind: Kind;
+  /** game or app; meaningless for a service. */
   category: string;
   tags: string;
   color: string | null;
@@ -111,7 +113,9 @@ export function summary(env: Env, g: GizletRow) {
     names: parse<Record<string, string>>(g.names, {}),
     description: g.description,
     descriptions: parse<Record<string, string>>(g.descriptions, {}),
-    category: g.category,
+    kind: g.kind,
+    /** How an app is presented: game or app. Services have none. */
+    category: g.kind === "service" ? null : g.category,
     tags: parse<string[]>(g.tags, []),
     color: g.color,
     license: g.license,
@@ -218,6 +222,8 @@ export async function pickInstall(env: Env, repo: string, target: string, tier: 
 
 export interface ListQuery {
   q?: string;
+  kind?: Kind;
+  /** game or app; only apps have one. */
   category?: string;
   target?: string;
   tier?: string;
@@ -253,7 +259,8 @@ export async function listGizlets(env: Env, query: ListQuery): Promise<GizletRow
     const cols = ["lower(name)", "lower(names)", "lower(coalesce(description,''))", "lower(descriptions)", "tags", "repo"];
     where.push(`(${cols.map((c) => `${c} LIKE ${p} ESCAPE '\\'`).join(" OR ")})`);
   }
-  if (query.category) where.push(`category = ${bind(query.category)}`);
+  if (query.kind) where.push(`kind = ${bind(query.kind)}`);
+  if (query.category) where.push(`kind = 'app' AND category = ${bind(query.category)}`);
   if (query.owner) where.push(`owner = ${bind(query.owner)} COLLATE NOCASE`);
   if (query.mark) where.push(`EXISTS (SELECT 1 FROM json_each(gizlets.marks) WHERE value = ${bind(query.mark)})`);
   if (query.target) where.push(`EXISTS (SELECT 1 FROM json_each(gizlets.targets) WHERE value = ${bind(query.target)})`);
@@ -293,8 +300,9 @@ export async function featured(env: Env) {
   const sections = [
     ...curated.filter((c) => c.layout !== "hero"),
     section("new", "New & updated", { "zh-CN": "最新上架与更新" }, "row", recent.slice(0, 12)),
-    section("games", "Games", { "zh-CN": "游戏" }, "grid", recent.filter((g) => g.category === "game")),
-    section("apps", "Apps & tools", { "zh-CN": "应用与工具" }, "grid", recent.filter((g) => g.category === "app")),
+    section("games", "Games", { "zh-CN": "游戏" }, "grid", recent.filter((g) => g.kind === "app" && g.category === "game")),
+    section("apps", "Apps & tools", { "zh-CN": "应用与工具" }, "grid", recent.filter((g) => g.kind === "app" && g.category === "app")),
+    section("services", "Services", { "zh-CN": "服务" }, "grid", recent.filter((g) => g.kind === "service")),
     section("popular", "Most downloaded", { "zh-CN": "下载最多" }, "row", popular),
   ].filter((s) => s.gizlets.length > 0);
   return { hero: hero.length ? hero : recent.slice(0, 3).map((g) => summary(env, g)), sections };

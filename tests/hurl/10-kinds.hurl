@@ -1,0 +1,359 @@
+# Kinds and manifest schemas: apps (schema 1, schema 1 left out, schema 2) and schema 2 services,
+# listed only once an editor approves them, and filtered by kind in the API and on Explore.
+
+# A schema 2 service is indexed, mirrored and checked like an app.
+GET {{base}}/v1/gizlets/github.com/fixture-org/clock-service
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.kind" == "service"
+jsonpath "$.category" == null
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/clock-service/releases/v1.0.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "ready"
+jsonpath "$.warnings" count == 0
+jsonpath "$.visibility" == "unlisted"
+jsonpath "$.visibility_reason" == "awaiting editorial approval"
+
+# Not listed before approval, though a device can install it by link.
+GET {{base}}/v1/gizlets?kind=service
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.gizlets" count == 0
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/clock-service/install?target=aarch64-unknown-linux-gnu&tier=lite
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Captures]
+service_sha: jsonpath "$.package.sha256"
+[Asserts]
+jsonpath "$.kind" == "service"
+jsonpath "$.package.file" == "dev.fixture.clockservice-1.0.0-aarch64-unknown-linux-gnu-lite.gzl"
+
+POST {{base}}/v1/admin/gizlets/github.com/fixture-org/clock-service/visibility
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{admin_token}}
+{"visibility": "listed"}
+HTTP 200
+[Asserts]
+jsonpath "$.visibility" == "listed"
+jsonpath "$.locked" == true
+
+GET {{base}}/v1/gizlets?kind=service
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.gizlets" count == 1
+jsonpath "$.gizlets[0].repo" == "github.com/fixture-org/clock-service"
+jsonpath "$.gizlets[0].kind" == "service"
+jsonpath "$.gizlets[0].category" == null
+
+# A schema 2 app, and an app whose manifest.json leaves out its schema (schema 1).
+GET {{base}}/v1/gizlets/github.com/fixture-org/v2-app
+x-gizlet-host: api.gizlet.io
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/v2-app/releases/v1.0.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "ready"
+jsonpath "$.visibility" == "unlisted"
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/no-schema
+x-gizlet-host: api.gizlet.io
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/no-schema/releases/v1.0.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "ready"
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/v2-app
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.kind" == "app"
+jsonpath "$.category" == "app"
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/no-schema
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.kind" == "app"
+jsonpath "$.category" == "game"
+
+POST {{base}}/v1/admin/gizlets/github.com/fixture-org/v2-app/visibility
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{admin_token}}
+{"visibility": "listed"}
+HTTP 200
+
+POST {{base}}/v1/admin/gizlets/github.com/fixture-org/no-schema/visibility
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{admin_token}}
+{"visibility": "listed"}
+HTTP 200
+
+# Manifests that disagree with gizlet.toml, or that this release cannot read, fail their release.
+GET {{base}}/v1/gizlets/github.com/fixture-org/service-as-v1
+x-gizlet-host: api.gizlet.io
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/service-as-v1/releases/v1.0.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "failed"
+jsonpath "$.error" contains "manifest.json is an app, gizlet.toml says kind \"service\""
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/v2-no-kind
+x-gizlet-host: api.gizlet.io
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/v2-no-kind/releases/v1.0.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "failed"
+jsonpath "$.error" contains "schema 2 must name its kind"
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/v1-service-kind
+x-gizlet-host: api.gizlet.io
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/v1-service-kind/releases/v1.0.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "failed"
+jsonpath "$.error" contains "schema 1 is always an app"
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/schema-3
+x-gizlet-host: api.gizlet.io
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/schema-3/releases/v1.0.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "failed"
+jsonpath "$.error" contains "only 1 and 2 are supported"
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/schema-3/install?target=aarch64-unknown-linux-gnu
+x-gizlet-host: api.gizlet.io
+HTTP 404
+[Asserts]
+jsonpath "$.error.code" == "failed_checks"
+
+# Filtering by kind, alone and with search and category; a category is an app's.
+GET {{base}}/v1/gizlets?kind=app&limit=100
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.gizlets[?(@.kind == 'service')]" not exists
+jsonpath "$.gizlets[?(@.repo == 'github.com/fixture-org/v2-app')]" exists
+jsonpath "$.gizlets[?(@.repo == 'github.com/fixture-org/no-schema')]" exists
+
+GET {{base}}/v1/gizlets?kind=app&q=v2-app
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.gizlets" count == 1
+jsonpath "$.gizlets[0].repo" == "github.com/fixture-org/v2-app"
+
+GET {{base}}/v1/gizlets?kind=service&q=v2-app
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.gizlets" count == 0
+
+GET {{base}}/v1/gizlets?category=app&limit=100
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.gizlets[?(@.kind == 'service')]" not exists
+jsonpath "$.gizlets[?(@.repo == 'github.com/fixture-org/v2-app')]" exists
+
+GET {{base}}/v1/gizlets?kind=app&limit=1
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Captures]
+next: jsonpath "$.next_cursor"
+[Asserts]
+jsonpath "$.gizlets" count == 1
+jsonpath "$.next_cursor" == "1"
+
+GET {{base}}/v1/gizlets?kind=app&limit=1&cursor={{next}}
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.gizlets" count == 1
+jsonpath "$.gizlets[0].kind" == "app"
+
+GET {{base}}/v1/gizlets?kind=rom
+x-gizlet-host: api.gizlet.io
+HTTP 400
+[Asserts]
+jsonpath "$.error.message" == "kind must be app or service"
+
+GET {{base}}/v1/gizlets?kind=service&category=game
+x-gizlet-host: api.gizlet.io
+HTTP 400
+
+GET {{base}}/v1/featured
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.sections[?(@.id == 'services')].gizlets[0].repo" == "github.com/fixture-org/clock-service"
+jsonpath "$.sections[?(@.id == 'apps')].gizlets[?(@.kind == 'service')]" not exists
+jsonpath "$.sections[?(@.id == 'games')].gizlets[?(@.kind == 'service')]" not exists
+
+# Explore: kind tabs, a category row for apps, search and pages (EXPLORE_PAGE_SIZE is 2 here).
+GET {{base}}/explore?kind=service&lang=en
+x-gizlet-host: gizlet.io
+HTTP 200
+[Asserts]
+xpath "string(//nav[@aria-label='Kind']/a[@aria-current='page'])" == "Services"
+xpath "count(//nav[@aria-label='Category'])" == 0
+xpath "count(//a[contains(@class, 'cart')])" == 1
+body contains "href=\"/github.com/fixture-org/clock-service\""
+xpath "string(//a[@href='/github.com/fixture-org/clock-service']//span[@class='meta']/span[1])" == "Service"
+xpath "string(//form[@role='search']//input[@name='kind']/@value)" == "service"
+
+GET {{base}}/explore?kind=service&q=clock&lang=en
+x-gizlet-host: gizlet.io
+HTTP 200
+[Asserts]
+body contains "href=\"/github.com/fixture-org/clock-service\""
+
+GET {{base}}/explore?kind=service&q=snail&lang=en
+x-gizlet-host: gizlet.io
+HTTP 200
+[Asserts]
+xpath "count(//a[contains(@class, 'cart')])" == 0
+body contains "No gizlets match."
+
+GET {{base}}/explore?kind=app&lang=en
+x-gizlet-host: gizlet.io
+HTTP 200
+[Captures]
+more: xpath "string(//p[@class='more']/a/@href)"
+[Asserts]
+xpath "string(//nav[@aria-label='Kind']/a[@aria-current='page'])" == "Apps"
+xpath "string(//nav[@aria-label='Category']/a[@aria-current='page'])" == "All apps"
+xpath "count(//a[contains(@class, 'cart')])" == 2
+body not contains "href=\"/github.com/fixture-org/clock-service\""
+xpath "string(//p[@class='more']/a/@href)" == "/explore?kind=app&cursor=2"
+
+GET {{base}}{{more}}&lang=en
+x-gizlet-host: gizlet.io
+HTTP 200
+[Asserts]
+xpath "string(//nav[@aria-label='Kind']/a[@aria-current='page'])" == "Apps"
+xpath "count(//a[contains(@class, 'cart')])" == 2
+body not contains "href=\"/github.com/fixture-org/clock-service\""
+
+# Search keeps the kind, and its pages keep both.
+GET {{base}}/explore?kind=app&q=fixture&lang=en
+x-gizlet-host: gizlet.io
+HTTP 200
+[Asserts]
+xpath "string(//form[@role='search']//input[@name='kind']/@value)" == "app"
+xpath "string(//p[@class='more']/a/@href)" == "/explore?q=fixture&kind=app&cursor=2"
+
+# Categories filter apps; a link with only a category, as before kinds, means apps.
+GET {{base}}/explore?category=game&lang=en
+x-gizlet-host: gizlet.io
+HTTP 200
+[Asserts]
+xpath "string(//nav[@aria-label='Kind']/a[@aria-current='page'])" == "Apps"
+xpath "string(//nav[@aria-label='Category']/a[@aria-current='page'])" == "Games"
+body not contains "href=\"/github.com/fixture-org/v2-app\""
+
+GET {{base}}/explore?kind=app&category=app&lang=en
+x-gizlet-host: gizlet.io
+HTTP 200
+[Asserts]
+xpath "string(//nav[@aria-label='Category']/a[@aria-current='page'])" == "Apps & tools"
+body contains "href=\"/github.com/fixture-org/v2-app\""
+body not contains "href=\"/github.com/fixture-org/clock-service\""
+
+# A service has no category: one in the link is ignored.
+GET {{base}}/explore?kind=service&category=game&lang=en
+x-gizlet-host: gizlet.io
+HTTP 200
+[Asserts]
+body contains "href=\"/github.com/fixture-org/clock-service\""
+
+GET {{base}}/github.com/fixture-org/clock-service?lang=en
+x-gizlet-host: gizlet.io
+HTTP 200
+[Asserts]
+xpath "string(//p[@class='kicker'])" startsWith "Service"
+
+# Blocking an approved gizlet takes it out of every list and off the download host.
+POST {{base}}/v1/admin/gizlets/github.com/fixture-org/clock-service/visibility
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{admin_token}}
+{"visibility": "blocked", "reason": "test block"}
+HTTP 200
+
+GET {{base}}/v1/gizlets?kind=service
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.gizlets" count == 0
+
+GET {{base}}/explore?kind=service&lang=en
+x-gizlet-host: gizlet.io
+HTTP 200
+[Asserts]
+body not contains "href=\"/github.com/fixture-org/clock-service\""
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/clock-service/install?target=aarch64-unknown-linux-gnu&tier=lite
+x-gizlet-host: api.gizlet.io
+HTTP 403
+
+GET {{base}}/github.com/fixture-org/clock-service/v1.0.0/dev.fixture.clockservice-1.0.0-aarch64-unknown-linux-gnu-lite.gzl?sha256={{service_sha}}
+x-gizlet-host: dl.gizlet.io
+HTTP 403
+
+# Handing it back to the checks does not list it again: that takes a new approval.
+POST {{base}}/v1/admin/gizlets/github.com/fixture-org/clock-service/visibility
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{admin_token}}
+{"visibility": "auto"}
+HTTP 200
+[Asserts]
+jsonpath "$.visibility" == "unlisted"
+jsonpath "$.visibility_reason" == "awaiting editorial approval"
+jsonpath "$.locked" == false
+
+GET {{base}}/v1/gizlets?kind=service
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.gizlets" count == 0

@@ -23,6 +23,8 @@ export interface Env {
   GITHUB_APP_SLUG: string;
   /** A viewed gizlet is checked for a new release at most this often. */
   REFRESH_AFTER_SECONDS: string;
+  /** Gizlets per Explore page; 24 when unset (local tests use fewer). */
+  EXPLORE_PAGE_SIZE?: string;
   OIDC_ISSUER: string;
   OIDC_AUDIENCE: string;
   /** Override for the issuer's JWKS URL (local tests only). */

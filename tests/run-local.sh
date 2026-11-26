@@ -65,6 +65,7 @@ pnpm exec wrangler dev --port "$DEV_PORT" --ip 127.0.0.1 --persist-to "$STATE/wr
   --var "GITHUB_APP_CLIENT_ID:Iv-fixture" \
   --var "GITHUB_APP_PRIVATE_KEY:$APP_KEY" \
   --var "REFRESH_AFTER_SECONDS:3" \
+  --var "EXPLORE_PAGE_SIZE:2" \
   --var "OIDC_ISSUER:$FIXTURE" \
   --var "OIDC_JWKS_URL:$FIXTURE/.well-known/jwks" \
   --var "ADMIN_TOKEN:$ADMIN_TOKEN" \

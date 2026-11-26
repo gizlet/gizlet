@@ -15,7 +15,7 @@ import { readCapped, reader, UpstreamError } from "./github";
 import { artKey } from "./r2";
 import { deletePrefix, newPackageKey, packagesPrefix, pruneRevisions } from "./r2";
 import { refreshLatest } from "./registry";
-import { compareVersions, MAX_PACKAGE_BYTES, type GizletToml } from "./schema";
+import { compareVersions, MAX_PACKAGE_BYTES, storedSpec, type GizletToml } from "./schema";
 
 const MAX_ART_BYTES = 10 * 1024 * 1024;
 const MAX_ATTEMPTS = 5;
@@ -128,7 +128,7 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
   if (rel.status === "ready" || rel.status === "failed") return settle(env, job, rel.status);
   const g = await env.DB.prepare("SELECT owner, name_repo FROM gizlets WHERE repo = ?").bind(job.repo).first<{ owner: string; name_repo: string }>();
   if (!g) return;
-  const spec = JSON.parse(rel.spec_json) as GizletToml;
+  const spec = storedSpec(rel.spec_json);
   const { results: pkgs } = await env.DB.prepare("SELECT * FROM packages WHERE repo = ? AND tag = ? AND revision = ?").bind(job.repo, job.tag, job.revision).all<PackageRow>();
   const warnings: string[] = [];
   try {
@@ -180,6 +180,7 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
         id: spec.id,
         name: spec.name,
         version: spec.version,
+        kind: spec.kind,
         runtime: spec.runtime,
         target: p.target,
         tier: p.tier,
