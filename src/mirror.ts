@@ -4,30 +4,23 @@
  * Each indexing of a release bumps its `revision`, and every job carries the revision it was
  * queued for. A job for an older revision does nothing, and every status change is conditional
  * on the revision, so a job that was already running when the tag was republished cannot mark
- * the new index ready. Packages are stored under their sha256, so jobs for different revisions
- * never overwrite each other's files.
+ * the new gizlet.toml ready. A package's size and sha256 are learnt here, as it streams from
+ * GitHub into R2. Each mirror attempt writes its own R2 object, so jobs never overwrite each
+ * other's files, and a revision's objects are deleted once a newer one is decided.
  */
 import { checkPackage } from "./check";
 import type { PackageRow, ReleaseRow } from "./db";
 import type { Env, MirrorJob } from "./env";
 import { readCapped, reader, UpstreamError } from "./github";
+import { artKey } from "./r2";
+import { deletePrefix, newPackageKey, packagesPrefix, pruneRevisions } from "./r2";
 import { refreshLatest } from "./registry";
-import { compareVersions, MAX_PACKAGE_BYTES, type ReleaseIndex } from "./schema";
+import { compareVersions, MAX_PACKAGE_BYTES, type GizletToml } from "./schema";
 
 const MAX_ART_BYTES = 10 * 1024 * 1024;
 const MAX_ATTEMPTS = 5;
 /** A release this long in pending, mirroring or checking has lost its job; queue it again. */
 export const STUCK_AFTER_MS = 30 * 60 * 1000;
-
-/** R2 key of store art (icon, cover, screenshots, about pages). */
-export function artKey(repo: string, tag: string, file: string): string {
-  return `${repo}/${tag}/${file}`;
-}
-
-/** R2 key of a package: under its sha256, so each indexed revision of a file has its own object. */
-export function packageKey(repo: string, tag: string, sha256: string, file: string): string {
-  return `${repo}/${tag}/${sha256}/${file}`;
-}
 
 const CONTENT_TYPES: Record<string, string> = {
   png: "image/png",
@@ -42,10 +35,10 @@ export function contentType(file: string): string {
   return CONTENT_TYPES[file.split(".").pop()!.toLowerCase()] ?? "application/octet-stream";
 }
 
-/** Asset names a release index names: its packages and store art. Nothing else is served. */
-export function indexedFiles(index: ReleaseIndex): { packages: Set<string>; art: Set<string> } {
-  const packages = new Set(index.packages.map((p) => p.file));
-  const art = [index.icon, index.cover, ...index.screenshots, ...Object.values(index.about)].filter((f): f is string => !!f && !packages.has(f));
+/** What gizlet.toml names: its packages (release assets) and store art (repository paths). Nothing else is served. */
+export function indexedFiles(spec: GizletToml): { packages: Set<string>; art: Set<string> } {
+  const packages = new Set(spec.packages.map((p) => p.file));
+  const art = [spec.icon, spec.cover, spec.pattern, ...spec.screenshots, ...Object.values(spec.about)].filter((f): f is string => !!f);
   return { packages, art: new Set(art) };
 }
 
@@ -54,8 +47,10 @@ class Rejected extends Error {}
 /** The release was indexed again while this job ran. */
 class Superseded extends Error {}
 
-/** Stream a GitHub release asset into R2 under `key`; R2 rejects it unless it matches `sha256`. */
-async function copyToR2(env: Env, res: Response, key: string, file: string, sha256: string, size: number): Promise<void> {
+const hex = (b: ArrayBuffer) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
+
+/** Stream a GitHub release asset into R2 under `key`, learning its size and sha256 on the way. */
+async function copyToR2(env: Env, res: Response, key: string, file: string): Promise<{ size: number; sha256: string }> {
   if (res.status === 404) {
     await res.body?.cancel();
     throw new Rejected(`${file} is missing from the GitHub release`);
@@ -64,37 +59,38 @@ async function copyToR2(env: Env, res: Response, key: string, file: string, sha2
     await res.body?.cancel();
     throw new UpstreamError(`GitHub answered ${res.status} for ${file}`);
   }
+  const size = Number(res.headers.get("content-length") ?? NaN);
+  if (!Number.isSafeInteger(size) || size <= 0) {
+    await res.body.cancel();
+    throw new UpstreamError(`GitHub sent ${file} without its length`);
+  }
   if (size > MAX_PACKAGE_BYTES) {
     await res.body.cancel();
     throw new Rejected(`${file} is larger than ${MAX_PACKAGE_BYTES} bytes`);
   }
-  const fixed = new FixedLengthStream(size);
-  const piping = res.body.pipeTo(fixed.writable).catch((e: unknown) => {
-    throw new Rejected(`${file} is not ${size} bytes: ${String(e)}`);
+  // Hash each chunk on its way to R2; awaiting the digest's writer keeps the two in step.
+  const digest = new crypto.DigestStream("SHA-256");
+  const hasher = digest.getWriter();
+  const hashing = new TransformStream<Uint8Array, Uint8Array>({
+    async transform(chunk, out) {
+      await hasher.write(chunk);
+      out.enqueue(chunk);
+    },
+    async flush() {
+      await hasher.close();
+    },
   });
-  try {
-    await Promise.all([
-      env.BUCKET.put(key, fixed.readable, {
-        sha256,
-        httpMetadata: { contentType: contentType(file), contentDisposition: `attachment; filename="${file}"` },
-        customMetadata: { sha256 },
-      }),
-      piping,
-    ]);
-  } catch (e) {
-    if (e instanceof Rejected) throw e;
-    if (/checksum|sha-?256|digest|length/i.test(String(e))) throw new Rejected(`${file} does not match its sha256`);
-    throw e;
-  }
-}
-
-export async function deletePrefix(env: Env, prefix: string): Promise<void> {
-  let cursor: string | undefined;
-  do {
-    const list = await env.BUCKET.list({ prefix, cursor });
-    if (list.objects.length) await env.BUCKET.delete(list.objects.map((o) => o.key));
-    cursor = list.truncated ? list.cursor : undefined;
-  } while (cursor);
+  const fixed = new FixedLengthStream(size);
+  const piping = res.body.pipeThrough(hashing).pipeTo(fixed.writable).catch((e: unknown) => {
+    throw new UpstreamError(`${file} did not arrive whole: ${String(e)}`);
+  });
+  await Promise.all([
+    env.BUCKET.put(key, fixed.readable, {
+      httpMetadata: { contentType: contentType(file), contentDisposition: `attachment; filename="${file}"` },
+    }),
+    piping,
+  ]);
+  return { size, sha256: hex(await digest.digest) };
 }
 
 /** Packages of one revision whose bytes a malware scan found infected. */
@@ -132,7 +128,7 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
   if (rel.status === "ready" || rel.status === "failed") return settle(env, job, rel.status);
   const g = await env.DB.prepare("SELECT owner, name_repo FROM gizlets WHERE repo = ?").bind(job.repo).first<{ owner: string; name_repo: string }>();
   if (!g) return;
-  const index = JSON.parse(rel.index_json) as ReleaseIndex;
+  const spec = JSON.parse(rel.spec_json) as GizletToml;
   const { results: pkgs } = await env.DB.prepare("SELECT * FROM packages WHERE repo = ? AND tag = ? AND revision = ?").bind(job.repo, job.tag, job.revision).all<PackageRow>();
   const warnings: string[] = [];
   try {
@@ -141,15 +137,35 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
     if (!(await setStatus(env, job, "mirroring", null))) throw new Superseded();
     const src = await reader(env, { owner: g.owner, name: g.name_repo, key: job.repo });
     for (const p of pkgs) {
-      const key = packageKey(job.repo, job.tag, p.sha256, p.file);
-      if ((await env.BUCKET.head(key))?.customMetadata?.sha256 === p.sha256) continue;
-      await copyToR2(env, await src.asset(job.tag, p.file), key, p.file, p.sha256, p.size);
+      // Mirrored already, by an earlier attempt or another delivery of this job.
+      if (p.object && p.sha256 && p.size && (await env.BUCKET.head(p.object))?.size === p.size) continue;
+      const key = newPackageKey(job.repo, job.tag, job.revision, p.file);
+      const got = await copyToR2(env, await src.asset(job.tag, p.file), key, p.file);
+      // The first attempt to finish is the package; a later one drops its copy and uses that one.
+      const won = await env.DB.prepare(
+        "UPDATE packages SET size = ?, sha256 = ?, object = ? WHERE repo = ? AND tag = ? AND file = ? AND revision = ? AND object IS NULL",
+      )
+        .bind(got.size, got.sha256, key, job.repo, job.tag, p.file, job.revision)
+        .run();
+      if (won.meta.changes > 0) {
+        Object.assign(p, got, { object: key });
+      } else {
+        await env.BUCKET.delete(key);
+        const mine = await env.DB.prepare("SELECT size, sha256, object FROM packages WHERE repo = ? AND tag = ? AND file = ? AND revision = ?")
+          .bind(job.repo, job.tag, p.file, job.revision)
+          .first<Pick<PackageRow, "size" | "sha256" | "object">>();
+        if (!mine?.object) throw new Superseded();
+        Object.assign(p, mine);
+      }
+      // Bytes a malware scan found infected, in any release, are never served again.
+      const infected = await infectedError(env, job);
+      if (infected) throw new Rejected(infected);
     }
-    for (const file of indexedFiles(index).art) {
-      const res = await src.asset(job.tag, file);
+    for (const file of indexedFiles(spec).art) {
+      const res = await src.file(job.tag, file);
       if (!res.ok) {
         await res.body?.cancel();
-        warnings.push(`${file} is missing from the GitHub release`);
+        warnings.push(`${file} is missing from the repository at ${job.tag}`);
         continue;
       }
       const bytes = await readCapped(res, MAX_ART_BYTES).catch(() => null);
@@ -160,13 +176,25 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
     if (!(await setStatus(env, job, "checking", null))) throw new Superseded();
     const errors: string[] = [];
     for (const p of pkgs) {
-      const found = await checkPackage(env, packageKey(job.repo, job.tag, p.sha256, p.file), p.file, p.size, { id: index.id, version: index.version, target: p.target });
+      const found = await checkPackage(env, p.object!, p.file, p.size!, {
+        id: spec.id,
+        name: spec.name,
+        version: spec.version,
+        runtime: spec.runtime,
+        target: p.target,
+        tier: p.tier,
+        entry: p.entry,
+      });
       errors.push(...found.errors);
       warnings.push(...found.warnings);
     }
     if (errors.length) throw new Rejected(errors.slice(0, 10).join("; "));
   } catch (e) {
-    if (e instanceof Superseded) return;
+    if (e instanceof Superseded) {
+      // A newer revision is being indexed; nothing this job wrote will be served.
+      await deletePrefix(env, packagesPrefix(job.repo, job.tag, job.revision));
+      return;
+    }
     if (e instanceof Rejected || attempt >= MAX_ATTEMPTS) {
       if (!(await setStatus(env, job, "failed", e instanceof Error ? e.message : String(e)))) return;
       return settle(env, job, "failed");
@@ -174,8 +202,8 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
     await setStatus(env, job, "pending", null);
     throw e;
   }
-  if (!index.icon) warnings.push("gizlet.json names no icon");
-  if (!index.description) warnings.push("gizlet.json has no description");
+  if (!spec.icon) warnings.push("gizlet.toml names no icon");
+  if (!spec.description) warnings.push("gizlet.toml has no description");
   if (!(await setStatus(env, job, "ready", null, warnings, true))) {
     // Superseded, failed by a malware report meanwhile, or its bytes were reported in another release.
     const infected = await infectedError(env, job);
@@ -206,7 +234,7 @@ export async function reportInfected(env: Env, job: MirrorJob, report: string, e
       job.revision,
     ),
     env.DB.prepare(
-      "INSERT OR IGNORE INTO infected (sha256, repo, tag, error, created_at) SELECT sha256, repo, tag, ?, ? FROM packages WHERE repo = ? AND tag = ? AND revision = ? AND EXISTS (SELECT 1 FROM releases WHERE repo = ?3 AND tag = ?4 AND revision = ?5)",
+      "INSERT OR IGNORE INTO infected (sha256, repo, tag, error, created_at) SELECT sha256, repo, tag, ?, ? FROM packages WHERE repo = ? AND tag = ? AND revision = ? AND sha256 IS NOT NULL AND EXISTS (SELECT 1 FROM releases WHERE repo = ?3 AND tag = ?4 AND revision = ?5)",
     ).bind(error, now, job.repo, job.tag, job.revision),
     env.DB.prepare(`UPDATE releases SET status = 'failed', error = ?, updated_at = ? WHERE status != 'failed' AND EXISTS (${INFECTED_PACKAGES})`).bind(error, now),
   ])) as D1Result[];
@@ -239,11 +267,9 @@ export async function reportInfected(env: Env, job: MirrorJob, report: string, e
 async function settle(env: Env, job: MirrorJob, status: "ready" | "failed"): Promise<void> {
   if (status === "failed") {
     // Nothing of a failed release is served, so its packages need not stay in R2.
-    const { results } = await env.DB.prepare("SELECT file, sha256 FROM packages WHERE repo = ? AND tag = ? AND revision = ?")
-      .bind(job.repo, job.tag, job.revision)
-      .all<Pick<PackageRow, "file" | "sha256">>();
-    await Promise.all(results.map((p) => env.BUCKET.delete(packageKey(job.repo, job.tag, p.sha256, p.file))));
+    await deletePrefix(env, packagesPrefix(job.repo, job.tag, job.revision));
   }
+  await pruneRevisions(env, job.repo, job.tag, job.revision);
   await refreshLatest(env, job.repo);
   if (status === "ready") await pruneMirrors(env, job.repo);
 }
@@ -278,3 +304,5 @@ export async function pruneMirrors(env: Env, repo: string): Promise<void> {
     await env.DB.prepare("UPDATE releases SET mirrored = 0 WHERE repo = ? AND tag = ? AND revision = ?").bind(repo, r.tag, r.revision).run();
   }
 }
+
+export { artKey, deletePrefix } from "./r2";

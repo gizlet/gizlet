@@ -1,10 +1,10 @@
 /** Indexing releases into the registry, and deciding what is listed. */
 import { parse, type GizletRow, type ReleaseRow } from "./db";
 import type { Env, Waiter } from "./env";
-import { fetchIndex, NotFound, reader, type Reader, type RepoInfo } from "./github";
+import { fetchGizletToml, NotFound, reader, type Reader, type RepoInfo } from "./github";
 import { queueMirror } from "./mirror";
 import type { RepoRef } from "./repo";
-import { compareVersions, IndexError, type ReleaseIndex } from "./schema";
+import { compareVersions, IndexError, type GizletToml } from "./schema";
 import { rescore } from "./score";
 
 const MISS_TTL_MS = 10 * 60 * 1000;
@@ -21,38 +21,35 @@ export interface IndexOptions {
   repositoryId?: number;
   /** Display casing of owner/name, e.g. from the OIDC `repository` claim. */
   display?: { owner: string; name: string };
-  /** Re-check a release that failed before (CI re-publishing the same tag). */
-  retryFailed?: boolean;
+  /**
+   * Index the release again even when its gizlet.toml has not changed: a publish from CI, whose
+   * packages may have been rebuilt, or a release that failed before.
+   */
+  force?: boolean;
   /** How to read the repository; made on demand when not given. */
   reader?: Reader;
   /** What the GitHub API says about the repository (through the app only). */
   info?: RepoInfo | null;
 }
 
-/** Record a release from its gizlet.json, point the gizlet at its newest release and queue mirroring. */
+/** Record a release from its gizlet.toml, point the gizlet at its newest release and queue mirroring. */
 export async function indexRelease(env: Env, ref: RepoRef, tag: string, opts: IndexOptions = {}): Promise<ReleaseRow> {
   const src = opts.reader ?? (await reader(env, ref));
-  const index = await fetchIndex(src, ref, tag);
+  const spec = await fetchGizletToml(src, ref, tag);
   if (!/^v?\d/.test(tag)) throw new IndexError(`tag ${tag} must be v<version>`);
-  if (tag.replace(/^v/, "") !== index.version) throw new IndexError(`tag ${tag} does not match gizlet.json version ${index.version}`);
+  if (tag.replace(/^v/, "") !== spec.version) throw new IndexError(`tag ${tag} does not match gizlet.toml version ${spec.version}`);
   const now = Date.now();
-  const indexJson = JSON.stringify(index);
+  const specJson = JSON.stringify(spec);
   const existing = await env.DB.prepare("SELECT * FROM releases WHERE repo = ? AND tag = ?").bind(ref.key, tag).first<ReleaseRow>();
-  // A failed release is re-checked only by an explicit publish, never by browsing; one a malware
-  // scan found infected never is, while its index (and so its packages' sha256) is the same.
-  if (existing?.status === "failed" && existing.index_json === indexJson && (!opts.retryFailed || existing.scan === "infected")) return existing;
-  const unchanged = existing && existing.index_json === indexJson && existing.status !== "failed";
+  // Browsing re-indexes a release only when its gizlet.toml changed, and never re-checks a failed
+  // one. A publish always does, since the packages may have been rebuilt; bytes a malware scan
+  // found infected fail again when they are mirrored (src/mirror.ts), whatever the release.
+  if (existing?.status === "failed" && existing.spec_json === specJson && !opts.force) return existing;
+  const unchanged = existing && existing.spec_json === specJson && !opts.force;
   const display = opts.display ?? (opts.info ? { owner: opts.info.owner, name: opts.info.name } : undefined);
   const owner = display?.owner ?? ref.owner;
   const name = display?.name ?? ref.name;
   const isPrivate = opts.info ? (opts.info.private ? 1 : 0) : null;
-  // Bytes a malware scan found infected stay failed, whatever else the new index changes.
-  const shas = index.packages.map((p) => p.sha256);
-  const infected = unchanged || !shas.length
-    ? null
-    : await env.DB.prepare(`SELECT error FROM infected WHERE sha256 IN (${shas.map(() => "?").join(", ")}) LIMIT 1`)
-        .bind(...shas)
-        .first<{ error: string }>();
 
   const stmts: D1PreparedStatement[] = [
     env.DB.prepare(
@@ -63,32 +60,32 @@ export async function indexRelease(env: Env, ref: RepoRef, tag: string, opts: In
          owner = CASE WHEN ?10 THEN excluded.owner ELSE gizlets.owner END,
          name_repo = CASE WHEN ?10 THEN excluded.name_repo ELSE gizlets.name_repo END,
          private = coalesce(?11, gizlets.private)`,
-    ).bind(ref.key, owner, name, opts.repositoryId ?? opts.info?.id ?? null, index.id, index.name, now, now, now, display ? 1 : 0, isPrivate),
+    ).bind(ref.key, owner, name, opts.repositoryId ?? opts.info?.id ?? null, spec.id, spec.name, now, now, now, display ? 1 : 0, isPrivate),
     env.DB.prepare("DELETE FROM misses WHERE repo = ?").bind(ref.key),
   ];
   if (!unchanged) {
     stmts.push(
       env.DB.prepare(
-        `INSERT INTO releases (repo, tag, version, status, error, warnings, index_json, mirrored, published_at, updated_at, scan)
-         VALUES (?, ?, ?, ?, ?, '[]', ?, 0, ?, ?, ?)
-         ON CONFLICT (repo, tag) DO UPDATE SET version = excluded.version, status = excluded.status, error = excluded.error, warnings = '[]',
-           index_json = excluded.index_json, mirrored = 0, updated_at = excluded.updated_at, revision = releases.revision + 1,
-           scan = excluded.scan, scan_report = NULL`,
-      ).bind(ref.key, tag, index.version, infected ? "failed" : "pending", infected?.error ?? null, indexJson, now, now, infected ? "infected" : null),
+        `INSERT INTO releases (repo, tag, version, status, error, warnings, spec_json, mirrored, published_at, updated_at)
+         VALUES (?, ?, ?, 'pending', NULL, '[]', ?, 0, ?, ?)
+         ON CONFLICT (repo, tag) DO UPDATE SET version = excluded.version, status = 'pending', error = NULL, warnings = '[]',
+           spec_json = excluded.spec_json, mirrored = 0, updated_at = excluded.updated_at, revision = releases.revision + 1,
+           scan = NULL, scan_report = NULL`,
+      ).bind(ref.key, tag, spec.version, specJson, now, now),
       env.DB.prepare("DELETE FROM packages WHERE repo = ? AND tag = ?").bind(ref.key, tag),
-      ...index.packages.map((p) =>
+      // Size, sha256 and the R2 object are filled in by the mirror job.
+      ...spec.packages.map((p) =>
         env.DB.prepare(
-          "INSERT INTO packages (repo, tag, file, target, tier, size, sha256, revision) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, (SELECT revision FROM releases WHERE repo = ?1 AND tag = ?2))",
-        ).bind(ref.key, tag, p.file, p.target, p.tier, p.size, p.sha256),
+          "INSERT INTO packages (repo, tag, file, target, tier, entry, revision) VALUES (?1, ?2, ?3, ?4, ?5, ?6, (SELECT revision FROM releases WHERE repo = ?1 AND tag = ?2))",
+        ).bind(ref.key, tag, p.file, p.target, p.tier, p.entry),
       ),
     );
   }
   await env.DB.batch(stmts);
   await refreshLatest(env, ref.key);
   const rel = (await env.DB.prepare("SELECT * FROM releases WHERE repo = ? AND tag = ?").bind(ref.key, tag).first<ReleaseRow>())!;
-  // A new revision needs a job. So does a publish of a release still waiting for one: its job
-  // may have been lost (the cron requeues those too). Jobs for one revision are idempotent.
-  if ((!unchanged && !infected) || (opts.retryFailed && rel.status === "pending")) await queueMirror(env, ref.key, tag, rel.revision);
+  // A new revision needs a job; a lost one is queued again by the cron (requeueStuck).
+  if (!unchanged) await queueMirror(env, ref.key, tag, rel.revision);
   return rel;
 }
 
@@ -104,12 +101,12 @@ export async function refreshLatest(env: Env, repo: string): Promise<void> {
   if (!latest) {
     await env.DB.prepare("UPDATE gizlets SET latest_tag = NULL, version = NULL WHERE repo = ?").bind(repo).run();
   } else {
-    const idx = JSON.parse(latest.index_json) as ReleaseIndex;
+    const idx = JSON.parse(latest.spec_json) as GizletToml;
     const targets = [...new Set(idx.packages.map((p) => p.target))].sort();
     const tiers = [...new Set(idx.packages.map((p) => p.tier))].sort();
     await env.DB.prepare(
-      `UPDATE gizlets SET app_id = ?, name = ?, names = ?, description = ?, descriptions = ?, category = ?, tags = ?, color = ?,
-         icon = ?, cover = ?, screenshots = ?, about = ?, controls = ?, targets = ?, tiers = ?, version = ?,
+      `UPDATE gizlets SET app_id = ?, name = ?, names = ?, description = ?, descriptions = ?, category = ?, tags = ?, color = ?, license = ?, links = ?,
+         icon = ?, cover = ?, pattern = ?, screenshots = ?, about = ?, controls = ?, targets = ?, tiers = ?, version = ?,
          updated_at = CASE WHEN latest_tag IS ? THEN updated_at ELSE ? END, latest_tag = ?
        WHERE repo = ?`,
     )
@@ -122,8 +119,11 @@ export async function refreshLatest(env: Env, repo: string): Promise<void> {
         idx.category,
         JSON.stringify(idx.tags),
         idx.color,
+        idx.license,
+        JSON.stringify(idx.links ?? {}),
         idx.icon,
         idx.cover,
+        idx.pattern ?? null,
         JSON.stringify(idx.screenshots),
         JSON.stringify(idx.about),
         JSON.stringify(idx.controls),
@@ -169,7 +169,7 @@ export async function setVisibility(env: Env, repo: string, visibility: "listed"
 /**
  * The gizlet for a repository, indexing its latest release on first sight (installing by link
  * works for any repository with a release that Gizlet can read: public ones, and private ones
- * the GitHub App is installed on). Null when it has no release with a gizlet.json.
+ * the GitHub App is installed on). Null when its latest release has no gizlet.toml.
  * Blocked gizlets are returned too; callers refuse them.
  *
  * A known gizlet is answered from the registry at once; with `ctx`, a view also refreshes it in
@@ -206,7 +206,7 @@ export async function ensureGizlet(env: Env, ref: RepoRef, ctx?: Waiter): Promis
 
 /**
  * Bring a gizlet up to date with GitHub: the repository's casing and privacy, its latest release
- * (a new tag, or a gizlet.json uploaded again), and its score. Does nothing unless it was last
+ * (a new tag, or a changed gizlet.toml at the tag), and its score. Does nothing unless it was last
  * checked at least `olderThanMs` ago; the check time is claimed first, in one statement, so
  * concurrent views refresh it once. False when another refresh had it.
  */

@@ -1,4 +1,4 @@
-// Devices pages: filter the handheld table as you type, and copy the flash commands.
+// Devices and gizlet pages: filter the handheld table as you type, copy commands, and show screenshots full size.
 const input = document.querySelector("#device-q");
 const table = document.querySelector(".hh-table");
 if (input && table) {
@@ -28,4 +28,27 @@ for (const b of document.querySelectorAll("button.copy-btn")) {
       // No clipboard access: the command is still there to select.
     }
   });
+}
+
+// Gizlet pages: a screenshot opens full size; clicking outside the image or Esc closes it.
+const shots = document.querySelector(".gz-shots");
+if (shots && typeof HTMLDialogElement === "function") {
+  const box = document.createElement("dialog");
+  box.className = "lightbox";
+  box.setAttribute("aria-label", shots.previousElementSibling?.textContent ?? "");
+  const img = document.createElement("img");
+  img.alt = "";
+  box.append(img);
+  document.body.append(box);
+  shots.addEventListener("click", (e) => {
+    const a = e.target.closest("a");
+    if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+    e.preventDefault();
+    img.src = a.href;
+    box.showModal();
+  });
+  box.addEventListener("click", (e) => {
+    if (e.target !== img) box.close();
+  });
+  box.addEventListener("close", () => img.removeAttribute("src"));
 }

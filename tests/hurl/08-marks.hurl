@@ -143,7 +143,8 @@ HTTP 404
 [Asserts]
 jsonpath "$.error.code" == "failed_checks"
 
-# Publishing the same bytes again does not bring it back.
+# Publishing the same bytes again does not bring it back. A package's sha256 is learnt while it
+# is mirrored, so the new revision is pending until then, and failed as soon as its bytes match.
 GET {{fixture}}/token?repo=fixture-org/infected&ref=refs/tags/v1.0.0
 HTTP 200
 [Captures]
@@ -154,11 +155,20 @@ x-gizlet-host: api.gizlet.io
 Authorization: Bearer {{infected_token}}
 {}
 HTTP 202
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/infected/releases/v1.0.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
 [Asserts]
 jsonpath "$.status" == "failed"
+jsonpath "$.revision" == 2
+jsonpath "$.error" contains "Linux.Trojan.Fixture"
 
-# Nor does a gizlet.json that changes only its description around the same packages: the
-# verdict belongs to their sha256, so the new revision is failed without being checked again.
+# Nor does a gizlet.toml that changes only its description around the same packages: the
+# verdict belongs to their sha256.
 POST {{fixture}}/_fixture/describe?repo=fixture-org/infected&tag=v1.0.0&description=Now%20with%20a%20new%20description
 HTTP 200
 
@@ -167,17 +177,16 @@ x-gizlet-host: api.gizlet.io
 Authorization: Bearer {{infected_token}}
 {}
 HTTP 202
-[Asserts]
-jsonpath "$.status" == "failed"
 
 GET {{base}}/v1/gizlets/github.com/fixture-org/infected/releases/v1.0.0
 x-gizlet-host: api.gizlet.io
 [Options]
-delay: 500ms
+retry: 40
+retry-interval: 250ms
 HTTP 200
 [Asserts]
 jsonpath "$.status" == "failed"
-jsonpath "$.revision" > 1
+jsonpath "$.revision" == 3
 jsonpath "$.error" contains "Linux.Trojan.Fixture"
 
 GET {{base}}/github.com/fixture-org/infected/v1.0.0/dev.fixture.infected-1.0.0-aarch64-unknown-linux-gnu-lite.gzl

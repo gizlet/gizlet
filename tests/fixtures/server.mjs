@@ -1,20 +1,26 @@
 // A stand-in for github.com, raw.githubusercontent.com, api.github.com (as the GitHub App
-// gizlet-bot sees it) and the Actions OIDC issuer, used by tests/run-local.sh. It serves releases
-// of fixture repositories with real `.gzl` packages (zips with manifest.toml and an entry
-// executable) and signs OIDC tokens with a throwaway key.
+// gizlet-bot sees it) and the Actions OIDC issuer, used by tests/run-local.sh. It serves the
+// fixture repositories' files at each tag (gizlet.toml and art) and their releases with real
+// `.gzl` packages (zips with manifest.json and an entry executable), and signs OIDC tokens with a
+// throwaway key. tests/fixtures/repos/<name> are fixture-org/<name> as written by hand; the
+// others are generated below.
 //
 // The app is installed on the repositories in INSTALLED; PRIVATE ones are not on the web at all.
 // Its private key is GET /_fixture/app-key, its client id APP_CLIENT_ID. Tests can add a release
-// (POST /_fixture/release?repo=&version=), rewrite a release's description around the same
-// packages (POST /_fixture/describe?repo=&tag=&description=), make the API hand over asset bytes
-// directly instead of redirecting (POST /_fixture/direct?repo=) and count requests
-// (GET /_fixture/hits?key=&since=).
+// (POST /_fixture/release?repo=&version=), rewrite a release's description in its gizlet.toml
+// around the same packages (POST /_fixture/describe?repo=&tag=&description=), make the API hand
+// over asset bytes directly instead of redirecting (POST /_fixture/direct?repo=) and count
+// requests (GET /_fixture/hits?key=&since=).
 //
 //   node tests/fixtures/server.mjs 18788
 import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { crc32, deflateRawSync } from "node:zlib";
 import { exportJWK, jwtVerify, SignJWT } from "jose";
+import { parse as parseToml } from "smol-toml";
 
 const port = Number(process.argv[2] ?? 18788);
 const issuer = `http://127.0.0.1:${port}`;
@@ -32,7 +38,7 @@ const INSTALLED = new Set(["fixture-org/hello-gizlet", "fixture-org/secret-gizle
 const PRIVATE = new Set(["fixture-org/secret-gizlet", "fixture-org/hidden"]);
 const tokens = new Set();
 /** Asset id -> { repo, tag, name }, and signed download URLs: sig -> the same. */
-const assets = new Map();
+const assets_ = new Map();
 const signed = new Map();
 /** Repositories whose asset API answers 200 with the bytes, which GitHub may do instead of a 302. */
 const DIRECT = new Set();
@@ -126,98 +132,137 @@ function executable(target) {
   return Buffer.concat([head, randomBytes(8192)]);
 }
 
+/** A gizlet.toml for `spec` (the fields of docs/gizlet-toml.md); `literal` writes strings as TOML literal strings. */
+function gizletToml(spec, literal = false) {
+  const val = (x) => (typeof x === "string" ? (literal ? `'${x}'` : JSON.stringify(x)) : Array.isArray(x) ? `[${x.map(val).join(", ")}]` : String(x));
+  const inline = (o) => `{ ${Object.entries(o).map(([k, x]) => `${JSON.stringify(k)} = ${val(x)}`).join(", ")} }`;
+  const lines = ["# Written by the fixture server."];
+  const tables = [];
+  for (const [k, x] of Object.entries(spec)) {
+    if (x === undefined || x === null) continue;
+    if (k === "controls" || k === "packages") {
+      for (const item of x) tables.push("", `[[${k}]]`, ...Object.entries(item).map(([ik, iv]) => `${ik} = ${typeof iv === "object" ? inline(iv) : val(iv)}`));
+    } else if (typeof x === "object" && !Array.isArray(x)) {
+      tables.push("", `[${k}]`, ...Object.entries(x).map(([ik, iv]) => `${JSON.stringify(ik)} = ${val(iv)}`));
+    } else lines.push(`${k} = ${val(x)}`);
+  }
+  return [...lines, ...tables, ""].join("\n");
+}
+
+/** The manifest.json a build writes into a package (docs/gizlet-toml.md). */
+function manifestJson(spec, pkg) {
+  const m = { schema: 1, id: spec.id, name: spec.name, names: spec.names ?? {}, version: spec.version, description: spec.description, descriptions: spec.descriptions ?? {} };
+  return { ...m, color: spec.color, runtime: spec.runtime ?? 1, target: pkg.target, tier: pkg.tier, entry: pkg.entry, icon: "icon.png" };
+}
+
 /**
- * A `.gzl` package. `problem` builds a broken one: symlink | setuid | wrong-arch | traversal |
- * alias (`./game`, an x86-64 build, after `game`) | case (`Game` after `game`) |
- * unicode-path (an x86-64 `other` that a Unicode Path extra field renames to `game`).
- * `literal` writes manifest.toml with TOML literal strings.
+ * A `.gzl` package for one [[packages]] entry. `problem` builds a broken one: symlink | setuid |
+ * wrong-arch | traversal | alias (`./<entry>`, an x86-64 build, after the entry) | case (the
+ * entry's name capitalized, after it) | unicode-path (an x86-64 `other` that a Unicode Path extra
+ * field renames to the entry) | mismatch (manifest.json says another tier).
  */
-function gzl({ id, version, target, tier, problem, literal }) {
-  const str = (v) => (literal ? `'${v}'` : JSON.stringify(v));
-  const manifest = [
-    "# Written by the fixture server.",
-    `id = ${str(id)}`,
-    `name = ${str("Fixture")}`,
-    `version = ${str(version)}`,
-    `tier = ${str(tier)}`,
-    `target = ${str(target)}`,
-    `entry = ${str("game")}`,
-    `icon = ${str("icon.png")}`,
-    "",
-    "[names]",
-    `"zh-CN" = "示例"`,
-  ].join("\n");
-  const exeTarget = problem === "wrong-arch" ? "x86_64-unknown-linux-gnu" : target;
+function gzl(spec, pkg, { problem, files = {} } = {}) {
+  const manifest = manifestJson(spec, pkg);
+  if (problem === "mismatch") manifest.tier = pkg.tier === "lite" ? "full" : "lite";
+  const exeTarget = problem === "wrong-arch" ? "x86_64-unknown-linux-gnu" : pkg.target;
+  const other = executable("x86_64-unknown-linux-gnu");
   const entries = [
-    { name: "manifest.toml", data: Buffer.from(manifest), mode: 0o100644, deflate: true },
-    { name: "game", data: executable(exeTarget), mode: problem === "setuid" ? 0o104755 : 0o100755, deflate: true },
-    { name: "icon.png", data: PNG, mode: 0o100644 },
+    { name: "manifest.json", data: Buffer.from(JSON.stringify(manifest, null, 2)), mode: 0o100644, deflate: true },
+    { name: pkg.entry, data: executable(exeTarget), mode: problem === "setuid" ? 0o104755 : 0o100755, deflate: true },
+    { name: "icon.png", data: files.icon ?? PNG, mode: 0o100644 },
     { name: "assets/", data: Buffer.alloc(0), mode: 0o040755 },
     { name: "assets/level.txt", data: Buffer.from("level 1\n"), mode: 0o100644 },
-    { name: "CHECKSUMS", data: Buffer.from("fixture\n"), mode: 0o100644 },
   ];
   if (problem === "symlink") entries.push({ name: "assets/passwd", data: Buffer.from("/etc/passwd"), mode: 0o120777 });
   if (problem === "traversal") entries.push({ name: "assets/../../escape", data: Buffer.from("x"), mode: 0o100644 });
-  if (problem === "alias") entries.push({ name: "./game", data: executable("x86_64-unknown-linux-gnu"), mode: 0o100755 });
-  if (problem === "unicode-path") entries.push({ name: "other", data: executable("x86_64-unknown-linux-gnu"), mode: 0o100755, extra: unicodePath("other", "game") });
-  if (problem === "case") entries.push({ name: "Game", data: executable("x86_64-unknown-linux-gnu"), mode: 0o100755 });
+  if (problem === "alias") entries.push({ name: `./${pkg.entry}`, data: other, mode: 0o100755 });
+  if (problem === "unicode-path") entries.push({ name: "other", data: other, mode: 0o100755, extra: unicodePath("other", pkg.entry) });
+  if (problem === "case") entries.push({ name: pkg.entry.replace(/^./, (c) => c.toUpperCase()), data: other, mode: 0o100755 });
+  const sums = entries.filter((e) => !e.name.endsWith("/") && (e.mode & 0o170000) === 0o100000).map((e) => `${sha(e.data)}  ${e.name}`);
+  entries.push({ name: "CHECKSUMS", data: Buffer.from(`${sums.join("\n")}\n`), mode: 0o100644 });
   return zip(entries);
 }
 
-/** repo -> { latest, tags: { tag -> { files: Map<name, Buffer> } } } */
+const packageFile = (spec, p) => `${spec.id}-${spec.version}-${p.target}-${p.tier}.gzl`;
+
+/**
+ * repo -> { latest, tags: { tag -> { assets: Map<name, Buffer>, ids: Map<name, asset id>,
+ * files: Map<path, Buffer>, spec } } }: release assets, and the repository's files at the tag.
+ */
 const repos = new Map();
 
-function addRelease(repo, version, { category = "game", lie = false, targets, page = true, problem, literal, extra = [], icon = true, iconName = "icon.png", description = true } = {}) {
-  const tag = `v${version}`;
-  const id = `dev.fixture.${repo.split("/")[1].replace(/[^a-z0-9]/g, "")}`;
-  const files = new Map();
-  const packages = [];
-  for (const [target, tier] of targets ?? [
-    ["aarch64-unknown-linux-gnu", "lite"],
-    ["aarch64-apple-darwin", "lite"],
-    ["aarch64-apple-darwin", "full"],
-  ]) {
-    const file = `${id}-${version}-${target}-${tier}.gzl`;
-    const body = gzl({ id, version, target, tier, problem, literal });
-    files.set(file, body);
-    packages.push({ file, target, tier, size: body.length, sha256: lie ? sha(Buffer.from("not this")) : sha(body) });
-  }
-  if (icon) files.set("icon.png", PNG);
-  files.set("screenshot-1.png", PNG);
-  if (page) files.set("cover.png", PNG);
-  if (page) files.set("about.en.md", Buffer.from("# About Hello\n\nServe yourself **sushi** from the belt.\n"));
-  const index = {
-    schema: 1,
-    id,
-    name: repo === "fixture-org/hello-gizlet" ? "Hello Gizlet" : repo.split("/")[1],
-    names: repo === "fixture-org/hello-gizlet" ? { "zh-CN": "你好 Gizlet" } : {},
-    version,
-    description: description ? "A fixture gizlet for the tests." : null,
-    descriptions: description ? { "zh-CN": "测试用的示例。" } : {},
-    category,
-    tags: ["fixture", "arcade"],
-    color: "#2fa37a",
-    icon: icon ? iconName : null,
-    screenshots: ["screenshot-1.png"],
-    cover: page ? "cover.png" : null,
-    about: page ? { en: "about.en.md" } : {},
-    controls: [{ button: "a", action: "Eat", actions: { "zh-CN": "吃" } }],
-    packages,
-  };
-  files.set("gizlet.json", Buffer.from(JSON.stringify(index, null, 2)));
-  // Release assets gizlet.json does not name; never served.
-  for (const name of extra) files.set(name, gzl({ id, version, target: "x86_64-unknown-linux-gnu", tier: "lite" }));
+function addTag(repo, tag, assets, files, spec = null) {
+  const r = repos.get(repo) ?? { tags: {}, latest: null };
+  files.set("README.md", Buffer.from(`# ${repo}\n`));
   const ids = new Map();
-  for (const name of files.keys()) {
+  for (const name of assets.keys()) {
     const assetId = nextAssetId++;
     ids.set(name, assetId);
-    assets.set(assetId, { repo, tag, name });
+    assets_.set(assetId, { repo, tag, name });
   }
-  const r = repos.get(repo) ?? { tags: {}, latest: null };
-  r.tags[tag] = { files, ids };
+  r.tags[tag] = { assets, ids, files, spec };
   r.latest = tag;
   repos.set(repo, r);
 }
+
+/** A release of a generated fixture gizlet: gizlet.toml and its art in the repository, packages in the release. */
+function addRelease(repo, version, { category = "game", targets, page = true, problem, literal, extra = [], icon = true, iconPath = "store/icon.png", description = true, missing = false } = {}) {
+  const hello = repo === "fixture-org/hello-gizlet";
+  const files = new Map();
+  if (icon) files.set("store/icon.png", PNG);
+  files.set("store/screenshot-1.png", PNG);
+  if (page) files.set("store/cover.png", PNG);
+  if (page) files.set("store/about.en.md", Buffer.from("## About Hello\n\nServe yourself **sushi** from the belt.\n"));
+  const spec = {
+    id: `dev.fixture.${repo.split("/")[1].replace(/[^a-z0-9]/g, "")}`,
+    name: hello ? "Hello Gizlet" : repo.split("/")[1],
+    version,
+    category,
+    description: description ? "A fixture gizlet for the tests." : undefined,
+    tags: ["fixture", "arcade"],
+    color: "#2fa37a",
+    icon: icon ? iconPath : undefined,
+    cover: page ? "store/cover.png" : undefined,
+    screenshots: ["store/screenshot-1.png"],
+    names: hello ? { "zh-CN": "你好 Gizlet" } : undefined,
+    descriptions: description ? { "zh-CN": "测试用的示例。" } : undefined,
+    about: page ? { en: "store/about.en.md" } : undefined,
+    controls: [{ button: "a", action: "Eat", actions: { "zh-CN": "吃" } }],
+    packages: (targets ?? [
+      ["aarch64-unknown-linux-gnu", "lite"],
+      ["aarch64-apple-darwin", "lite"],
+      ["aarch64-apple-darwin", "full"],
+    ]).map(([target, tier]) => ({ target, tier, entry: "game" })),
+  };
+  files.set("gizlet.toml", Buffer.from(gizletToml(spec, literal)));
+  const assets = new Map();
+  // `missing`: the first package listed in gizlet.toml was never uploaded.
+  for (const p of spec.packages.slice(missing ? 1 : 0)) assets.set(packageFile(spec, p), gzl(spec, p, { problem }));
+  // Release assets gizlet.toml does not name; never served.
+  for (const name of extra) assets.set(name, gzl(spec, { target: "x86_64-unknown-linux-gnu", tier: "lite", entry: "game" }));
+  addTag(repo, `v${version}`, assets, files, spec);
+}
+
+/** A fixture repository written out under tests/fixtures/repos/<name>, with its own gizlet.toml and art. */
+function addRepoDir(name) {
+  const root = join(REPOS, name);
+  const files = new Map();
+  const walk = (dir) => {
+    for (const e of readdirSync(join(root, dir), { withFileTypes: true })) {
+      const path = dir ? `${dir}/${e.name}` : e.name;
+      if (e.isDirectory()) walk(path);
+      else files.set(path, readFileSync(join(root, path)));
+    }
+  };
+  walk("");
+  const spec = parseToml(files.get("gizlet.toml").toString());
+  const icon = spec.icon ? files.get(spec.icon) : undefined;
+  const assets = new Map(spec.packages.map((p) => [packageFile(spec, p), gzl(spec, p, { files: { icon } })]));
+  addTag(`fixture-org/${name}`, `v${spec.version}`, assets, files, spec);
+}
+
+const REPOS = join(dirname(fileURLToPath(import.meta.url)), "repos");
+for (const name of readdirSync(REPOS)) addRepoDir(name);
 
 addRelease("fixture-org/hello-gizlet", "0.1.0");
 addRelease("fixture-org/hello-gizlet", "0.2.0", { extra: ["unsafe.gzl"] });
@@ -225,19 +270,20 @@ addRelease("fixture-org/hello-gizlet", "0.2.0", { extra: ["unsafe.gzl"] });
 addRelease("fixture-org/on-demand", "1.0.0", { category: "app", page: false, icon: false, description: false, targets: [["x86_64-unknown-linux-gnu", "full"]] });
 // Used only by the device simulation (tests/sim/device.mjs).
 addRelease("fixture-org/pocket-sim", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
-addRelease("fixture-org/bad-sum", "0.1.0", { lie: true });
+addRelease("fixture-org/missing-package", "0.1.0", { missing: true });
 addRelease("fixture-org/symlink", "0.1.0", { problem: "symlink" });
 addRelease("fixture-org/setuid", "0.1.0", { problem: "setuid" });
 addRelease("fixture-org/wrong-arch", "0.1.0", { problem: "wrong-arch", targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 addRelease("fixture-org/traversal", "0.1.0", { problem: "traversal", targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 addRelease("fixture-org/alias", "0.1.0", { problem: "alias", targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 addRelease("fixture-org/unicode-path", "0.1.0", { problem: "unicode-path", targets: [["aarch64-unknown-linux-gnu", "lite"]] });
-// Names an extra, unchecked package as its icon; refused at publish.
-addRelease("fixture-org/gzl-icon", "0.1.0", { iconName: "unchecked.gzl", extra: ["unchecked.gzl"], targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+addRelease("fixture-org/mismatch", "0.1.0", { problem: "mismatch", targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+// Names a package as its icon; refused at publish.
+addRelease("fixture-org/gzl-icon", "0.1.0", { iconPath: "store/unchecked.gzl", targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 addRelease("fixture-org/case", "0.1.0", { problem: "case", targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 addRelease("fixture-org/literal-toml", "0.1.0", { literal: true, targets: [["aarch64-unknown-linux-gnu", "lite"]] });
-repos.set("fixture-org/no-index", { tags: { "v1.0.0": { files: new Map([["other.zip", Buffer.from("x")]]), ids: new Map() } }, latest: "v1.0.0" });
-// Visited by tests/hurl/07-refresh.hurl, which adds releases while it runs.
+addTag("fixture-org/no-index", "v1.0.0", new Map([["other.zip", Buffer.from("x")]]), new Map());
+// Visited by tests/hurl/07-index.hurl, which adds releases while it runs.
 addRelease("fixture-org/refresh-me", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 // Private, with the app installed: read only through the API. Three releases, so the oldest is pruned from R2.
 addRelease("fixture-org/secret-gizlet", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
@@ -253,13 +299,7 @@ addRelease("fixture-org/suspended", "1.0.0", { targets: [["aarch64-unknown-linux
 addRelease("fixture-org/twin-a", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 {
   const src = repos.get("fixture-org/twin-a").tags["v1.0.0"];
-  const ids = new Map();
-  for (const name of src.files.keys()) {
-    const assetId = nextAssetId++;
-    ids.set(name, assetId);
-    assets.set(assetId, { repo: "fixture-org/twin-b", tag: "v1.0.0", name });
-  }
-  repos.set("fixture-org/twin-b", { tags: { "v1.0.0": { files: src.files, ids } }, latest: "v1.0.0" });
+  addTag("fixture-org/twin-b", "v1.0.0", new Map(src.assets), new Map(src.files), src.spec);
 }
 
 async function token(repo, ref, visibility = "public") {
@@ -305,12 +345,11 @@ createServer(async (req, res) => {
     return json(200, { direct: [...DIRECT] });
   }
   if (url.pathname === "/_fixture/describe" && req.method === "POST") {
-    const files = repos.get(url.searchParams.get("repo"))?.tags[url.searchParams.get("tag")]?.files;
-    if (!files) return json(404, { message: "no such fixture release" });
-    const index = JSON.parse(files.get("gizlet.json"));
-    index.description = url.searchParams.get("description");
-    files.set("gizlet.json", Buffer.from(JSON.stringify(index, null, 2)));
-    return json(200, index);
+    const rel = repos.get(url.searchParams.get("repo"))?.tags[url.searchParams.get("tag")];
+    if (!rel?.spec) return json(404, { message: "no such fixture release" });
+    rel.spec.description = url.searchParams.get("description");
+    rel.files.set("gizlet.toml", Buffer.from(gizletToml(rel.spec)));
+    return json(200, rel.spec);
   }
   if (url.pathname === "/_fixture/release" && req.method === "POST") {
     const key = url.searchParams.get("repo");
@@ -356,8 +395,15 @@ createServer(async (req, res) => {
       return repo.latest ? json(200, release(repo.latest)) : json(404, { message: "Not Found" });
     }
     if (rest[0] === "releases" && rest[1] === "tags" && rest.length === 3) return repo.tags[rest[2]] ? json(200, release(rest[2])) : json(404, { message: "Not Found" });
+    if (rest[0] === "contents" && rest.length > 1) {
+      hit(`contents:${key}`);
+      const file = repo.tags[url.searchParams.get("ref")]?.files.get(rest.slice(1).join("/"));
+      if (!file) return json(404, { message: "Not Found" });
+      if (req.headers.accept !== "application/vnd.github.raw") return json(200, { type: "file", path: rest.slice(1).join("/"), size: file.length });
+      return send(200, file, { "content-length": String(file.length), "content-type": "application/vnd.github.raw" });
+    }
     if (rest[0] === "releases" && rest[1] === "assets" && rest.length === 3) {
-      const a = assets.get(Number(rest[2]));
+      const a = assets_.get(Number(rest[2]));
       if (!a || a.repo !== key) return json(404, { message: "Not Found" });
       if (RELOCATED.has(key)) return send(301, "", { location: `${issuer}/repositories/${900 + [...INSTALLED].indexOf(key)}/releases/assets/${rest[2]}` });
       return serveAsset(a, Number(rest[2]));
@@ -367,7 +413,7 @@ createServer(async (req, res) => {
   // A relocated repository's asset, by repository id; needs the token and the Accept header again.
   if (parts[0] === "repositories" && parts[2] === "releases" && parts[3] === "assets" && parts.length === 5) {
     if (!bearer || !tokens.has(bearer)) return json(401, { message: "Bad credentials" });
-    const a = assets.get(Number(parts[4]));
+    const a = assets_.get(Number(parts[4]));
     if (!a || 900 + [...INSTALLED].indexOf(a.repo) !== Number(parts[1])) return json(404, { message: "Not Found" });
     hit(`relocated:${a.repo}`);
     return serveAsset(a, Number(parts[4]));
@@ -379,7 +425,7 @@ createServer(async (req, res) => {
       if (req.headers.accept !== "application/octet-stream") return json(200, { id: assetId, name: a.name });
       if (DIRECT.has(key)) {
         hit(`direct:${key}`);
-        const file = repo.tags[a.tag].files.get(a.name);
+        const file = repo.tags[a.tag].assets.get(a.name);
         const range = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range ?? "");
         if (range) {
           const start = Number(range[1]);
@@ -405,7 +451,7 @@ createServer(async (req, res) => {
     if (!a) return send(404, "Not Found");
     if (req.headers.authorization) return send(400, "Only one auth mechanism allowed");
     hit(`signed:${a.repo}`);
-    const file = repos.get(a.repo).tags[a.tag].files.get(a.name);
+    const file = repos.get(a.repo).tags[a.tag].assets.get(a.name);
     return send(200, file, { "content-length": String(file.length), "content-type": "application/octet-stream" });
   }
 
@@ -418,11 +464,14 @@ createServer(async (req, res) => {
     hit(`latest:${key}`);
     return send(302, "", { location: `https://github.com/${owner}/${name}/releases/tag/${repo.latest}` });
   }
+  // github.com: release assets.
   if (rest[0] === "releases" && rest[1] === "download" && rest.length === 4) {
-    const file = repo.tags[rest[2]]?.files.get(rest[3]);
+    const file = repo.tags[rest[2]]?.assets.get(rest[3]);
     if (!file) return send(404, "Not Found");
     return send(200, file, { "content-length": String(file.length), "content-type": "application/octet-stream" });
   }
-  if (rest.length === 2 && rest[1] === "README.md" && repo.tags[rest[0]]) return send(200, "# Fixture\n", { "content-type": "text/plain" });
+  // raw.githubusercontent.com: repository files at a tag.
+  const file = repo.tags[rest[0]]?.files.get(rest.slice(1).join("/"));
+  if (file) return send(200, file, { "content-length": String(file.length), "content-type": "text/plain; charset=utf-8" });
   send(404, "Not Found");
 }).listen(port, "127.0.0.1", () => console.log(`fixture server on ${issuer}`));

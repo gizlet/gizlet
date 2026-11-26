@@ -30,6 +30,99 @@ HTTP 200
 xpath "string(//h1)" == "Hello Gizlet"
 body contains "aarch64-unknown-linux-gnu"
 
+# A gizlet's page, from its gizlet.toml (tests/fixtures/repos/rocket-snail): indexed on first sight,
+# then shown once its packages are mirrored and checked.
+GET {{base}}/v1/gizlets/github.com/fixture-org/rocket-snail
+x-gizlet-host: api.gizlet.io
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/rocket-snail/releases/v0.1.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "ready"
+jsonpath "$.visibility" == "listed"
+
+GET {{base}}/github.com/fixture-org/rocket-snail
+x-gizlet-host: gizlet.io
+Accept-Language: zh-CN
+HTTP 200
+[Asserts]
+xpath "string(//h1)" == "火箭蜗牛"
+xpath "string(//link[contains(@href, '/_theme/')]/@href)" == "/_theme/2/7b4dff.css"
+# The cartridge and the band take the colour from gizlet.toml.
+xpath "string(//span[contains(@class, 'rig-cart')]/@class)" contains "theme-7b4dff"
+xpath "string(//section[contains(@class, 'gz-band')]/@class)" contains "theme-7b4dff"
+xpath "string(//section[contains(@class, 'gz-band')]/@class)" contains "has-pattern"
+xpath "string(//link[contains(@href, '/_patterns.css')]/@href)" == "/_patterns.css?r=github.com%2Ffixture-org%2Frocket-snail"
+xpath "string(//span[contains(@class, 'rig-cart')]/@class)" contains "has-pattern"
+xpath "string(//span[contains(@class, 'rig-cart')]//img/@src)" == "https://dl.gizlet.io/github.com/fixture-org/rocket-snail/v0.1.0/store/icon.png"
+xpath "count(//div[@class='gz-shots']//img)" == 4
+# What to enter on a device is the repository address, not a site URL.
+xpath "string(//div[contains(@class, 'gz-get')]//pre)" == "github.com/fixture-org/rocket-snail"
+xpath "string(//div[contains(@class, 'gz-get')]//button/@data-copy)" == "github.com/fixture-org/rocket-snail"
+# The about page is the zh-CN Markdown, rendered on the server.
+xpath "string(//div[@class='prose']/h3[1])" == "慢？那是以前"
+xpath "string(//div[@class='prose']//strong[1])" == "火箭蜗牛"
+xpath "count(//ul[@class='gz-controls']/li)" == 6
+# The developer's links, in the store's order, on their own domains.
+xpath "count(//ul[@class='gz-links']/li)" == 4
+xpath "string(//ul[@class='gz-links']/li[1]//b)" == "网站"
+xpath "string(//ul[@class='gz-links']/li[2]/a/@href)" == "https://x.com/gizletio"
+xpath "string(//ul[@class='gz-links']/li[3]/a/@href)" == "https://discord.gg/gizlet"
+xpath "string(//ul[@class='gz-controls']/li[2])" contains "点火加速"
+body contains "io.gizlet.rocket-snail-0.1.0-aarch64-unknown-linux-gnu-lite.gzl?sha256="
+body not contains "raw.githubusercontent.com"
+
+# Pattern tiles come from the registry, never from the request; repositories without one are left out.
+GET {{base}}/_patterns.css?r=github.com%2Ffixture-org%2Frocket-snail&r=github.com%2Ffixture-org%2Fhello-gizlet&r=https%3A%2F%2Fevil.test
+x-gizlet-host: gizlet.io
+HTTP 200
+[Asserts]
+header "content-type" contains "text/css"
+body matches /^\.pat-[0-9a-f]{8} \{ --pattern: image-set\(url\("https:\/\/dl\.gizlet\.io\/github\.com\/fixture-org\/rocket-snail\/v0\.1\.0\/store\/pattern\.png"\) 2x\); \}\n$/
+
+GET {{base}}/github.com/fixture-org/rocket-snail/v0.1.0/store/pattern.png
+x-gizlet-host: dl.gizlet.io
+HTTP 200
+[Asserts]
+header "content-type" == "image/png"
+
+GET {{base}}/_patterns.css
+x-gizlet-host: gizlet.io
+HTTP 404
+
+GET {{base}}/_theme/2/2fa37a-7b4dff.css
+x-gizlet-host: gizlet.io
+HTTP 200
+[Asserts]
+header "content-type" contains "text/css"
+header "cache-control" contains "immutable"
+body contains ".theme-7b4dff { --c: #7b4dff; --g: #7b4dff; --g-on: #ffffff; }"
+body contains ".theme-2fa37a {"
+
+GET {{base}}/_theme/2/7b4dff.css%7Bx
+x-gizlet-host: gizlet.io
+HTTP 404
+
+# An older version of the stylesheets is gone, not served stale.
+GET {{base}}/_theme/1/7b4dff.css
+x-gizlet-host: gizlet.io
+HTTP 404
+
+# Explore links one stylesheet for the colours of the cartridges on it.
+GET {{base}}/explore
+x-gizlet-host: gizlet.io
+HTTP 200
+[Asserts]
+xpath "string(//link[contains(@href, '/_theme/')]/@href)" matches /^\/_theme\/2\/[0-9a-f-]+\.css$/
+xpath "count(//a[contains(@class, 'cart') and contains(@class, 'theme-7b4dff')])" == 1
+xpath "count(//a[contains(@class, 'cart') and contains(@class, 'has-pattern')])" == 1
+xpath "string(//link[contains(@href, '/_patterns.css')]/@href)" == "/_patterns.css?r=github.com%2Ffixture-org%2Frocket-snail"
+
 GET {{base}}/github.com/fixture-org/no-index
 x-gizlet-host: gizlet.io
 HTTP 404

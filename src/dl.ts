@@ -2,22 +2,21 @@
 import { Hono, type Context } from "hono";
 import { packageUrl, pickInstall, type ReleaseRow } from "./db";
 import type { Env } from "./env";
-import { assetUrl, reader } from "./github";
-import { artKey, contentType, indexedFiles, packageKey } from "./mirror";
+import { assetUrl, rawUrl, reader } from "./github";
+import { artKey, contentType, indexedFiles } from "./mirror";
 import { ensureGizlet } from "./registry";
 import { repoRef } from "./repo";
-import { isAssetName, type ReleaseIndex, type Tier } from "./schema";
+import { isAssetName, isRepoPath, TARGET, type GizletToml, type Tier } from "./schema";
 
 type App = { Bindings: Env };
 export const dl = new Hono<App>();
 
 const TAG = /^[A-Za-z0-9._+-]{1,100}$/;
-const TARGET = /^[a-z0-9_]+(-[a-z0-9_.]+){2,3}$/;
 
 dl.get("/", (c) => c.redirect(c.env.SITE_ORIGIN, 302));
 
 /** Serve an R2 object with Range, conditional and immutable caching headers; null when it is not in R2. */
-async function fromR2(c: Context<App>, key: string, file: string, cacheControl: string, onDownload: () => void): Promise<Response | null> {
+async function fromR2(c: Context<App>, key: string, file: string, cacheControl: string, sha256: string | null, onDownload: () => void): Promise<Response | null> {
   const obj = await c.env.BUCKET.get(key, { range: c.req.raw.headers, onlyIf: c.req.raw.headers });
   if (!obj) return null;
   const headers = new Headers();
@@ -28,7 +27,7 @@ async function fromR2(c: Context<App>, key: string, file: string, cacheControl: 
   headers.set("cache-control", cacheControl);
   headers.set("access-control-allow-origin", "*");
   if (!headers.has("content-type")) headers.set("content-type", contentType(file));
-  if (obj.customMetadata?.sha256) headers.set("x-checksum-sha256", obj.customMetadata.sha256);
+  if (sha256) headers.set("x-checksum-sha256", sha256);
   if (!("body" in obj)) return new Response(null, { status: 304, headers });
   let status = 200;
   if (obj.range && c.req.header("range")) {
@@ -61,40 +60,47 @@ dl.get("/github.com/:owner/:repo", async (c) => {
   return c.redirect(packageUrl(c.env, pkg), 302);
 });
 
-dl.on(["GET", "HEAD"], "/github.com/:owner/:repo/:tag/:file", async (c) => {
+/** A package (a release asset name) or store art (a repository path) of a release. */
+dl.on(["GET", "HEAD"], "/github.com/:owner/:repo/:tag/:file{.+}", async (c) => {
   const r = repoRef(c.req.param("owner"), c.req.param("repo"));
   const tag = c.req.param("tag");
-  const file = c.req.param("file");
-  if (!r || !TAG.test(tag) || !isAssetName(file)) return c.text("Not found", 404);
+  let file: string;
+  try {
+    file = c.req.param("file").split("/").map(decodeURIComponent).join("/");
+  } catch {
+    return c.text("Not found", 404);
+  }
+  if (!r || !TAG.test(tag) || !isRepoPath(file)) return c.text("Not found", 404);
   // One statement, so the status, the index and the package row all belong to one revision.
   const [g, rel] = await Promise.all([
     c.env.DB.prepare("SELECT owner, name_repo, visibility, private FROM gizlets WHERE repo = ?")
       .bind(r.key)
       .first<{ owner: string; name_repo: string; visibility: string; private: number }>(),
     c.env.DB.prepare(
-      `SELECT r.status, r.index_json, p.sha256 FROM releases r
+      `SELECT r.status, r.spec_json, p.sha256, p.object FROM releases r
          LEFT JOIN packages p ON p.repo = r.repo AND p.tag = r.tag AND p.revision = r.revision AND p.file = ?
         WHERE r.repo = ? AND r.tag = ?`,
     )
       .bind(file, r.key, tag)
-      .first<Pick<ReleaseRow, "status" | "index_json"> & { sha256: string | null }>(),
+      .first<Pick<ReleaseRow, "status" | "spec_json"> & { sha256: string | null; object: string | null }>(),
   ]);
   if (!g || !rel) return c.text("Not found", 404);
   if (g.visibility === "blocked") return c.text(`${r.key} is blocked`, 403);
-  // Nothing of a failed release is served. Of the others, only files the index names: its
-  // packages once checked, and its art (images and about pages, never packages: see parseIndex).
+  // Nothing of a failed release is served. Of the others, only files gizlet.toml names: its
+  // packages once checked, and its art (images and about pages: see parseSpec).
   if (rel.status === "failed") return c.text(`${r.key} ${tag} failed its checks`, 410);
-  const files = indexedFiles(JSON.parse(rel.index_json) as ReleaseIndex);
+  const files = indexedFiles(JSON.parse(rel.spec_json) as GizletToml);
+  const isPackage = files.packages.has(file) && isAssetName(file);
   let key: string;
   let cacheControl: string;
-  if (files.packages.has(file)) {
+  if (isPackage) {
     // Packages are served only once their release has passed its checks.
     if (rel.status !== "ready") return c.text(`${r.key} ${tag} is still being checked`, 409);
-    if (!rel.sha256) return c.text("Not found", 404);
+    if (!rel.sha256 || !rel.object) return c.text("Not found", 404);
     const pinned = c.req.query("sha256");
     // A URL for bytes this tag no longer has: the client should ask the API again.
     if (pinned !== undefined && pinned !== rel.sha256) return c.text(`${file} has changed; its sha256 is now ${rel.sha256}`, 404);
-    key = packageKey(r.key, tag, rel.sha256, file);
+    key = rel.object;
     cacheControl = pinned ? "public, max-age=31536000, immutable" : "public, max-age=300";
   } else if (files.art.has(file)) {
     key = artKey(r.key, tag, file);
@@ -102,20 +108,35 @@ dl.on(["GET", "HEAD"], "/github.com/:owner/:repo/:tag/:file", async (c) => {
   } else {
     return c.text("Not found", 404);
   }
-  const isPackage = files.packages.has(file);
   const countDownload = () => {
     if (isPackage && c.req.method === "GET" && !c.req.header("range")) {
       c.executionCtx.waitUntil(c.env.DB.prepare("UPDATE gizlets SET downloads = downloads + 1 WHERE repo = ?").bind(r.key).run());
     }
   };
-  const res = await fromR2(c, key, file, cacheControl, countDownload);
+  const res = await fromR2(c, key, file, cacheControl, isPackage ? rel.sha256 : null, countDownload);
   if (res) return res;
   // Not mirrored (an older ready release, pruned from R2): hand off to GitHub. The client
   // checks the package against the sha256 the API gave it. A private repository's assets have
   // no public URL, so the GitHub App asks for a short-lived one, which is never cached; when
   // GitHub hands over the bytes instead, they are passed on.
+  const ref = { owner: g.owner, name: g.name_repo, key: r.key };
+  if (!isPackage) {
+    // Art of a pruned release: the repository file at the tag, never cached for a private one.
+    if (!g.private) return c.redirect(rawUrl(c.env, g.owner, g.name_repo, tag, file), 302);
+    const got = await (await reader(c.env, ref)).file(tag, file);
+    if (!got.ok) {
+      await got.body?.cancel();
+      return c.text("Not found", 404);
+    }
+    const headers = new Headers({ "content-type": contentType(file), "cache-control": "no-store", "x-content-type-options": "nosniff", "access-control-allow-origin": "*" });
+    if (c.req.method === "HEAD") {
+      await got.body?.cancel();
+      return new Response(null, { headers });
+    }
+    return new Response(got.body, { headers });
+  }
   if (g.private) {
-    const got = await (await reader(c.env, { owner: g.owner, name: g.name_repo, key: r.key })).download(tag, file, c.req.header("range"));
+    const got = await (await reader(c.env, ref)).download(tag, file, c.req.header("range"));
     if (!got) return c.text("Not found", 404);
     countDownload();
     if ("url" in got) {
