@@ -247,9 +247,17 @@ const ORDER: Record<ListSort, string> = {
   downloads: "downloads DESC, updated_at DESC, repo",
 };
 
+/**
+ * What public lists (search, Explore, featured) show of the gizlets table `g`: approved gizlets
+ * whose shown release passed its checks. An approval outlives releases, so a gizlet whose only
+ * ready release is being indexed again drops out of the lists until it is ready again.
+ */
+export const publicListed = (g: string) =>
+  `${g}.visibility = 'listed' AND ${g}.latest_tag IS NOT NULL AND EXISTS (SELECT 1 FROM releases lr WHERE lr.repo = ${g}.repo AND lr.tag = ${g}.latest_tag AND lr.status = 'ready')`;
+
 /** Search: listed gizlets only, unless `all` (never blocked ones). */
 export async function listGizlets(env: Env, query: ListQuery): Promise<GizletRow[]> {
-  const where = [query.all ? "visibility != 'blocked'" : "visibility = 'listed'", "latest_tag IS NOT NULL"];
+  const where = [query.all ? "visibility != 'blocked' AND latest_tag IS NOT NULL" : publicListed("gizlets")];
   const binds: unknown[] = [];
   const bind = (v: unknown) => {
     binds.push(v);
@@ -282,7 +290,7 @@ interface CollectionRow {
 
 /** Home lists: hand-picked collections plus automatic sections, all of listed gizlets. */
 export async function featured(env: Env) {
-  const listed = "g.visibility = 'listed' AND g.latest_tag IS NOT NULL";
+  const listed = publicListed("g");
   const [{ results: cols }, { results: items }, { results: recent }, { results: popular }] = (await env.DB.batch([
     env.DB.prepare("SELECT * FROM collections ORDER BY position, id"),
     env.DB.prepare(`SELECT ci.collection_id AS collection_id, g.* FROM collection_items ci JOIN gizlets g ON g.repo = ci.repo WHERE ${listed} ORDER BY ci.collection_id, ci.position`),

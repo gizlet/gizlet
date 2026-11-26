@@ -109,6 +109,67 @@ Authorization: Bearer {{admin_token}}
 {"visibility": "listed"}
 HTTP 200
 
+# An approved gizlet whose only release is published again keeps its approval, but leaves the
+# lists until the new revision passes its checks: its downloads are held meanwhile.
+POST {{fixture}}/_fixture/hold?repo=fixture-org/v2-app
+HTTP 200
+
+GET {{fixture}}/token?repo=fixture-org/v2-app&ref=refs/tags/v1.0.0
+HTTP 200
+[Captures]
+v2_token: jsonpath "$.value"
+
+POST {{base}}/v1/publish
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{v2_token}}
+{}
+HTTP 202
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/v2-app/releases/v1.0.0
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.status" != "ready"
+jsonpath "$.visibility" == "listed"
+
+GET {{base}}/v1/gizlets?q=v2-app
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.gizlets" count == 0
+
+GET {{base}}/explore?q=v2-app&lang=en
+x-gizlet-host: gizlet.io
+HTTP 200
+[Asserts]
+body not contains "href=\"/github.com/fixture-org/v2-app\""
+
+GET {{base}}/v1/featured
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.hero[?(@.repo == 'github.com/fixture-org/v2-app')]" not exists
+jsonpath "$.sections[*].gizlets[?(@.repo == 'github.com/fixture-org/v2-app')]" not exists
+
+POST {{fixture}}/_fixture/release-hold?repo=fixture-org/v2-app
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/v2-app/releases/v1.0.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "ready"
+jsonpath "$.visibility" == "listed"
+
+GET {{base}}/v1/gizlets?q=v2-app
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.gizlets" count == 1
+
 # Manifests that disagree with gizlet.toml, or that this release cannot read, fail their release.
 GET {{base}}/v1/gizlets/github.com/fixture-org/service-as-v1
 x-gizlet-host: api.gizlet.io

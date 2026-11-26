@@ -9,8 +9,9 @@
 // Its private key is GET /_fixture/app-key, its client id APP_CLIENT_ID. Tests can add a release
 // (POST /_fixture/release?repo=&version=), rewrite a release's description in its gizlet.toml
 // around the same packages (POST /_fixture/describe?repo=&tag=&description=), make the API hand
-// over asset bytes directly instead of redirecting (POST /_fixture/direct?repo=) and count
-// requests (GET /_fixture/hits?key=&since=).
+// over asset bytes directly instead of redirecting (POST /_fixture/direct?repo=), hold a public
+// repository's release downloads until it is let go (POST /_fixture/hold?repo=, then
+// /_fixture/release-hold?repo=) and count requests (GET /_fixture/hits?key=&since=).
 //
 //   node tests/fixtures/server.mjs 18788
 import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
@@ -42,6 +43,8 @@ const assets_ = new Map();
 const signed = new Map();
 /** Repositories whose asset API answers 200 with the bytes, which GitHub may do instead of a 302. */
 const DIRECT = new Set();
+/** Public repositories whose release downloads wait until the hold is let go: repo -> waiting resolvers. */
+const HELD = new Map();
 /** Repositories renamed or moved: their asset API redirects to /repositories/<id>/releases/assets/<id>. */
 const RELOCATED = new Set();
 let nextAssetId = 1000;
@@ -360,6 +363,16 @@ createServer(async (req, res) => {
     RELOCATED.add(url.searchParams.get("repo"));
     return json(200, { relocated: [...RELOCATED] });
   }
+  if (url.pathname === "/_fixture/hold" && req.method === "POST") {
+    HELD.set(url.searchParams.get("repo"), []);
+    return json(200, { held: [...HELD.keys()] });
+  }
+  if (url.pathname === "/_fixture/release-hold" && req.method === "POST") {
+    const waiting = HELD.get(url.searchParams.get("repo")) ?? [];
+    HELD.delete(url.searchParams.get("repo"));
+    for (const go of waiting) go();
+    return json(200, { released: waiting.length });
+  }
   if (url.pathname === "/_fixture/direct" && req.method === "POST") {
     DIRECT.add(url.searchParams.get("repo"));
     return json(200, { direct: [...DIRECT] });
@@ -488,6 +501,7 @@ createServer(async (req, res) => {
   if (rest[0] === "releases" && rest[1] === "download" && rest.length === 4) {
     const file = repo.tags[rest[2]]?.assets.get(rest[3]);
     if (!file) return send(404, "Not Found");
+    if (HELD.has(key)) await new Promise((go) => HELD.get(key).push(go));
     return send(200, file, { "content-length": String(file.length), "content-type": "application/octet-stream" });
   }
   // raw.githubusercontent.com: repository files at a tag.
