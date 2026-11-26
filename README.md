@@ -16,7 +16,7 @@ One Cloudflare Worker serves every host:
 
 | Host | Serves |
 | --- | --- |
-| `gizlet.io` | Share pages, sign-in, `/device` (approving a console), `/account` |
+| `gizlet.io` | The home page, share pages, sign-in, `/device` (approving a console), `/account` |
 | `api.gizlet.io` | The JSON API, `/v1/...` |
 | `dl.gizlet.io` | Packages and art: `/github.com/<owner>/<repo>/<tag>/<file>` |
 | `www.gizlet.io` | Redirects to `gizlet.io` |
@@ -68,11 +68,12 @@ pnpm test:hurl sim        # the device simulation only
 | --- | --- |
 | `src/index.ts` | Host routing, queue consumer, cron |
 | `src/api.ts`, `src/dl.ts`, `src/site.ts` | The three hosts |
+| `src/home.ts` | The home page: the featured gizlets as cartridges, a box that opens any repository link (`/open?url=`), and how to publish |
 | `src/registry.ts`, `src/mirror.ts`, `src/check.ts` | Indexing, mirroring, static checks, visibility |
 | `src/auth.ts` | Better Auth options; one instance and connection per request |
 | `migrations/d1/` | The registry (D1) |
 | `migrations/pg/` | Accounts (Postgres); `node scripts/pg.ts generate <name>` writes the next one after changing `src/auth.ts` |
-| `public/static/` | Stylesheet and scripts of the account pages |
+| `public/static/` | The site's stylesheet (system fonts and no inline styles, as the CSP requires) and the account pages' scripts |
 | `tests/hurl/`, `tests/sim/`, `tests/prod/` | Local suite, device simulation, production smoke checks |
 | `scripts/dev.sh` | `pnpm dev` |
 
