@@ -43,6 +43,10 @@ for _ in $(seq 1 60); do grep -q postgresql "$STATE/pg.log" 2>/dev/null && break
 DATABASE_URL=$(grep -m1 postgresql "$STATE/pg.log") node scripts/pg.ts migrate >"$STATE/pg-migrate.log" 2>&1 \
   || { cat "$STATE/pg.log" "$STATE/pg-migrate.log"; exit 1; }
 
+# The fixture's GitHub App key, one line with literal \n (src/github.ts turns them back).
+for _ in $(seq 1 60); do curl -fsS "$FIXTURE/healthz" >/dev/null 2>&1 && break; sleep 0.25; done
+APP_KEY=$(curl -fsS "$FIXTURE/_fixture/app-key" | awk '{printf "%s\\n", $0}') || { cat "$STATE/fixture.log"; exit 1; }
+
 pnpm exec wrangler d1 migrations apply gizlet --local --persist-to "$STATE/wrangler" >"$STATE/migrate.log" 2>&1 \
   || { cat "$STATE/migrate.log"; exit 1; }
 
@@ -53,6 +57,9 @@ pnpm exec wrangler dev --port "$DEV_PORT" --ip 127.0.0.1 --persist-to "$STATE/wr
   --var "GITHUB_WEB:$FIXTURE" \
   --var "GITHUB_RAW:$FIXTURE" \
   --var "GITHUB_API:$FIXTURE" \
+  --var "GITHUB_APP_CLIENT_ID:Iv-fixture" \
+  --var "GITHUB_APP_PRIVATE_KEY:$APP_KEY" \
+  --var "REFRESH_AFTER_SECONDS:3" \
   --var "OIDC_ISSUER:$FIXTURE" \
   --var "OIDC_JWKS_URL:$FIXTURE/.well-known/jwks" \
   --var "ADMIN_TOKEN:$ADMIN_TOKEN" \

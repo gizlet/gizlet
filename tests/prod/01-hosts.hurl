@@ -27,3 +27,11 @@ jsonpath "$.verification_uri" == "https://gizlet.io/device"
 
 GET https://api.gizlet.io/v1/me
 HTTP 401
+
+GET https://api.gizlet.io/v1/gizlets?sort=score&limit=1
+HTTP 200
+[Asserts]
+jsonpath "$.gizlets" exists
+
+GET https://api.gizlet.io/v1/me/ratings
+HTTP 401

@@ -10,7 +10,7 @@
 import { checkPackage } from "./check";
 import type { PackageRow, ReleaseRow } from "./db";
 import type { Env, MirrorJob } from "./env";
-import { assetUrl, ghFetch, readCapped, UpstreamError } from "./github";
+import { readCapped, reader, UpstreamError } from "./github";
 import { refreshLatest } from "./registry";
 import { compareVersions, MAX_PACKAGE_BYTES, type ReleaseIndex } from "./schema";
 
@@ -55,8 +55,7 @@ class Rejected extends Error {}
 class Superseded extends Error {}
 
 /** Stream a GitHub release asset into R2 under `key`; R2 rejects it unless it matches `sha256`. */
-async function copyToR2(env: Env, url: string, key: string, file: string, sha256: string, size: number): Promise<void> {
-  const res = await ghFetch(url);
+async function copyToR2(env: Env, res: Response, key: string, file: string, sha256: string, size: number): Promise<void> {
   if (res.status === 404) {
     await res.body?.cancel();
     throw new Rejected(`${file} is missing from the GitHub release`);
@@ -98,14 +97,32 @@ export async function deletePrefix(env: Env, prefix: string): Promise<void> {
   } while (cursor);
 }
 
-/** Set the status of one revision of a release; false when the release has moved on. */
+/** Packages of one revision whose bytes a malware scan found infected. */
+const INFECTED_PACKAGES = `SELECT 1 FROM packages p JOIN infected i ON i.sha256 = p.sha256
+  WHERE p.repo = releases.repo AND p.tag = releases.tag AND p.revision = releases.revision`;
+
+/**
+ * Set the status of one revision of a release; false when the release has moved on. Failed is
+ * final for a revision (a malware report can fail it while its job still runs), and a revision
+ * with infected packages never becomes ready.
+ */
 async function setStatus(env: Env, job: MirrorJob, status: ReleaseRow["status"], error: string | null, warnings: string[] = [], mirrored = false): Promise<boolean> {
   const res = await env.DB.prepare(
-    "UPDATE releases SET status = ?, error = ?, warnings = ?, mirrored = ?, updated_at = ? WHERE repo = ? AND tag = ? AND revision = ?",
+    `UPDATE releases SET status = ?1, error = ?2, warnings = ?3, mirrored = ?4, updated_at = ?5
+      WHERE repo = ?6 AND tag = ?7 AND revision = ?8 AND status != 'failed'
+        AND (?1 != 'ready' OR NOT EXISTS (${INFECTED_PACKAGES}))`,
   )
     .bind(status, error, JSON.stringify(warnings), mirrored ? 1 : 0, Date.now(), job.repo, job.tag, job.revision)
     .run();
   return res.meta.changes > 0;
+}
+
+/** Why a revision may not be served: the report on one of its packages' bytes, or null. */
+async function infectedError(env: Env, job: MirrorJob): Promise<string | null> {
+  const row = await env.DB.prepare("SELECT i.error FROM packages p JOIN infected i ON i.sha256 = p.sha256 WHERE p.repo = ? AND p.tag = ? AND p.revision = ? LIMIT 1")
+    .bind(job.repo, job.tag, job.revision)
+    .first<{ error: string }>();
+  return row?.error ?? null;
 }
 
 export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): Promise<void> {
@@ -119,14 +136,17 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
   const { results: pkgs } = await env.DB.prepare("SELECT * FROM packages WHERE repo = ? AND tag = ? AND revision = ?").bind(job.repo, job.tag, job.revision).all<PackageRow>();
   const warnings: string[] = [];
   try {
+    const infected = await infectedError(env, job);
+    if (infected) throw new Rejected(infected);
     if (!(await setStatus(env, job, "mirroring", null))) throw new Superseded();
+    const src = await reader(env, { owner: g.owner, name: g.name_repo, key: job.repo });
     for (const p of pkgs) {
       const key = packageKey(job.repo, job.tag, p.sha256, p.file);
       if ((await env.BUCKET.head(key))?.customMetadata?.sha256 === p.sha256) continue;
-      await copyToR2(env, assetUrl(env, g.owner, g.name_repo, job.tag, p.file), key, p.file, p.sha256, p.size);
+      await copyToR2(env, await src.asset(job.tag, p.file), key, p.file, p.sha256, p.size);
     }
     for (const file of indexedFiles(index).art) {
-      const res = await ghFetch(assetUrl(env, g.owner, g.name_repo, job.tag, file));
+      const res = await src.asset(job.tag, file);
       if (!res.ok) {
         await res.body?.cancel();
         warnings.push(`${file} is missing from the GitHub release`);
@@ -156,8 +176,59 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
   }
   if (!index.icon) warnings.push("gizlet.json names no icon");
   if (!index.description) warnings.push("gizlet.json has no description");
-  if (!(await setStatus(env, job, "ready", null, warnings, true))) return;
+  if (!(await setStatus(env, job, "ready", null, warnings, true))) {
+    // Superseded, failed by a malware report meanwhile, or its bytes were reported in another release.
+    const infected = await infectedError(env, job);
+    if (infected && (await setStatus(env, job, "failed", infected))) await settle(env, job, "failed");
+    return;
+  }
   await settle(env, job, "ready");
+}
+
+/**
+ * A malware scan found one revision of a release infected. In one transaction: record the scan,
+ * fail the revision whatever state it is in (a running job cannot undo it), remember its
+ * packages' sha256, so no later re-index serves those bytes, and fail every other release whose
+ * current revision has any of them (the same files released under another tag or repository).
+ * Then the follow-up work of every affected revision, chosen by its packages rather than by
+ * what this call changed, so reporting again redoes it all; one that throws is also queued,
+ * and the queue retries it until it is done. False when the release has moved on.
+ */
+export async function reportInfected(env: Env, job: MirrorJob, report: string, error: string): Promise<boolean> {
+  const now = Date.now();
+  const [res] = (await env.DB.batch([
+    env.DB.prepare("UPDATE releases SET scan = 'infected', scan_report = ?, status = 'failed', error = ?, updated_at = ? WHERE repo = ? AND tag = ? AND revision = ?").bind(
+      report,
+      error,
+      now,
+      job.repo,
+      job.tag,
+      job.revision,
+    ),
+    env.DB.prepare(
+      "INSERT OR IGNORE INTO infected (sha256, repo, tag, error, created_at) SELECT sha256, repo, tag, ?, ? FROM packages WHERE repo = ? AND tag = ? AND revision = ? AND EXISTS (SELECT 1 FROM releases WHERE repo = ?3 AND tag = ?4 AND revision = ?5)",
+    ).bind(error, now, job.repo, job.tag, job.revision),
+    env.DB.prepare(`UPDATE releases SET status = 'failed', error = ?, updated_at = ? WHERE status != 'failed' AND EXISTS (${INFECTED_PACKAGES})`).bind(error, now),
+  ])) as D1Result[];
+  if (!res!.meta.changes) return false;
+  const { results: affected } = await env.DB.prepare(
+    `SELECT DISTINCT r.repo, r.tag, r.revision FROM releases r
+       JOIN packages p ON p.repo = r.repo AND p.tag = r.tag AND p.revision = r.revision
+       JOIN packages q ON q.sha256 = p.sha256
+      WHERE q.repo = ? AND q.tag = ? AND q.revision = ? AND r.status = 'failed'`,
+  )
+    .bind(job.repo, job.tag, job.revision)
+    .all<MirrorJob>();
+  for (const one of affected) {
+    try {
+      await settle(env, one, "failed");
+    } catch (e) {
+      // A job for a failed revision only settles it (mirrorRelease), retried by the queue.
+      console.error("quarantine follow-up failed; queued", one, e);
+      await queueMirror(env, one.repo, one.tag, one.revision);
+    }
+  }
+  return true;
 }
 
 /**
@@ -198,7 +269,7 @@ export async function requeueStuck(env: Env): Promise<void> {
   }
 }
 
-/** Keep only the newest KEEP_MIRRORED_RELEASES releases in R2; older downloads redirect to GitHub. */
+/** Keep only the newest KEEP_MIRRORED_RELEASES releases in R2; older downloads redirect to GitHub (src/dl.ts). */
 export async function pruneMirrors(env: Env, repo: string): Promise<void> {
   const keep = Math.max(1, Number.parseInt(env.KEEP_MIRRORED_RELEASES, 10) || 2);
   const { results } = await env.DB.prepare("SELECT * FROM releases WHERE repo = ? AND status = 'ready' AND mirrored = 1").bind(repo).all<ReleaseRow>();
