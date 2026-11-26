@@ -33,8 +33,10 @@ export default {
   async fetch(request, env, ctx) {
     const { host, req } = route(request, env);
     const url = new URL(req.url);
+    // Browsers and crawlers ask for /favicon.ico whatever the page links.
+    if (url.pathname === "/favicon.ico") url.pathname = "/static/favicon.ico";
     if (url.pathname.startsWith("/static/")) {
-      const res = await env.ASSETS.fetch(req);
+      const res = await env.ASSETS.fetch(new Request(url, req));
       const out = new Response(res.body, res);
       // Fonts never change under one name; the stylesheet and scripts are revalidated on every
       // load (a 304 when unchanged), so a deploy shows at once and never pairs new pages with old CSS.

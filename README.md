@@ -76,7 +76,8 @@ pnpm test:hurl sim        # the device simulation only
 | `src/auth.ts` | Better Auth options; one instance and connection per request |
 | `migrations/d1/` | The registry (D1) |
 | `migrations/pg/` | Accounts (Postgres); `node scripts/pg.ts generate <name>` writes the next one after changing `src/auth.ts` |
-| `public/static/` | The site's stylesheet (no inline styles, as the CSP requires), Schibsted Grotesk in `fonts/` (SIL OFL), and the pages' scripts |
+| `public/static/` | The site's stylesheet (no inline styles, as the CSP requires), Schibsted Grotesk in `fonts/` (SIL OFL), the pages' scripts and the icon (`/favicon.ico` is served from here) |
+| `design/` | Design notes, and the icon's sources and organization avatar in `icon/` |
 | `tests/hurl/`, `tests/sim/`, `tests/prod/` | Local suite, device simulation, production smoke checks |
 | `scripts/dev.sh` | `pnpm dev` |
 | `mirror/`, `tests/mirror/` | An nginx reverse proxy that serves every host under another domain (`gizlet.xyz`, `api.gizlet.xyz`, ...), and its checks; see [mirror/README.md](mirror/README.md). Links in account emails use the domain the request came in on, if the `SITE_DOMAINS` repository variable lists it, else `gizlet.io` |
