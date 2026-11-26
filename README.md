@@ -8,7 +8,7 @@ Gizlet turns handhelds into pocket computers. A **gizlet** is one native Linux p
 
 Search and the featured lists only show gizlets that pass automated checks. Installing by link works for any gizlet that is not blocked.
 
-Start a gizlet from [gizlet/app-template](https://github.com/gizlet/app-template). The OS for handhelds is [gizlet/os](https://github.com/gizlet/os). Plans and open work are tracked in [#1](https://github.com/gizlet/gizlet/issues/1).
+The OS for handhelds is [gizlet/os](https://github.com/gizlet/os). Plans and open work are tracked in [#1](https://github.com/gizlet/gizlet/issues/1).
 
 ## How it works
 
@@ -43,7 +43,7 @@ One Cloudflare Worker serves every host:
 | `GET /v1/me`, `GET /v1/me/gizlets` | The signed-in user, and the gizlets in their GitHub repositories |
 | `PUT`/`DELETE /v1/admin/collections/{id}`, `POST /v1/admin/gizlets/github.com/{owner}/{repo}/visibility` | Curation, with `Authorization: Bearer $ADMIN_TOKEN` |
 
-Errors are `{"error": {"code", "message"}}`. The release index `gizlet.json` (schema 1) is the one [gizlet/app-template](https://github.com/gizlet/app-template) writes.
+Errors are `{"error": {"code", "message"}}`. The release index `gizlet.json` (schema 1) is validated by `src/schema.ts`.
 
 ## Development
 

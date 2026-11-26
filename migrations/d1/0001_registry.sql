@@ -85,11 +85,3 @@ CREATE TABLE misses (
   repo TEXT PRIMARY KEY,
   checked_at INTEGER NOT NULL
 );
-
-INSERT INTO collections (id, title, titles, layout, position) VALUES
-  ('hero', 'Featured', '{"zh-CN":"精选推荐"}', 'hero', 0),
-  ('starter', 'Make your own', '{"zh-CN":"做一个自己的"}', 'row', 40);
-
-INSERT INTO collection_items (collection_id, repo, position) VALUES
-  ('hero', 'github.com/gizlet/app-template', 0),
-  ('starter', 'github.com/gizlet/app-template', 0);

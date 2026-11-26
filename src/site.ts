@@ -49,7 +49,7 @@ site.get("/", (c) =>
       "Gizlet",
       html`<h1>Gizlet</h1>
 <p>Turn a handheld into a pocket computer. A gizlet is one native Linux program or game: build it in Rust, Go, Zig, C or Flutter, release it on GitHub, and share its link with anyone. No review to install, no store tax.</p>
-<p><a href="https://github.com/gizlet/app-template">Make a gizlet</a> · <a href="${c.env.API_ORIGIN}/v1">API</a></p>`,
+<p><a href="${c.env.API_ORIGIN}/v1">API</a> · <a href="https://github.com/gizlet/gizlet">Source</a></p>`,
     ),
   ),
 );
@@ -117,7 +117,7 @@ site.get("/github.com/:owner/:repo", async (c) => {
   const g = await ensureGizlet(c.env, r, c.executionCtx);
   if (!g) {
     return c.html(
-      page("Not found · Gizlet", html`<h1>${r.key}</h1><p>This repository has no release with a <code>gizlet.json</code>. <a href="https://github.com/gizlet/app-template">Start from the app template.</a></p>`),
+      page("Not found · Gizlet", html`<h1>${r.key}</h1><p>This repository has no release with a <code>gizlet.json</code>.</p>`),
       404,
     );
   }

@@ -121,7 +121,7 @@ async function gizletOr404(c: C): Promise<{ gizlet: GizletRow } | { error: Respo
       .bind(r.key)
       .first<{ tag: string; error: string | null }>();
     if (failed) return { error: apiError(c, 404, "failed_checks", `${r.key} has no release that passed its checks; ${failed.tag}: ${failed.error ?? "failed"}`) };
-    return { error: apiError(c, 404, "not_found", `${r.key} has no release with a gizlet.json; see https://github.com/gizlet/app-template`) };
+    return { error: apiError(c, 404, "not_found", `${r.key} has no release with a gizlet.json`) };
   }
   if (g.visibility === "blocked") return { error: apiError(c, 403, "blocked", `${r.key} is blocked: ${g.visibility_reason ?? "removed by Gizlet"}`) };
   return { gizlet: g };
