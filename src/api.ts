@@ -6,7 +6,7 @@ import { featured, getGizlet, gizletDetail, LIST_SORTS, listGizlets, listRelease
 import { findHandheld, HANDHELDS, handheldJson, wantCounts, type Handheld } from "./devices";
 import type { Env } from "./env";
 import { canManage, NotFound, reader, UpstreamError, UserTokenRejected } from "./github";
-import { claimLink, getLink, LINK_MAX, LINK_MIN, linkProblem, minLengthOf, normalizeLinkId, releaseLink, resolveLink, shortUrl, type LinkProblem } from "./links";
+import { adoptRepositoryId, claimLink, getLink, LINK_MAX, LINK_MIN, linkProblem, minLengthOf, normalizeLinkId, releaseLink, resolveLink, shortUrl, type LinkProblem } from "./links";
 import { reportInfected } from "./mirror";
 import { AuthError, verifyActionsToken } from "./oidc";
 import { ensureGizlet, indexRelease, setVisibility } from "./registry";
@@ -390,7 +390,11 @@ api.get("/v1/links/:id", async (c) => {
 
 const MY_LINK = "/v1/me/gizlets/github.com/:owner/:repo/link";
 
-/** The gizlet the route names, if the user may set its link now: admin or maintain on GitHub, asked live. */
+/**
+ * The gizlet the route names, if the user may set its link now: admin or maintain on GitHub, asked
+ * live. A gizlet indexed without GitHub's repository id (read from the public web) takes the id
+ * GitHub just gave, so its links are bound to the repository rather than its path.
+ */
 async function managedGizlet(c: C, u: MeUser, pool: AuthPool): Promise<{ gizlet: GizletRow } | { error: Response }> {
   const r = ref(c);
   if (!r) return { error: apiError(c, 400, "bad_request", "not a GitHub repository") };
@@ -399,15 +403,15 @@ async function managedGizlet(c: C, u: MeUser, pool: AuthPool): Promise<{ gizlet:
   if (g.visibility === "blocked") return { error: apiError(c, 403, "blocked", `${r.key} is blocked`) };
   const token = u.githubLogin ? await githubToken(pool, u.id) : null;
   if (!token) return { error: apiError(c, 403, "github_not_linked", "link GitHub first") };
+  let id: number | null;
   try {
-    if (!(await canManage(c.env, token, { owner: g.owner, name: g.name_repo, key: g.repo }, g.repository_id ?? null))) {
-      return { error: apiError(c, 403, "forbidden", `only admins and maintainers of ${g.owner}/${g.name_repo} can set its short link`) };
-    }
+    id = await canManage(c.env, token, { owner: g.owner, name: g.name_repo, key: g.repo }, g.repository_id ?? null);
   } catch (e) {
     if (e instanceof UserTokenRejected) return { error: apiError(c, 403, "github_relink", "GitHub no longer accepts the linked account; link GitHub again") };
     throw e;
   }
-  return { gizlet: g };
+  if (id === null) return { error: apiError(c, 403, "forbidden", `only admins and maintainers of ${g.owner}/${g.name_repo} can set its short link`) };
+  return { gizlet: await adoptRepositoryId(c.env, g, id) };
 }
 
 /** Body: {"id": "<short id>"}. Sets the gizlet's short link; its previous one keeps working for 30 days. */

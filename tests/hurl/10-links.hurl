@@ -9,6 +9,11 @@ GET {{base}}/v1/gizlets/github.com/fixture-org/rocket-snail
 x-gizlet-host: api.gizlet.io
 HTTP 200
 
+# Indexed from the public web, so the registry has no GitHub repository id for it yet.
+GET {{base}}/v1/gizlets/github.com/fixture-org/on-demand
+x-gizlet-host: api.gizlet.io
+HTTP 200
+
 # Nothing there yet; ids that cannot be links say why.
 GET {{base}}/v1/links/hello-gizlet
 x-gizlet-host: api.gizlet.io
@@ -177,6 +182,19 @@ x-gizlet-host: gizlet.io
 HTTP 302
 [Asserts]
 header "Location" == "/github.com/fixture-org/hello-gizlet"
+
+# A gizlet without a GitHub id takes the one the permission check returns (tests/unit/links.test.ts).
+PUT {{base}}/v1/me/gizlets/github.com/fixture-org/on-demand/link
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{dev}}
+{"id": "on-demand-app"}
+HTTP 200
+
+GET {{base}}/on-demand-app
+x-gizlet-host: gizlet.io
+HTTP 302
+[Asserts]
+header "Location" == "/github.com/fixture-org/on-demand"
 
 # The site's own paths still win.
 GET {{base}}/explore

@@ -364,21 +364,22 @@ export async function userOrgs(env: Pick<Env, "GITHUB_API">, token: string): Pro
 }
 
 /**
- * Whether the user may manage a repository now (admin or maintain), asked of GitHub. `id` must be
- * the repository's GitHub id where known: another repository created at the path does not count.
+ * The repository's GitHub id if the user may manage it now (admin or maintain), asked of GitHub;
+ * else null. `id` must be the repository's GitHub id where known: another repository created at
+ * the path does not count.
  */
-export async function canManage(env: Pick<Env, "GITHUB_API">, token: string, ref: RepoRef, id: number | null): Promise<boolean> {
+export async function canManage(env: Pick<Env, "GITHUB_API">, token: string, ref: RepoRef, id: number | null): Promise<number | null> {
   const res = await userFetch(env, token, `/repos/${ref.owner}/${ref.name}`);
   if (res.status === 403 || res.status === 404) {
     await res.body?.cancel();
-    return false;
+    return null;
   }
   if (!res.ok) {
     await res.body?.cancel();
     throw new UpstreamError(`GitHub answered ${res.status} for ${ref.key}`);
   }
   const r = (await res.json()) as { id: number; permissions?: { admin?: boolean; maintain?: boolean } };
-  return (id === null || r.id === id) && manages(r.permissions);
+  return (id === null || r.id === id) && manages(r.permissions) ? r.id : null;
 }
 
 // --- GitHub App authentication ------------------------------------------------------------------

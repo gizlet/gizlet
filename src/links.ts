@@ -77,15 +77,13 @@ export async function getLink(env: Env, id: string): Promise<LinkRow | null> {
 }
 
 /**
- * The gizlet a link points at: by repository id (the newest name it was indexed under). Its old
- * path only counts while the gizlet there has no other id: a repository deleted and created again
- * at the same path is another gizlet.
+ * The gizlet a link points at: by repository id (the newest name it was indexed under), never by
+ * path, since a repository deleted and created again at the same path is another gizlet. The
+ * registry keeps a gizlet's id once known. Links set before the id was known go by path.
  */
 async function linkTarget(env: Env, l: LinkRow): Promise<GizletRow | null> {
   if (l.repository_id != null) {
-    const g = await env.DB.prepare("SELECT * FROM gizlets WHERE repository_id = ? ORDER BY updated_at DESC LIMIT 1").bind(l.repository_id).first<GizletRow>();
-    if (g) return g;
-    return env.DB.prepare("SELECT * FROM gizlets WHERE repo = ? AND repository_id IS NULL").bind(l.repo).first<GizletRow>();
+    return env.DB.prepare("SELECT * FROM gizlets WHERE repository_id = ? ORDER BY updated_at DESC LIMIT 1").bind(l.repository_id).first<GizletRow>();
   }
   return env.DB.prepare("SELECT * FROM gizlets WHERE repo = ?").bind(l.repo).first<GizletRow>();
 }
@@ -158,6 +156,20 @@ export async function releaseLink(env: Env, g: Gizlet): Promise<string | null> {
     .bind(Date.now() + LINK_HOLD_MS, keysOf(g))
     .first<{ id: string }>();
   return row?.id ?? null;
+}
+
+/**
+ * Bind a gizlet indexed without GitHub's repository id (read from the public web) to the id GitHub
+ * just confirmed, with the links it already has: from then on they follow the repository, and
+ * another repository created at its path is another gizlet.
+ */
+export async function adoptRepositoryId<T extends Gizlet>(env: Env, g: T, id: number): Promise<T> {
+  if (g.repository_id != null) return g;
+  await env.DB.batch([
+    env.DB.prepare("UPDATE gizlets SET repository_id = ? WHERE repo = ? AND repository_id IS NULL").bind(id, g.repo),
+    env.DB.prepare("UPDATE links SET gizlet = ?, repository_id = ? WHERE gizlet = ?").bind(`id:${id}`, id, `repo:${g.repo}`),
+  ]);
+  return { ...g, repository_id: id };
 }
 
 /** The short URL for an id, on the site's own host. */

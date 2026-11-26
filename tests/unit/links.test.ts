@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import {
+  adoptRepositoryId,
   claimLink,
   currentLink,
   DEFAULT_LINK_MIN_LENGTH,
@@ -70,7 +71,7 @@ test("a link belongs to a gizlet by GitHub repository id where both know it, els
 /** D1 on an in-memory SQLite: each call awaits first, so concurrent callers interleave; a batch is one transaction. */
 function d1() {
   const db = new DatabaseSync(":memory:");
-  db.exec(readFileSync(new URL("../../migrations/d1/0005_links.sql", import.meta.url), "utf8"));
+  db.exec(readFileSync(new URL("../../migrations/d1/0006_links.sql", import.meta.url), "utf8"));
   db.exec("CREATE TABLE gizlets (repo TEXT PRIMARY KEY, repository_id INTEGER, visibility TEXT NOT NULL DEFAULT 'listed', updated_at INTEGER NOT NULL DEFAULT 0)");
   const tick = () => new Promise((r) => setImmediate(r));
   type Arg = string | number | null;
@@ -148,4 +149,28 @@ test("a link follows its repository's id, never another repository created at it
   // Deleted, and another repository created at the old path: the link leads nowhere.
   db.exec("DELETE FROM gizlets; INSERT INTO gizlets (repo, repository_id) VALUES ('github.com/o/a', 99)");
   assert.equal(await resolveLink(env, "follow-me"), null);
+});
+
+test("a gizlet indexed without GitHub's id takes the one GitHub confirms, and so do its links", async () => {
+  const { db, env } = d1();
+  db.exec("INSERT INTO gizlets (repo, repository_id) VALUES ('github.com/o/web', NULL)");
+  const web = { repo: "github.com/o/web", repository_id: null };
+  await claimLink(env, web, "early-one", "u1");
+  assert.equal(db.prepare("SELECT gizlet FROM links WHERE id = 'early-one'").get()!.gizlet, "repo:github.com/o/web");
+  // Setting a link again: the permission check returned GitHub's id 7.
+  const bound = await adoptRepositoryId(env, web, 7);
+  assert.equal(bound.repository_id, 7);
+  assert.equal(db.prepare("SELECT repository_id FROM gizlets").get()!.repository_id, 7);
+  assert.deepEqual(await claimLink(env, bound, "later-one", "u1"), { ok: true, id: "later-one" });
+  assert.deepEqual(
+    db.prepare("SELECT id, gizlet FROM links ORDER BY id").all().map((r) => ({ ...r })),
+    [
+      { id: "early-one", gizlet: "id:7" },
+      { id: "later-one", gizlet: "id:7" },
+    ],
+  );
+  // The repository is deleted and another is indexed at its path: neither link leads there.
+  db.exec("DELETE FROM gizlets; INSERT INTO gizlets (repo, repository_id) VALUES ('github.com/o/web', NULL)");
+  assert.equal(await resolveLink(env, "later-one"), null);
+  assert.equal(await resolveLink(env, "early-one"), null);
 });
