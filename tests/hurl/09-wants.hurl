@@ -132,12 +132,18 @@ HTTP 200
 [Asserts]
 xpath "string(//button[@data-device='k36']/preceding-sibling::span[@class='want-n'])" == "1 人想要"
 
+# The account page draws each as a card, newest first, with how many want it.
 GET {{base}}/account?lang=en
 x-gizlet-host: gizlet.io
+Authorization: Bearer {{wanter}}
 HTTP 200
 [Asserts]
-xpath "count(//ul[@id='wants'])" == 1
-xpath "string(//h2)" == "Handhelds you want"
+xpath "string(//section[@id='panel-handhelds']//h2)" == "Handhelds you want"
+xpath "count(//ul[@id='wants']/li)" == 2
+xpath "string(//ul[@id='wants']/li[1]//h3)" == "K36"
+xpath "count(//ul[@id='wants']//div[contains(@class, 'handheld')])" == 2
+xpath "string(//ul[@id='wants']/li[2]//button[contains(@class, 'unwant')]/@data-handheld)" == "r35s"
+xpath "string(//a[@id='tab-handhelds']/span[@class='n'])" == "2"
 
 DELETE {{base}}/v1/me/wants/r35s
 x-gizlet-host: api.gizlet.io

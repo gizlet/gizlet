@@ -315,7 +315,166 @@ function assetIds(rel: ReleaseJson): Map<string, number> {
   return new Map(rel.assets.map((a) => [a.name, a.id]));
 }
 
+// --- As a signed-in user ------------------------------------------------------------------------
+
+/** GitHub no longer accepts the user's token (revoked, or the OAuth app was removed): link GitHub again. */
+export class UserTokenRejected extends Error {}
+
+async function userFetch(env: Pick<Env, "GITHUB_API">, token: string, path: string): Promise<Response> {
+  const res = await ghFetch(`${env.GITHUB_API}${path}`, {
+    headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
+  });
+  if (res.status === 401) {
+    await res.body?.cancel();
+    throw new UserTokenRejected("GitHub rejected the linked account's token");
+  }
+  return res;
+}
+
+/** Whether repository permissions let a user manage a gizlet: admin or maintain. */
+const manages = (p: { admin?: boolean; maintain?: boolean } | undefined) => Boolean(p?.admin || p?.maintain);
+
+/** Who a token belongs to now: GitHub's id for the account, which never changes, and its current login, which can. */
+export async function githubUser(env: Pick<Env, "GITHUB_API">, token: string): Promise<{ id: number; login: string }> {
+  const res = await userFetch(env, token, "/user");
+  if (!res.ok) {
+    await res.body?.cancel();
+    throw new UpstreamError(`GitHub answered ${res.status} for the user`);
+  }
+  const u = (await res.json()) as { id: number; login: string };
+  return { id: u.id, login: u.login };
+}
+
+/**
+ * The repositories a user can see as owner, collaborator or organization member, by canonical key
+ * (github.com/<owner>/<name>, lowercase), with GitHub's id and whether they may manage each. Up to 500.
+ */
+export async function userRepos(env: Pick<Env, "GITHUB_API">, token: string): Promise<Map<string, { id: number; manage: boolean }>> {
+  const out = new Map<string, { id: number; manage: boolean }>();
+  for (let page = 1; page <= 5; page++) {
+    const res = await userFetch(env, token, `/user/repos?per_page=100&page=${page}&affiliation=owner,collaborator,organization_member`);
+    if (!res.ok) {
+      await res.body?.cancel();
+      throw new UpstreamError(`GitHub answered ${res.status} for the user's repositories`);
+    }
+    const repos = (await res.json()) as { id: number; full_name: string; permissions?: { admin?: boolean; maintain?: boolean } }[];
+    for (const r of repos) out.set(`github.com/${r.full_name}`.toLowerCase(), { id: r.id, manage: manages(r.permissions) });
+    if (repos.length < 100) break;
+  }
+  return out;
+}
+
+/** The organizations a user belongs to, by login. */
+export async function userOrgs(env: Pick<Env, "GITHUB_API">, token: string): Promise<string[]> {
+  const res = await userFetch(env, token, "/user/orgs?per_page=100");
+  if (!res.ok) {
+    await res.body?.cancel();
+    throw new UpstreamError(`GitHub answered ${res.status} for the user's organizations`);
+  }
+  return ((await res.json()) as { login: string }[]).map((o) => o.login);
+}
+
+/**
+ * The repository's GitHub id if the user may manage it now (admin or maintain), asked of GitHub;
+ * else null. `id` must be the repository's GitHub id where known: another repository created at
+ * the path does not count.
+ */
+export async function canManage(env: Pick<Env, "GITHUB_API">, token: string, ref: RepoRef, id: number | null): Promise<number | null> {
+  const res = await userFetch(env, token, `/repos/${ref.owner}/${ref.name}`);
+  if (res.status === 403 || res.status === 404) {
+    await res.body?.cancel();
+    return null;
+  }
+  if (!res.ok) {
+    await res.body?.cancel();
+    throw new UpstreamError(`GitHub answered ${res.status} for ${ref.key}`);
+  }
+  const r = (await res.json()) as { id: number; permissions?: { admin?: boolean; maintain?: boolean } };
+  return (id === null || r.id === id) && manages(r.permissions) ? r.id : null;
+}
+
 // --- GitHub App authentication ------------------------------------------------------------------
+
+const appConfigured = (env: Env) => Boolean(env.GITHUB_APP_CLIENT_ID && env.GITHUB_APP_PRIVATE_KEY);
+
+let someInstallation: { id: Promise<number | null>; until: number } | undefined;
+
+/** Any installation of the app: its token reads public repositories at the app's rate limit. */
+function anyInstallation(env: Env): Promise<number | null> {
+  if (someInstallation && someInstallation.until > Date.now()) return someInstallation.id;
+  const id = (async () => {
+    const res = await appFetch(env, "/app/installations?per_page=1");
+    if (!res.ok) {
+      await res.body?.cancel();
+      return null;
+    }
+    return ((await res.json()) as { id: number }[])[0]?.id ?? null;
+  })().catch(() => null);
+  someInstallation = { id, until: Date.now() + INSTALLATION_TTL_MS };
+  return id;
+}
+
+async function appHeaders(env: Env, installation: number): Promise<Headers> {
+  return new Headers({ authorization: `Bearer ${await installationToken(env, installation)}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" });
+}
+
+/**
+ * GitHub's id for the repository at a path now (following a rename), null when there is none, or
+ * undefined when GitHub did not say. Asked with an app installation token where the app is
+ * configured, else without credentials.
+ */
+export async function repositoryIdAt(env: Env, ref: RepoRef): Promise<number | null | undefined> {
+  const r = await appGet(env, `/repos/${ref.owner}/${ref.name}`, ref.key);
+  return r && r.id;
+}
+
+/** Where the repository with a GitHub id is now, null when it is gone, or undefined when GitHub did not say. */
+export async function repositoryById(env: Env, id: number): Promise<RepoInfo | null | undefined> {
+  const r = await appGet(env, `/repositories/${id}`, String(id));
+  return r && { id: r.id, owner: r.owner.login, name: r.name, private: r.private };
+}
+
+/** A repository from the API, as the app (or anyone, without the app): null for a 404, undefined when GitHub did not say. */
+async function appGet(env: Env, path: string, what: string): Promise<{ id: number; name: string; private: boolean; owner: { login: string } } | null | undefined> {
+  try {
+    const installation = appConfigured(env) ? await anyInstallation(env) : null;
+    const headers = installation === null ? new Headers({ accept: "application/vnd.github+json" }) : await appHeaders(env, installation);
+    const res = await ghFetch(`${env.GITHUB_API}${path}`, { headers });
+    if (!res.ok) {
+      await res.body?.cancel();
+      return res.status === 404 ? null : undefined;
+    }
+    return (await res.json()) as { id: number; name: string; private: boolean; owner: { login: string } };
+  } catch (e) {
+    console.error("repository lookup failed", what, e);
+    return undefined;
+  }
+}
+
+/**
+ * Like canManage, for a repository the app is installed on, asked by the user's GitHub login: users'
+ * tokens do not see private repositories (that would take the `repo` scope), the app does.
+ */
+export async function appCanManage(env: Env, ref: RepoRef, login: string, id: number | null): Promise<number | null> {
+  if (!appConfigured(env)) return null;
+  try {
+    const installation = await installationFor(env, ref);
+    if (installation === null) return null;
+    const headers = await appHeaders(env, installation);
+    const base = `${env.GITHUB_API}/repos/${ref.owner}/${ref.name}`;
+    const [repo, perm] = await Promise.all([ghFetch(base, { headers }), ghFetch(`${base}/collaborators/${encodeURIComponent(login)}/permission`, { headers })]);
+    if (!repo.ok || !perm.ok) {
+      await Promise.all([repo.body?.cancel(), perm.body?.cancel()]);
+      return null;
+    }
+    const r = (await repo.json()) as { id: number };
+    const p = (await perm.json()) as { role_name?: string };
+    return (p.role_name === "admin" || p.role_name === "maintain") && (id === null || r.id === id) ? r.id : null;
+  } catch (e) {
+    if (e instanceof TokenDenied || e instanceof UpstreamError) return null;
+    throw e;
+  }
+}
 
 /** Per isolate: the installation that covers each repository (null: none), and installation tokens. */
 const installations = new Map<string, { id: number | null; until: number }>();

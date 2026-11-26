@@ -1,10 +1,12 @@
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
-import { createAuth, devOutbox } from "./auth";
+import { githubAccount, myDevices, myGizlets, myWants, signInMethods, signOutDevice, type AccountUser } from "./account";
+import { createAuth, devGithubUrl, devOutbox, siteDomains } from "./auth";
 import { featured, getGizlet, gizletDetail, LIST_SORTS, listGizlets, listReleases, packageJson, pickInstall, releaseJson, summary, VISIBILITIES, type GizletRow, type ListSort, type PackageRow, type ReleaseRow } from "./db";
 import { findHandheld, HANDHELDS, handheldJson, wantCounts, type Handheld } from "./devices";
 import type { Env } from "./env";
-import { NotFound, reader, UpstreamError } from "./github";
+import { appCanManage, canManage, githubUser, NotFound, repositoryIdAt, reader, UpstreamError, UserTokenRejected } from "./github";
+import { adoptRepositoryId, claimLink, getLink, LINK_MAX, LINK_MIN, linkProblem, minLengthOf, normalizeLinkId, releaseLink, resolveLink, shortLinkIn, shortUrl, type LinkProblem } from "./links";
 import { reportInfected } from "./mirror";
 import { AuthError, verifyActionsToken } from "./oidc";
 import { ensureGizlet, indexRelease, setVisibility } from "./registry";
@@ -29,7 +31,7 @@ function ref(c: C): RepoRef | null {
 }
 
 /** Run `fn` with a per-request Better Auth instance, closing its connection afterwards. */
-export async function withAuth<T>(c: C, fn: (a: ReturnType<typeof createAuth>) => Promise<T>): Promise<T> {
+export async function withAuth<T>(c: { env: Env; executionCtx: { waitUntil(p: Promise<unknown>): void } }, fn: (a: ReturnType<typeof createAuth>) => Promise<T>): Promise<T> {
   const a = createAuth(c.env);
   try {
     return await fn(a);
@@ -38,8 +40,25 @@ export async function withAuth<T>(c: C, fn: (a: ReturnType<typeof createAuth>) =
   }
 }
 
+/** Local runs: the browser goes to the fixture's GitHub authorize page instead of github.com's (devGithubUrl). */
+async function devGithubResponse(env: Env, res: Response): Promise<Response> {
+  const location = res.headers.get("location");
+  const json = (res.headers.get("content-type") ?? "").includes("application/json");
+  const data = json ? ((await res.clone().json().catch(() => null)) as { url?: unknown } | null) : null;
+  const url = typeof data?.url === "string" ? data.url : null;
+  if ((!location || devGithubUrl(env, location) === location) && (!url || devGithubUrl(env, url) === url)) return res;
+  const out = new Response(url ? JSON.stringify({ ...data, url: devGithubUrl(env, url) }) : res.body, res);
+  if (url) out.headers.delete("content-length");
+  if (location) out.headers.set("location", devGithubUrl(env, location));
+  return out;
+}
+
 /** The Better Auth handler, mounted under /v1/auth on gizlet.io and api.gizlet.io. */
-export const authHandler = (c: C) => withAuth(c, ({ auth }) => auth.handler(c.req.raw));
+export const authHandler = (c: C) =>
+  withAuth(c, async ({ auth }) => {
+    const res = await auth.handler(c.req.raw);
+    return c.env.DEV_HOST_OVERRIDE === "1" ? devGithubResponse(c.env, res) : res;
+  });
 
 export const api = new Hono<App>();
 
@@ -86,11 +105,15 @@ api.get("/v1", (c) =>
       "GET /v1/gizlets/github.com/{owner}/{repo}/releases/{tag}",
       "GET /v1/gizlets/github.com/{owner}/{repo}/install?target=&tier=",
       "GET /v1/resolve?url=",
+      "GET /v1/links/{id}",
       "GET /v1/handhelds?status=",
       "POST /v1/publish",
       "/v1/auth/* (Better Auth: sign-up/email, sign-in/email, sign-in/social, device/code, device/token, ...)",
       "GET /v1/me",
       "GET /v1/me/gizlets",
+      "PUT|DELETE /v1/me/gizlets/github.com/{owner}/{repo}/link",
+      "GET /v1/me/devices",
+      "DELETE /v1/me/devices/{id}",
       "GET /v1/me/ratings",
       "PUT|DELETE /v1/me/ratings/github.com/{owner}/{repo}",
       "GET /v1/me/wants",
@@ -193,9 +216,19 @@ api.get(`${GIZLET}/install`, async (c) => {
   return c.json({ repo: r.gizlet.repo, id: r.gizlet.app_id, name: r.gizlet.name, kind: pkg.kind, version: pkg.version, tag: pkg.tag, package: packageJson(c.env, pkg) }, 200, { "cache-control": "no-store" });
 });
 
-api.get("/v1/resolve", (c) => {
+/** The hosts short links are on: the site's, and its mirrors' (SITE_DOMAINS). */
+export const siteHosts = (env: Env) => [new URL(env.SITE_ORIGIN).host.toLowerCase(), ...siteDomains(env)];
+
+/** Any way of writing a repository, or a short link to a gizlet (gizlet.io/<id>). */
+api.get("/v1/resolve", async (c) => {
   const url = c.req.query("url") ?? "";
-  const r = parseRepoAddress(url);
+  let r = parseRepoAddress(url);
+  const short = r ? null : shortLinkIn(url, siteHosts(c.env));
+  if (short) {
+    const found = await resolveLink(c.env, short);
+    if (!found) return apiError(c, 404, "not_found", `${short} leads nowhere`);
+    r = { owner: found.gizlet.owner, name: found.gizlet.name_repo, key: found.gizlet.repo };
+  }
   if (!r) return apiError(c, 400, "bad_request", `${JSON.stringify(url.slice(0, 200))} is not a GitHub repository address`);
   return c.json({
     repo: r.key,
@@ -204,6 +237,7 @@ api.get("/v1/resolve", (c) => {
     api_url: `${c.env.API_ORIGIN}/v1/gizlets/${r.key}`,
     share_url: `${c.env.SITE_ORIGIN}/${r.key}`,
     github_url: `https://github.com/${r.owner}/${r.name}`,
+    ...(short ? { short_link: short } : {}),
   });
 });
 
@@ -273,15 +307,19 @@ api.post("/v1/publish", async (c) => {
 
 api.on(["GET", "POST"], "/v1/auth/*", authHandler);
 
-interface MeUser {
-  id: string;
-  name: string;
-  email: string;
-  emailVerified: boolean;
-  image?: string | null;
-  githubLogin?: string | null;
-  createdAt: Date;
+type MeUser = AccountUser;
+type AuthPool = ReturnType<typeof createAuth>["pool"];
+
+/** The signed-in user (session cookie or bearer token), or a 401. */
+async function signedIn(c: C, fn: (user: MeUser, pool: AuthPool) => Promise<Response>): Promise<Response> {
+  return withAuth(c, async ({ auth, pool }) => {
+    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    if (!session) return apiError(c, 401, "unauthorized", "sign in first");
+    return fn(session.user as MeUser, pool);
+  });
 }
+
+const noStore = { "cache-control": "no-store" };
 
 /** The signed-in user (session cookie or `Authorization: Bearer <token>`), with linked sign-in methods. */
 api.get("/v1/me", (c) =>
@@ -289,45 +327,141 @@ api.get("/v1/me", (c) =>
     const session = await auth.api.getSession({ headers: c.req.raw.headers });
     if (!session) return apiError(c, 401, "unauthorized", "sign in first");
     const u = session.user as MeUser;
-    const { rows } = await pool.query<{ providerId: string; accountId: string }>(`SELECT "providerId", "accountId" FROM account WHERE "userId" = $1 ORDER BY "createdAt"`, [u.id]);
+    const accounts = await signInMethods(pool, u.id);
     return c.json(
       {
-        user: { id: u.id, name: u.name, email: u.email, email_verified: u.emailVerified, image: u.image ?? null, github_login: u.githubLogin ?? null, created_at: new Date(u.createdAt).toISOString() },
-        sign_in_methods: rows.map((a) => (a.providerId === "credential" ? "email" : a.providerId)),
+        user: {
+          id: u.id,
+          name: u.name,
+          email: u.email,
+          email_verified: u.emailVerified,
+          image: u.image ?? null,
+          github_login: u.githubLogin ?? null,
+          link_min_length: minLengthOf(u.linkMinLength),
+          created_at: new Date(u.createdAt).toISOString(),
+        },
+        sign_in_methods: accounts.map((a) => a.provider),
+        accounts,
         session: { expires_at: new Date(session.session.expiresAt).toISOString() },
       },
       200,
-      { "cache-control": "no-store" },
+      noStore,
     );
   }),
 );
 
-/** Gizlets in repositories owned by the user's linked GitHub account, including unlisted ones. */
-api.get("/v1/me/gizlets", (c) =>
-  withAuth(c, async ({ auth }) => {
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
-    if (!session) return apiError(c, 401, "unauthorized", "sign in first");
-    const login = (session.user as MeUser).githubLogin;
-    if (!login) return c.json({ github_login: null, gizlets: [] }, 200, { "cache-control": "no-store" });
-    const rows = await listGizlets(c.env, { owner: login, all: true, limit: 100, offset: 0 });
-    return c.json(
-      { github_login: login, gizlets: rows.map((g) => ({ ...summary(c.env, g), visibility_reason: g.visibility_reason })) },
-      200,
-      { "cache-control": "no-store" },
-    );
+/**
+ * Gizlets in repositories of the user's linked GitHub account and its organizations, any
+ * visibility, with their checks, short link and whether the user may set it (src/account.ts).
+ */
+api.get("/v1/me/gizlets", (c) => signedIn(c, async (u, pool) => c.json(await myGizlets(c.env, pool, u), 200, noStore)));
+
+// --- Devices: consoles signed in through the device flow --------------------------------------
+
+api.get("/v1/me/devices", (c) => signedIn(c, async (u, pool) => c.json({ devices: await myDevices(pool, u.id) }, 200, noStore)));
+
+/** Sign a device out: its session ends, so its token stops working. */
+api.delete("/v1/me/devices/:id", (c) =>
+  signedIn(c, async (u, pool) => {
+    if (!(await signOutDevice(pool, u.id, c.req.param("id")))) return apiError(c, 404, "not_found", "no such device");
+    return c.body(null, 204);
+  }),
+);
+
+// --- Short links (src/links.ts) ----------------------------------------------------------------
+
+const LINK_MESSAGES: Record<LinkProblem, string> = {
+  format: "an id is lowercase letters, digits and single hyphens, starting with a letter and ending with a letter or digit",
+  reserved: "that id is reserved",
+  too_short: "that id is too short",
+  too_long: `an id has at most ${LINK_MAX} characters`,
+};
+
+function linkError(c: C, problem: LinkProblem, min = LINK_MIN) {
+  const code = problem === "reserved" ? "reserved" : problem === "too_short" ? "too_short" : "bad_link";
+  return apiError(c, 400, code, problem === "too_short" ? `ids need at least ${min} characters` : LINK_MESSAGES[problem], { problem, min_length: min });
+}
+
+const linkJson = (c: C, id: string, g: GizletRow) => ({ id, url: shortUrl(c.env, id), repo: g.repo, share_url: `${c.env.SITE_ORIGIN}/${g.repo}` });
+
+/** Where a short link leads. A 404 says whether the id could be claimed (`available`). */
+api.get("/v1/links/:id", async (c) => {
+  const id = normalizeLinkId(c.req.param("id"));
+  const problem = linkProblem(id);
+  if (problem) return linkError(c, problem);
+  const r = await resolveLink(c.env, id);
+  if (!r) {
+    const held = await getLink(c.env, id);
+    const available = !held || (held.expires_at !== null && held.expires_at <= Date.now());
+    return apiError(c, 404, "not_found", `${id} leads nowhere`, { available });
+  }
+  const expires = r.link.expires_at;
+  return c.json({ ...linkJson(c, id, r.gizlet), current: expires === null, expires_at: expires ? new Date(expires).toISOString() : null }, 200, noStore);
+});
+
+const MY_LINK = "/v1/me/gizlets/github.com/:owner/:repo/link";
+
+/**
+ * The gizlet the route names, if the user may set its link now: admin or maintain on GitHub, asked
+ * live: with the user's token, or for a private repository (which that token cannot see) through
+ * the app installed on it. A gizlet indexed without GitHub's repository id (read from the public
+ * web) takes the id GitHub just gave, so its links are bound to the repository rather than its path.
+ */
+async function managedGizlet(c: C, u: MeUser, pool: AuthPool): Promise<{ gizlet: GizletRow } | { error: Response }> {
+  const r = ref(c);
+  if (!r) return { error: apiError(c, 400, "bad_request", "not a GitHub repository") };
+  const g = await getGizlet(c.env, r.key);
+  if (!g) return { error: apiError(c, 404, "not_found", `${r.key} is not a gizlet`) };
+  if (g.visibility === "blocked") return { error: apiError(c, 403, "blocked", `${r.key} is blocked`) };
+  const account = u.githubLogin ? await githubAccount(pool, u.id) : null;
+  if (!account) return { error: apiError(c, 403, "github_not_linked", "link GitHub first") };
+  let id: number | null;
+  const repo = { owner: g.owner, name: g.name_repo, key: g.repo };
+  try {
+    id = await canManage(c.env, account.token, repo, g.repository_id ?? null);
+    if (id === null && g.private === 1) {
+      // The app is asked by login, which GitHub lets people change and others then take: use the
+      // login the token's owner has now, once GitHub's id for them is the linked account's.
+      const me = await githubUser(c.env, account.token);
+      if (String(me.id) === account.githubId) id = await appCanManage(c.env, repo, me.login, g.repository_id ?? null);
+    }
+  } catch (e) {
+    if (e instanceof UserTokenRejected) return { error: apiError(c, 403, "github_relink", "GitHub no longer accepts the linked account; link GitHub again") };
+    throw e;
+  }
+  if (id === null) return { error: apiError(c, 403, "forbidden", `only admins and maintainers of ${g.owner}/${g.name_repo} can set its short link`) };
+  return { gizlet: await adoptRepositoryId(c.env, g, id) };
+}
+
+/** Body: {"id": "<short id>"}. Sets the gizlet's short link; its previous one keeps working for 30 days. */
+api.put(MY_LINK, (c) =>
+  signedIn(c, async (u, pool) => {
+    const b = await c.req.json<{ id?: unknown }>().catch(() => null);
+    if (typeof b?.id !== "string") return apiError(c, 400, "bad_request", 'body must be {"id": "<short id>"}');
+    const id = normalizeLinkId(b.id);
+    const min = minLengthOf(u.linkMinLength);
+    const problem = linkProblem(id, min);
+    if (problem) return linkError(c, problem, min);
+    const m = await managedGizlet(c, u, pool);
+    if ("error" in m) return m.error;
+    const res = await claimLink(c.env, m.gizlet, id, u.id);
+    if (!res.ok) return apiError(c, 409, "taken", `${id} is taken`);
+    return c.json(linkJson(c, id, m.gizlet), 200, noStore);
+  }),
+);
+
+/** Remove the gizlet's short link; it keeps working, and stays the gizlet's, for 30 days. */
+api.delete(MY_LINK, (c) =>
+  signedIn(c, async (u, pool) => {
+    const m = await managedGizlet(c, u, pool);
+    if ("error" in m) return m.error;
+    const id = await releaseLink(c.env, m.gizlet);
+    if (!id) return apiError(c, 404, "not_found", `${m.gizlet.repo} has no short link`);
+    return c.body(null, 204);
   }),
 );
 
 // --- Ratings -----------------------------------------------------------------------------------
-
-/** The signed-in user, or an error response. */
-async function signedIn(c: C, fn: (user: MeUser) => Promise<Response>): Promise<Response> {
-  return withAuth(c, async ({ auth }) => {
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
-    if (!session) return apiError(c, 401, "unauthorized", "sign in first");
-    return fn(session.user as MeUser);
-  });
-}
 
 const ratingOf = (g: Pick<GizletRow, "rating_count" | "rating_sum">) => ({ average: ratingAverage(g.rating_count, g.rating_sum), count: g.rating_count });
 
@@ -396,20 +530,7 @@ api.delete(RATING, (c) =>
 // --- Wants: handhelds people ask Gizlet OS to support -------------------------------------------
 
 /** The handhelds the user wants, newest first. */
-api.get("/v1/me/wants", (c) =>
-  signedIn(c, async (u) => {
-    const { results } = await c.env.DB.prepare(
-      "SELECT w.handheld, w.created_at, (SELECT COUNT(*) FROM wants x WHERE x.handheld = w.handheld) AS n FROM wants w WHERE w.user_id = ? ORDER BY w.created_at DESC",
-    )
-      .bind(u.id)
-      .all<{ handheld: string; created_at: number; n: number }>();
-    const wants = results.flatMap((w) => {
-      const h = findHandheld(w.handheld);
-      return h ? [{ ...handheldJson(h, w.n), wanted_at: new Date(w.created_at).toISOString() }] : [];
-    });
-    return c.json({ wants }, 200, { "cache-control": "no-store" });
-  }),
-);
+api.get("/v1/me/wants", (c) => signedIn(c, async (u) => c.json({ wants: await myWants(c.env, u.id) }, 200, noStore)));
 
 const WANT = "/v1/me/wants/:handheld";
 
@@ -495,6 +616,54 @@ api.post("/v1/admin/gizlets/github.com/:owner/:repo/visibility", async (c) => {
 });
 
 const ADMIN_GIZLET = "/v1/admin/gizlets/github.com/:owner/:repo";
+
+/**
+ * Set a short link by hand. Body: {"repo": "<GitHub repository address>"}. Any valid id, of any
+ * length from LINK_MIN; one live for another gizlet moves. The gizlet's previous id is held 30 days.
+ */
+api.put("/v1/admin/links/:id", async (c) => {
+  const id = normalizeLinkId(c.req.param("id"));
+  const problem = linkProblem(id);
+  if (problem) return linkError(c, problem);
+  const b = await c.req.json<{ repo?: unknown }>().catch(() => null);
+  const r = typeof b?.repo === "string" ? parseRepoAddress(b.repo) : null;
+  if (!r) return apiError(c, 400, "bad_request", 'body must be {"repo": "github.com/<owner>/<repo>"}');
+  let g = await getGizlet(c.env, r.key);
+  if (!g) return apiError(c, 404, "not_found", "gizlet is not indexed");
+  // Bound to the repository, not its path, wherever GitHub says which it is.
+  if (g.repository_id == null) {
+    const repositoryId = await repositoryIdAt(c.env, r);
+    if (typeof repositoryId === "number") g = await adoptRepositoryId(c.env, g, repositoryId);
+  }
+  await claimLink(c.env, g, id, null, true);
+  return c.json(linkJson(c, id, g));
+});
+
+/** Take a short link back at once: it stops working and anyone may claim it. */
+api.delete("/v1/admin/links/:id", async (c) => {
+  const res = await c.env.DB.prepare("DELETE FROM links WHERE id = ?").bind(normalizeLinkId(c.req.param("id"))).run();
+  if (!res.meta.changes) return apiError(c, 404, "not_found", "no such link");
+  return c.body(null, 204);
+});
+
+/**
+ * An account's shortest short link. Body: {"min_length": 3-32}. The account is named by its user
+ * id, or by its email. Ids it already has stay.
+ */
+api.put("/v1/admin/users/:user/link-min-length", async (c) => {
+  const b = await c.req.json<{ min_length?: unknown }>().catch(() => null);
+  const n = b?.min_length;
+  if (typeof n !== "number" || !Number.isInteger(n) || n < LINK_MIN || n > LINK_MAX) return apiError(c, 400, "bad_request", `min_length must be ${LINK_MIN}-${LINK_MAX}`);
+  const who = c.req.param("user");
+  return withAuth(c, async ({ pool }) => {
+    const { rows } = await pool.query<{ id: string; email: string; linkMinLength: number }>(
+      `UPDATE "user" SET "linkMinLength" = $1, "updatedAt" = now() WHERE ${who.includes("@") ? "lower(email) = lower($2)" : "id = $2"} RETURNING id, email, "linkMinLength"`,
+      [n, who],
+    );
+    if (!rows[0]) return apiError(c, 404, "not_found", "no such user");
+    return c.json({ user_id: rows[0].id, email: rows[0].email, link_min_length: rows[0].linkMinLength });
+  });
+});
 
 /** Set a mark by hand (awesome). Body: {"note"?: string}. */
 api.put(`${ADMIN_GIZLET}/marks/:mark`, async (c) => {

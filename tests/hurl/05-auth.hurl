@@ -176,6 +176,17 @@ HTTP 200
 [Asserts]
 jsonpath "$.user.email" == "player-{{run}}@example.com"
 
+# The account lists it among its devices; browser sessions are not devices.
+GET {{base}}/v1/me/devices
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{web_token}}
+HTTP 200
+[Asserts]
+header "cache-control" == "no-store"
+jsonpath "$.devices" count == 1
+jsonpath "$.devices[0].client_id" == "gizlet-os"
+jsonpath "$.devices[0].signed_in_at" isString
+
 # A device code works once.
 POST {{base}}/v1/auth/device/token
 x-gizlet-host: api.gizlet.io
@@ -200,6 +211,73 @@ x-gizlet-host: api.gizlet.io
 Authorization: Bearer {{web_token}}
 HTTP 200
 
+GET {{base}}/v1/me/devices
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{web_token}}
+HTTP 200
+[Asserts]
+jsonpath "$.devices" count == 0
+
+# A second console, signed out from the account page instead.
+POST {{base}}/v1/auth/device/code
+x-gizlet-host: api.gizlet.io
+{"client_id": "gizlet-cli"}
+HTTP 200
+[Captures]
+device_code_2: jsonpath "$.device_code"
+user_code_2: jsonpath "$.user_code"
+
+GET {{base}}/v1/auth/device?user_code={{user_code_2}}
+x-gizlet-host: gizlet.io
+Authorization: Bearer {{web_token}}
+HTTP 200
+
+POST {{base}}/v1/auth/device/approve
+x-gizlet-host: gizlet.io
+Origin: {{site}}
+Authorization: Bearer {{web_token}}
+{"userCode": "{{user_code_2}}"}
+HTTP 200
+
+POST {{base}}/v1/auth/device/token
+x-gizlet-host: api.gizlet.io
+[Options]
+delay: 5500
+{"grant_type": "urn:ietf:params:oauth:grant-type:device_code", "device_code": "{{device_code_2}}", "client_id": "gizlet-cli"}
+HTTP 200
+[Captures]
+device_token_2: jsonpath "$.access_token"
+
+GET {{base}}/v1/me/devices
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{web_token}}
+HTTP 200
+[Captures]
+device_session_2: jsonpath "$.devices[0].id"
+[Asserts]
+jsonpath "$.devices" count == 1
+jsonpath "$.devices[0].client_id" == "gizlet-cli"
+
+# Nobody else can sign it out, and the account cannot sign out what is not one of its devices.
+DELETE {{base}}/v1/me/devices/{{device_session_2}}
+x-gizlet-host: api.gizlet.io
+HTTP 401
+
+DELETE {{base}}/v1/me/devices/not-a-session
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{web_token}}
+HTTP 404
+
+DELETE {{base}}/v1/me/devices/{{device_session_2}}
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{web_token}}
+HTTP 204
+
+GET {{base}}/v1/me
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{device_token_2}}
+HTTP 401
+
 # The site's account pages may call the API with cookies; other origins may not.
 OPTIONS {{base}}/v1/me
 x-gizlet-host: api.gizlet.io
@@ -217,3 +295,87 @@ Access-Control-Request-Method: GET
 HTTP 204
 [Asserts]
 header "access-control-allow-origin" not exists
+
+# Profile: the name changes; the fields only Gizlet and admins set do not.
+POST {{base}}/v1/auth/update-user
+x-gizlet-host: api.gizlet.io
+Origin: {{site}}
+Authorization: Bearer {{web_token}}
+{"name": "Player Two"}
+HTTP 200
+
+POST {{base}}/v1/auth/update-user
+x-gizlet-host: api.gizlet.io
+Origin: {{site}}
+Authorization: Bearer {{web_token}}
+{"linkMinLength": 3, "githubLogin": "someone"}
+HTTP 400
+
+GET {{base}}/v1/me
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{web_token}}
+HTTP 200
+[Asserts]
+jsonpath "$.user.name" == "Player Two"
+jsonpath "$.user.link_min_length" == 6
+jsonpath "$.user.github_login" == null
+
+# Password: the current one is needed.
+POST {{base}}/v1/auth/change-password
+x-gizlet-host: api.gizlet.io
+Origin: {{site}}
+Authorization: Bearer {{web_token}}
+{"currentPassword": "not my password", "newPassword": "a better password"}
+HTTP 400
+[Asserts]
+jsonpath "$.code" == "INVALID_PASSWORD"
+
+POST {{base}}/v1/auth/change-password
+x-gizlet-host: api.gizlet.io
+Origin: {{site}}
+Authorization: Bearer {{web_token}}
+{"currentPassword": "correct horse battery", "newPassword": "a better password"}
+HTTP 200
+
+POST {{base}}/v1/auth/sign-in/email
+x-gizlet-host: api.gizlet.io
+Origin: {{site}}
+{"email": "player-{{run}}@example.com", "password": "a better password"}
+HTTP 200
+
+# Email: a link goes to the new address, and the email changes once it is opened.
+POST {{base}}/v1/auth/change-email
+x-gizlet-host: api.gizlet.io
+Origin: {{site}}
+Authorization: Bearer {{web_token}}
+{"newEmail": "Moved-{{run}}@example.com", "callbackURL": "/account?email=changed#profile"}
+HTTP 200
+
+GET {{base}}/v1/dev/mail?to=moved-{{run}}@example.com
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Captures]
+change_token: jsonpath "$.link" regex "token=([^&]+)"
+[Asserts]
+jsonpath "$.subject" == "Confirm your new email for Gizlet"
+
+GET {{base}}/v1/me
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{web_token}}
+HTTP 200
+[Asserts]
+jsonpath "$.user.email" == "player-{{run}}@example.com"
+
+GET {{base}}/v1/auth/verify-email?token={{change_token}}&callbackURL=%2Faccount%3Femail%3Dchanged%23profile
+x-gizlet-host: gizlet.io
+HTTP 302
+[Asserts]
+header "location" == "/account?email=changed#profile"
+
+GET {{base}}/v1/me
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{web_token}}
+HTTP 200
+[Asserts]
+jsonpath "$.user.email" == "moved-{{run}}@example.com"
+jsonpath "$.user.email_verified" == true
