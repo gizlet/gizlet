@@ -1,0 +1,81 @@
+# Rocket Snail, an invented gizlet the fixture server publishes as fixture-org/rocket-snail
+# (tests/fixtures/server.mjs). The field reference is docs/gizlet-toml.md. Art and about pages
+# are repository paths at the tag; screenshots are the handheld's own 640×480.
+id = "io.gizlet.rocket-snail"
+name = "Rocket Snail"
+version = "0.1.0"
+category = "game"
+description = "The slowest racer in the galaxy straps on a rocket. Slingshot round tiny planets, steer by gravity, and try not to overshoot."
+tags = ["racing", "space", "arcade"]
+color = "#7b4dff"
+license = "MIT"
+runtime = 1
+icon = "store/icon.png"
+cover = "store/cover.jpg"
+pattern = "store/pattern.png"
+screenshots = [
+  "store/screenshots/planet.jpg",
+  "store/screenshots/slingshot.jpg",
+  "store/screenshots/ice.jpg",
+  "store/screenshots/garage.jpg",
+]
+
+[names]
+zh-CN = "火箭蜗牛"
+zh-TW = "火箭蝸牛"
+ja = "ロケットカタツムリ"
+
+[descriptions]
+zh-CN = "银河系最慢的赛车手绑上了火箭。绕着小星球甩飞，靠引力转弯，千万别冲过头。"
+zh-TW = "銀河系最慢的賽車手綁上了火箭。繞著小星球甩飛，靠引力轉彎，千萬別衝過頭。"
+ja = "銀河一おそいレーサーがロケットを背負った。小さな惑星をスイングバイして、重力で曲がれ。飛びすぎ注意。"
+
+[links]
+website = "https://rocket-snail.example"
+x = "https://x.com/gizletio"
+discord = "https://discord.gg/gizlet"
+bilibili = "https://space.bilibili.com/1"
+
+[about]
+en = "store/about.en.md"
+zh-CN = "store/about.zh-CN.md"
+
+[[controls]]
+button = "dpad"
+action = "Steer"
+actions = { zh-CN = "转向", zh-TW = "轉向", ja = "かじ取り" }
+
+[[controls]]
+button = "a"
+action = "Fire the rocket"
+actions = { zh-CN = "点火加速", zh-TW = "點火加速", ja = "ロケット点火" }
+
+[[controls]]
+button = "b"
+action = "Pull into your shell"
+actions = { zh-CN = "缩进壳里", zh-TW = "縮進殼裡", ja = "殻にこもる" }
+
+[[controls]]
+button = "x"
+action = "Garage"
+actions = { zh-CN = "车库", zh-TW = "車庫", ja = "ガレージ" }
+
+[[controls]]
+button = "start"
+action = "Pause"
+actions = { zh-CN = "暂停", zh-TW = "暫停", ja = "ポーズ" }
+
+[[controls]]
+button = "select"
+action = "Switch 中文/English"
+actions = { zh-CN = "切换中文/English", zh-TW = "切換中文/English", ja = "中文/English を切り替え" }
+
+[[packages]]
+target = "aarch64-unknown-linux-gnu"
+tier = "lite"
+entry = "bin/rocket-snail"
+
+[[packages]]
+target = "aarch64-apple-darwin"
+tier = "full"
+entry = "bin/rocket-snail"

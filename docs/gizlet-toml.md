@@ -7,35 +7,35 @@ A gizlet is described by one file its developer writes, `gizlet.toml` at the roo
 | `gizlet.toml` | The developer | Repository root, at the release tag | The build, and the registry (the store page, search, which packages exist) |
 | `manifest.json` | The build | Root of each `.gzl` | The device (installing and running), and the registry's checks |
 
-A worked example is [tests/fixtures/repos/overeaten/gizlet.toml](../tests/fixtures/repos/overeaten/gizlet.toml). The parser is `parseGizletToml` in [src/schema.ts](../src/schema.ts).
+A worked example is [tests/fixtures/repos/rocket-snail/gizlet.toml](../tests/fixtures/repos/rocket-snail/gizlet.toml). The parser is `parseGizletToml` in [src/schema.ts](../src/schema.ts).
 
 ## gizlet.toml
 
 ```toml
-id = "io.gizlet.overeaten"
-name = "Overeaten"
+id = "io.gizlet.rocket-snail"
+name = "Rocket Snail"
 version = "0.1.0"
 category = "game"
-description = "A reverse cooking game: you don't cook, you eat."
-tags = ["food", "arcade"]
-color = "#c8553d"
+description = "The slowest racer in the galaxy straps on a rocket."
+tags = ["racing", "space", "arcade"]
+color = "#7b4dff"
 license = "MIT"
 runtime = 1
 icon = "store/icon.png"
 cover = "store/cover.jpg"
 pattern = "store/pattern.png"
-screenshots = ["store/screenshots/title.png", "store/screenshots/dining.jpg"]
+screenshots = ["store/screenshots/planet.jpg", "store/screenshots/slingshot.jpg"]
 
 [names]
-zh-CN = "吃吃吃"
+zh-CN = "火箭蜗牛"
 
 [descriptions]
-zh-CN = "反向料理游戏：你不做饭，你只管吃。"
+zh-CN = "银河系最慢的赛车手绑上了火箭。"
 
 [links]
-website = "https://overeaten.example"
-x = "https://x.com/overeaten"
-discord = "https://discord.gg/overeaten"
+website = "https://rocket-snail.example"
+x = "https://x.com/rocketsnail"
+discord = "https://discord.gg/rocketsnail"
 
 [about]
 en = "store/about.en.md"
@@ -43,20 +43,20 @@ zh-CN = "store/about.zh-CN.md"
 
 [[controls]]
 button = "a"
-action = "Eat"
-actions = { zh-CN = "吃" }
+action = "Fire the rocket"
+actions = { zh-CN = "点火加速" }
 
 [[packages]]
 target = "aarch64-unknown-linux-gnu"
 tier = "lite"
-entry = "bin/overeaten"
+entry = "bin/rocket-snail"
 ```
 
 ### Fields
 
 | Field | Required | Rules |
 | --- | --- | --- |
-| `id` | yes | Reverse-DNS, lowercase: `io.gizlet.overeaten`. Never changes; a device keeps saves under it |
+| `id` | yes | Reverse-DNS, lowercase: `io.gizlet.rocket-snail`. Never changes; a device keeps saves under it |
 | `name` | yes | At most 80 characters |
 | `version` | yes | The release tag must be `v<version>` |
 | `category` | no | `game` or `app`; `app` if left out |
@@ -68,7 +68,7 @@ entry = "bin/overeaten"
 | `icon` | no | Repository path of a square PNG, JPEG or WebP, at least 256×256. Without one the gizlet stays unlisted |
 | `cover` | no | Repository path of a 16:9 image, at least 1280×720: the top of the store page |
 | `pattern` | no | Repository path of a square PNG or WebP tile with transparency, 512×512, repeated over `color` across the top of the gizlet's page (every 256 CSS pixels) and on its cartridge's shell (every 128). Keep it faint and light (a few tens of KB): the page's text sits on the left, over a scrim |
-| `screenshots` | no | Up to 8 repository paths of 4:3 images, 640×480 or 1280×960 (the handheld's screen, or twice it) |
+| `screenshots` | no | Up to 8 repository paths of 4:3 images: real captures of the game, at the handheld's own 640×480 (or 1280×960 from a desktop build). Not renders or key art; that belongs in `cover` |
 | `[names]`, `[descriptions]` | no | `name` and `description` per language tag (`zh-CN`, `ja`, ...) |
 | `[links]` | no | The developer's site and accounts, shown on the gizlet's page: `website`, `x`, `bluesky`, `mastodon`, `youtube`, `twitch`, `discord`, `bilibili`, `weibo`, `xiaohongshu`, `itch`, `steam`, `patreon`, `kofi`, `afdian`. Each is an `https://` URL of at most 300 characters; except for `website` and `mastodon`, it must be on that service's own domain (`x` on x.com or twitter.com, `discord` on discord.gg or discord.com, ...) |
 | `[about]` | no | Per language tag, the repository path of a Markdown file: the long description on the store page |
@@ -85,7 +85,7 @@ Repository paths are relative to the repository root, `/`-separated, with no emp
 [[packages]]
 target = "aarch64-unknown-linux-gnu"
 tier = "lite"
-entry = "bin/overeaten"
+entry = "bin/rocket-snail"
 ```
 
 | Field | Rules |
@@ -100,7 +100,7 @@ Each `target` and `tier` pair appears once. Its package is the release asset nam
 <id>-<version>-<target>-<tier>.gzl
 ```
 
-for example `io.gizlet.overeaten-0.1.0-aarch64-unknown-linux-gnu-lite.gzl`. The registry finds packages by that name, so it needs no GitHub API. It learns their size and sha256 while it mirrors them; a release becomes installable once every package is mirrored and checked.
+for example `io.gizlet.rocket-snail-0.1.0-aarch64-unknown-linux-gnu-lite.gzl`. The registry finds packages by that name, so it needs no GitHub API. It learns their size and sha256 while it mirrors them; a release becomes installable once every package is mirrored and checked.
 
 ## manifest.json
 
@@ -109,17 +109,17 @@ The build writes it at the root of each `.gzl`, beside `CHECKSUMS` (the SHA-256 
 ```json
 {
   "schema": 1,
-  "id": "io.gizlet.overeaten",
-  "name": "Overeaten",
-  "names": { "zh-CN": "吃吃吃" },
+  "id": "io.gizlet.rocket-snail",
+  "name": "Rocket Snail",
+  "names": { "zh-CN": "火箭蜗牛" },
   "version": "0.1.0",
-  "description": "A reverse cooking game: you don't cook, you eat.",
-  "descriptions": { "zh-CN": "反向料理游戏：你不做饭，你只管吃。" },
-  "color": "#c8553d",
+  "description": "The slowest racer in the galaxy straps on a rocket.",
+  "descriptions": { "zh-CN": "银河系最慢的赛车手绑上了火箭。" },
+  "color": "#7b4dff",
   "runtime": 1,
   "target": "aarch64-unknown-linux-gnu",
   "tier": "lite",
-  "entry": "bin/overeaten",
+  "entry": "bin/rocket-snail",
   "icon": "icon.png"
 }
 ```

@@ -36,21 +36,21 @@ test("prefixes, build metadata and hyphens in prereleases", () => {
   assert.equal(compareVersions("1.0.0-x-y.1", "1.0.0-x-y"), 1);
 });
 
-const FIXTURE = new URL("../fixtures/repos/overeaten/gizlet.toml", import.meta.url);
+const FIXTURE = new URL("../fixtures/repos/rocket-snail/gizlet.toml", import.meta.url);
 const minimal = ['id = "dev.test.game"', 'name = "Game"', 'version = "1.0.0"', "", "[[packages]]", 'target = "aarch64-unknown-linux-gnu"', 'tier = "lite"', 'entry = "bin/game"'].join("\n");
 
-test("gizlet.toml: the Overeaten fixture", () => {
+test("gizlet.toml: the Rocket Snail fixture", () => {
   const g = parseGizletToml(readFileSync(FIXTURE, "utf8"));
-  assert.equal(g.id, "io.gizlet.overeaten");
-  assert.equal(g.names["zh-CN"], "吃吃吃");
+  assert.equal(g.id, "io.gizlet.rocket-snail");
+  assert.equal(g.names["zh-CN"], "火箭蜗牛");
   assert.equal(g.category, "game");
   assert.equal(g.runtime, 1);
   assert.equal(g.cover, "store/cover.jpg");
   assert.equal(g.pattern, "store/pattern.png");
   assert.equal(g.screenshots.length, 4);
   assert.equal(g.about["zh-CN"], "store/about.zh-CN.md");
-  assert.deepEqual(g.controls[1], { button: "a", action: "Eat the plate in reach", actions: { "zh-CN": "吃够得着的那盘", "zh-TW": "吃夠得著的那盤", ja: "手の届く皿を食べる" } });
-  assert.deepEqual(g.packages[0], { target: "aarch64-unknown-linux-gnu", tier: "lite", entry: "bin/overeaten", file: "io.gizlet.overeaten-0.1.0-aarch64-unknown-linux-gnu-lite.gzl" });
+  assert.deepEqual(g.controls[1], { button: "a", action: "Fire the rocket", actions: { "zh-CN": "点火加速", "zh-TW": "點火加速", ja: "ロケット点火" } });
+  assert.deepEqual(g.packages[0], { target: "aarch64-unknown-linux-gnu", tier: "lite", entry: "bin/rocket-snail", file: "io.gizlet.rocket-snail-0.1.0-aarch64-unknown-linux-gnu-lite.gzl" });
 });
 
 test("gizlet.toml: defaults", () => {
