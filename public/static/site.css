@@ -362,10 +362,18 @@ form.signing-up .signup { display: grid; }
   footer .langs { margin-left: 0; flex-basis: 100%; }
 }
 @media (max-width: 480px) {
-  .brand { font-size: 20px; }
-  .brand .mark { width: 30px; height: 30px; }
+  /* The mark alone, so the nav and Account fit; the link keeps its aria-label. */
+  header .brand { gap: 0; font-size: 0; }
+  header .brand .mark { width: 32px; height: 32px; }
   .carts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
   .cart { padding: 24px 10px 10px; }
   .cart .name { font-size: 15px; }
   .cart .repo { display: none; }
+}
+@media (max-width: 360px) {
+  header.wrap { gap: 6px; padding-left: 12px; padding-right: 12px; }
+  header nav { gap: 0; }
+  header nav a { padding: 7px 6px; font-size: 13.5px; }
+  .login { padding: 8px 9px; font-size: 13.5px; }
+  header .brand .mark { width: 28px; height: 28px; }
 }
