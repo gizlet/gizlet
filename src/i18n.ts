@@ -100,8 +100,8 @@ const en = {
     title: "Gizlet · Native games and apps for handhelds",
     description: "Gizlet turns handhelds into pocket computers: native programs and games for Linux handhelds, macOS and Windows, released on GitHub and installed from their link.",
   },
-  nav: { home: "Home", explore: "Explore", devices: "Install", account: "Account", brand: "Gizlet home" },
-  footer: { source: "Source", os: "Gizlet OS", language: "Language", keys: "Ⓐ Select · Ⓑ Back" },
+  nav: { home: "Home", explore: "Explore", devices: "Install", account: "Account", brand: "Gizlet home", language: "Language" },
+  footer: { source: "Source", os: "Gizlet OS", keys: "Ⓐ Select · Ⓑ Back" },
   home: {
     stamp: "Open · No review",
     title: ["One link.", "One press.", "*Pocket* it."],
@@ -281,8 +281,8 @@ const zhCN: Messages = {
     title: "Gizlet · 掌机上的原生游戏与应用",
     description: "Gizlet 让掌机变成口袋电脑：原生程序和游戏，可在 Linux 掌机、macOS 和 Windows 上运行，在 GitHub 上发布，凭链接即可安装。",
   },
-  nav: { home: "首页", explore: "探索", devices: "安装", account: "账号", brand: "Gizlet 首页" },
-  footer: { source: "源代码", os: "Gizlet OS", language: "语言", keys: "Ⓐ 选择 · Ⓑ 返回" },
+  nav: { home: "首页", explore: "探索", devices: "安装", account: "账号", brand: "Gizlet 首页", language: "语言" },
+  footer: { source: "源代码", os: "Gizlet OS", keys: "Ⓐ 选择 · Ⓑ 返回" },
   home: {
     stamp: "开放 · 免审核",
     title: ["一个链接。", "一键安装。", "*随身*带走。"],
@@ -458,8 +458,8 @@ const zhTW: Messages = {
     title: "Gizlet · 掌機上的原生遊戲與應用程式",
     description: "Gizlet 讓掌機變成口袋電腦：原生程式和遊戲，可在 Linux 掌機、macOS 和 Windows 上執行，在 GitHub 上發布，憑連結即可安裝。",
   },
-  nav: { home: "首頁", explore: "探索", devices: "安裝", account: "帳號", brand: "Gizlet 首頁" },
-  footer: { source: "原始碼", os: "Gizlet OS", language: "語言", keys: "Ⓐ 選擇 · Ⓑ 返回" },
+  nav: { home: "首頁", explore: "探索", devices: "安裝", account: "帳號", brand: "Gizlet 首頁", language: "語言" },
+  footer: { source: "原始碼", os: "Gizlet OS", keys: "Ⓐ 選擇 · Ⓑ 返回" },
   home: {
     stamp: "開放 · 免審核",
     title: ["一個連結。", "一鍵安裝。", "*隨身*帶走。"],
@@ -635,8 +635,8 @@ const ja: Messages = {
     title: "Gizlet · 携帯ゲーム機のためのネイティブなゲームとアプリ",
     description: "Gizlet は携帯ゲーム機をポケットコンピューターに。Linux の携帯機、macOS、Windows で動くネイティブなプログラムやゲームを GitHub でリリースし、リンクからインストールできます。",
   },
-  nav: { home: "ホーム", explore: "探す", devices: "インストール", account: "アカウント", brand: "Gizlet ホーム" },
-  footer: { source: "ソースコード", os: "Gizlet OS", language: "言語", keys: "Ⓐ 決定 · Ⓑ 戻る" },
+  nav: { home: "ホーム", explore: "探す", devices: "インストール", account: "アカウント", brand: "Gizlet ホーム", language: "言語" },
+  footer: { source: "ソースコード", os: "Gizlet OS", keys: "Ⓐ 決定 · Ⓑ 戻る" },
   home: {
     stamp: "オープン · 審査なし",
     title: ["リンクひとつ。", "ボタンひとつ。", "*ポケット*に。"],

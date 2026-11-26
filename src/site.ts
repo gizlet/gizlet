@@ -46,6 +46,17 @@ function langHref(c: C, lang: Locale): string {
 const navLink = (c: C, path: string, text: string) =>
   html`<a href="${path}"${c.req.path === path || (path !== "/" && c.req.path.startsWith(`${path}/`)) ? raw(' aria-current="page"') : ""}>${text}</a>`;
 
+const globe = raw(
+  '<svg class="globe" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>',
+);
+
+/** The language switcher in the header: a disclosure that opens a list of this page in each language. */
+function langMenu(c: C) {
+  const lang = langOf(c);
+  const t = MESSAGES[lang];
+  return html`<details class="langs"><summary title="${t.nav.language}">${globe}<span class="visually-hidden">${t.nav.language}: </span><span class="lang-now">${LOCALE_NAMES[lang]}</span></summary><ul>${LOCALES.map((l) => html`<li><a href="${langHref(c, l)}" hreflang="${l}" lang="${l}"${l === lang ? raw(' aria-current="true"') : ""}>${LOCALE_NAMES[l]}</a></li>`)}</ul></details>`;
+}
+
 interface PageOptions {
   script?: string;
   /** Extra stylesheets from this site. */
@@ -75,11 +86,10 @@ ${LOCALES.map((l) => html`<link rel="alternate" hreflang="${l}" href="${here}?la
 ${styles.map((s) => html`<link rel="stylesheet" href="${s}">\n`)}${script ? html`${scriptMessages(t)}\n${raw(`<script type="module" src="/static/${script}"></script>`)}` : ""}
 </head>
 <body${wide ? raw(' class="home"') : ""}>
-<header class="wrap"><a class="brand" href="/" aria-label="${t.nav.brand}">${mark}Gizlet</a><nav>${navLink(c, "/", t.nav.home)}${navLink(c, "/explore", t.nav.explore)}${navLink(c, "/install", t.nav.devices)}</nav><a class="login" href="/account">${t.nav.account}</a></header>
+<header class="wrap"><a class="brand" href="/" aria-label="${t.nav.brand}">${mark}Gizlet</a><nav>${navLink(c, "/", t.nav.home)}${navLink(c, "/explore", t.nav.explore)}${navLink(c, "/install", t.nav.devices)}</nav>${langMenu(c)}<a class="login" href="/account">${t.nav.account}</a></header>
 <main>${wide ? body : html`<div class="wrap narrow">${body}</div>`}</main>
 <footer><div class="wrap">
   <span class="brand small">${mark}Gizlet</span><a href="https://github.com/gizlet/gizlet">${t.footer.source}</a><a href="https://github.com/gizlet/os">${t.footer.os}</a><a href="https://github.com/gizlet/gizlet/blob/main/LICENSE">Apache-2.0</a>
-  <nav class="langs" aria-label="${t.footer.language}">${LOCALES.map((l) => html`<a href="${langHref(c, l)}" hreflang="${l}" lang="${l}"${l === lang ? raw(' aria-current="true"') : ""}>${LOCALE_NAMES[l]}</a>`)}</nav>
 </div></footer>
 </body>
 </html>`;
