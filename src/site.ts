@@ -1,14 +1,15 @@
 /**
- * gizlet.io: share pages and the account pages the sign-in flows need (sign in, approve a
- * device, account). Deliberately plain until the site is designed.
+ * gizlet.io: the home page (src/home.ts), share pages and the account pages the sign-in flows
+ * need (sign in, approve a device, account).
  */
 import { Hono } from "hono";
 import { html, raw } from "hono/html";
 import type { HtmlEscapedString } from "hono/utils/html";
 import { gizletDetail } from "./db";
 import type { Env } from "./env";
+import { homePage } from "./home";
 import { ensureGizlet } from "./registry";
-import { repoRef } from "./repo";
+import { parseRepoAddress, repoRef } from "./repo";
 
 type App = { Bindings: Env };
 export const site = new Hono<App>();
@@ -16,20 +17,27 @@ export const site = new Hono<App>();
 const csp = (env: Env) =>
   `default-src 'self'; img-src 'self' https: ${env.DL_ORIGIN}; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://github.com`;
 
-function page(title: string, body: HtmlEscapedString | Promise<HtmlEscapedString>, script?: string) {
+const DESCRIPTION = "Gizlet turns handhelds into pocket computers: native Linux programs and games, released on GitHub and installed from their link.";
+
+const brand = html`<a class="brand" href="/" aria-label="Gizlet home"><span class="px" aria-hidden="true">${raw("<i></i>".repeat(9))}</span>GIZLET</a>`;
+
+/** `wide` pages (the home page) lay out their own `.wrap` containers; others get a narrow column. */
+function page(title: string, body: HtmlEscapedString | Promise<HtmlEscapedString>, script?: string, wide = false) {
   return html`<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title>
+<meta name="description" content="${DESCRIPTION}">
+<meta name="theme-color" content="#f2ede4">
 <link rel="stylesheet" href="/static/site.css">
 ${script ? raw(`<script type="module" src="/static/${script}"></script>`) : ""}
 </head>
-<body>
-<header><a class="brand" href="/">gizlet</a><nav><a href="/account">Account</a></nav></header>
-<main>${body}</main>
-<footer><a href="https://github.com/gizlet/gizlet">Source</a></footer>
+<body${wide ? raw(' class="home"') : ""}>
+<header class="wrap">${brand}<nav><a href="/#gizlets">Gizlets</a><a href="/#make">Make</a><a href="https://github.com/gizlet/os">Gizlet OS</a></nav><a class="login" href="/account">Account</a></header>
+<main>${wide ? body : html`<div class="wrap narrow">${body}</div>`}</main>
+<footer><div class="wrap"><span>© 2026 Gizlet</span><a href="https://github.com/gizlet/gizlet">Source</a><a href="https://github.com/gizlet/os">Gizlet OS</a><a href="https://github.com/gizlet/gizlet/blob/main/LICENSE">Apache-2.0</a><span class="keys">Ⓐ Select · Ⓑ Back</span></div></footer>
 </body>
 </html>`;
 }
@@ -43,16 +51,15 @@ site.use("*", async (c, next) => {
   }
 });
 
-site.get("/", (c) =>
-  c.html(
-    page(
-      "Gizlet",
-      html`<h1>Gizlet</h1>
-<p>Turn a handheld into a pocket computer. A gizlet is one native Linux program or game: build it in Rust, Go, Zig, C or Flutter, release it on GitHub, and share its link with anyone. No review to install, no store tax.</p>
-<p><a href="${c.env.API_ORIGIN}/v1">API</a> · <a href="https://github.com/gizlet/gizlet">Source</a></p>`,
-    ),
-  ),
-);
+site.get("/", async (c) => c.html(page("Gizlet · Native games and apps for handhelds", await homePage(c.env), undefined, true)));
+
+/** The home page's "Got a link?" box: any way of writing a GitHub repository opens its share page. */
+site.get("/open", async (c) => {
+  const url = c.req.query("url") ?? "";
+  const r = parseRepoAddress(url);
+  if (r) return c.redirect(`/${r.key}`, 302);
+  return c.html(page("Gizlet", await homePage(c.env, `"${url.slice(0, 200)}" is not a GitHub repository. Try github.com/owner/repo.`), undefined, true), 400);
+});
 
 site.get("/login", (c) =>
   c.html(

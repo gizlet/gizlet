@@ -4,7 +4,24 @@ x-gizlet-host: gizlet.io
 HTTP 200
 [Asserts]
 header "content-security-policy" contains "script-src 'self'"
-body contains "share its link with anyone"
+xpath "string(//h1)" contains "One link."
+body contains "href=\"/github.com/fixture-org/hello-gizlet\""
+body not contains "fixture-org/on-demand"
+body contains "/v1/publish"
+
+# The home page's link box opens any way of writing a repository.
+GET {{base}}/open?url=https%3A%2F%2Fgithub.com%2FFixture-Org%2Fhello-gizlet%2Freleases
+x-gizlet-host: gizlet.io
+HTTP 302
+[Asserts]
+header "Location" == "/github.com/fixture-org/hello-gizlet"
+
+GET {{base}}/open?url=%3Cb%3Enope
+x-gizlet-host: gizlet.io
+HTTP 400
+[Asserts]
+body contains "&lt;b&gt;nope"
+body not contains "<b>nope"
 
 GET {{base}}/github.com/fixture-org/hello-gizlet
 x-gizlet-host: gizlet.io
