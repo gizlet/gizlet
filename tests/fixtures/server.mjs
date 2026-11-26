@@ -19,8 +19,10 @@
 // be revoked (POST /_fixture/revoke?login=), as when someone removes the app on GitHub.
 // POST /_fixture/replace?repo= gives the repository at a path another GitHub id, as when it is
 // deleted and someone creates another at the same path; POST /_fixture/hide?repo=&hidden=1|0 takes
-// a public repository off GitHub for a while, as when it is made private. Users' tokens have no `repo` scope, so they
-// do not see private repositories; the app reads users' roles on the repositories it is installed on.
+// a public repository off GitHub for a while, as when it is made private; POST
+// /_fixture/rename?repo=&to= renames a repository and creates another at its old path. Users' tokens
+// have no `repo` scope, so they do not see private repositories; the app reads users' roles on the
+// repositories it is installed on.
 //
 //   node tests/fixtures/server.mjs 18788
 import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
@@ -443,6 +445,14 @@ createServer(async (req, res) => {
     else HIDDEN.add(key);
     return json(200, { repo: key, hidden: HIDDEN.has(key) });
   }
+  if (url.pathname === "/_fixture/rename" && req.method === "POST") {
+    const [from, to] = [url.searchParams.get("repo"), url.searchParams.get("to")];
+    const id = repoId(from);
+    repos.set(to, repos.get(from));
+    REPLACED.set(to, id);
+    REPLACED.set(from, id + 2);
+    return json(200, { repo: to, id, reused: { repo: from, id: repoId(from) } });
+  }
 
   // github.com/login/oauth: the OAuth app's authorize page and token exchange.
   if (url.pathname === "/login/oauth/authorize") {
@@ -568,6 +578,14 @@ createServer(async (req, res) => {
     return json(404, { message: "Not Found" });
   }
   // A relocated repository's asset, by repository id; needs the token and the Accept header again.
+  // Where a repository is now, by its id (GET /repositories/<id>), with any token.
+  if (parts[0] === "repositories" && parts.length === 2) {
+    if (!bearer || !tokens.has(bearer)) return json(401, { message: "Bad credentials" });
+    const key = [...repos.keys()].find((k) => !k.startsWith("_") && !HIDDEN.has(k) && !PRIVATE.has(k) && repoId(k) === Number(parts[1]));
+    if (!key) return json(404, { message: "Not Found" });
+    const [owner, name] = key.split("/");
+    return json(200, { id: repoId(key), name, full_name: key, owner: { login: owner }, private: false });
+  }
   if (parts[0] === "repositories" && parts[2] === "releases" && parts[3] === "assets" && parts.length === 5) {
     if (!bearer || !tokens.has(bearer)) return json(401, { message: "Bad credentials" });
     const a = assets_.get(Number(parts[4]));

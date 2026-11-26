@@ -1,9 +1,10 @@
 /** Indexing releases into the registry, and deciding what is listed. */
 import { parse, type GizletRow, type ReleaseRow } from "./db";
 import type { Env, Waiter } from "./env";
-import { fetchGizletToml, NotFound, reader, repositoryIdAt, type Reader, type RepoInfo } from "./github";
+import { fetchGizletToml, NotFound, reader, repositoryById, repositoryIdAt, type Reader, type RepoInfo } from "./github";
+import { bindLinks } from "./links";
 import { queueMirror } from "./mirror";
-import type { RepoRef } from "./repo";
+import { repoRef, type RepoRef } from "./repo";
 import { compareVersions, IndexError, sameSpec, storedSpec } from "./schema";
 import { rescore } from "./score";
 
@@ -51,6 +52,7 @@ export async function indexRelease(env: Env, ref: RepoRef, tag: string, opts: In
   const name = display?.name ?? ref.name;
   const isPrivate = opts.info ? (opts.info.private ? 1 : 0) : null;
 
+  const learned = opts.repositoryId ?? opts.info?.id ?? null;
   const stmts: D1PreparedStatement[] = [
     env.DB.prepare(
       `INSERT INTO gizlets (repo, owner, name_repo, repository_id, app_id, name, created_at, updated_at, checked_at, private)
@@ -60,8 +62,10 @@ export async function indexRelease(env: Env, ref: RepoRef, tag: string, opts: In
          owner = CASE WHEN ?10 THEN excluded.owner ELSE gizlets.owner END,
          name_repo = CASE WHEN ?10 THEN excluded.name_repo ELSE gizlets.name_repo END,
          private = coalesce(?11, gizlets.private)`,
-    ).bind(ref.key, owner, name, opts.repositoryId ?? opts.info?.id ?? null, spec.id, spec.name, now, now, now, display ? 1 : 0, isPrivate),
+    ).bind(ref.key, owner, name, learned, spec.id, spec.name, now, now, now, display ? 1 : 0, isPrivate),
     env.DB.prepare("DELETE FROM misses WHERE repo = ?").bind(ref.key),
+    // Short links set while the id was unknown follow the repository from now on (src/links.ts).
+    ...(learned != null ? bindLinks(env, ref.key, learned) : []),
   ];
   if (!unchanged) {
     stmts.push(
@@ -233,7 +237,14 @@ export async function refreshGizlet(env: Env, ref: RepoRef, olderThanMs: number)
       // The app reads the repository with its id; the public web has none, so ask GitHub.
       const id = info ? info.id : await repositoryIdAt(env, ref);
       if (id === undefined || id === null) return true;
-      if (id !== bound.repository_id) await env.DB.prepare("UPDATE gizlets SET repository_id = ? WHERE repo = ?").bind(id, ref.key).run();
+      if (id !== bound.repository_id) {
+        // Another repository has the path. If the gizlet's own moved (renamed or transferred) before
+        // that, it is indexed where it is now and keeps its id, so its links follow it.
+        const moved = await repositoryById(env, bound.repository_id);
+        if (moved === undefined) return true;
+        if (moved) await keepMoved(env, ref, bound.repository_id, moved);
+        await env.DB.prepare("UPDATE gizlets SET repository_id = ? WHERE repo = ?").bind(id, ref.key).run();
+      }
     }
     if (info) {
       await env.DB.prepare("UPDATE gizlets SET private = ?, repository_id = coalesce(repository_id, ?), owner = ?, name_repo = ? WHERE repo = ?")
@@ -250,6 +261,20 @@ export async function refreshGizlet(env: Env, ref: RepoRef, olderThanMs: number)
     await rescore(env, ref.key);
   }
   return true;
+}
+
+/** Index the repository with GitHub id `id` at the path it has now, as that id's gizlet. */
+async function keepMoved(env: Env, from: RepoRef, id: number, now: RepoInfo): Promise<void> {
+  const ref = repoRef(now.owner, now.name);
+  if (!ref || ref.key === from.key) return;
+  const src = await reader(env, ref);
+  const tag = await src.latestTag();
+  if (tag) {
+    await indexRelease(env, ref, tag, { reader: src, info: (await src.info()) ?? { ...now, id } }).catch((e: unknown) => {
+      if (!(e instanceof NotFound || e instanceof IndexError)) throw e;
+    });
+  }
+  await env.DB.prepare("UPDATE gizlets SET repository_id = ? WHERE repo = ? AND repository_id IS NULL").bind(id, ref.key).run();
 }
 
 /** Cron: refresh gizlets nobody viewed recently. */

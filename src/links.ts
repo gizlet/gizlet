@@ -167,17 +167,28 @@ export async function releaseLink(env: Env, g: Gizlet): Promise<string | null> {
  */
 export async function adoptRepositoryId<T extends Gizlet>(env: Env, g: T, id: number): Promise<T> {
   if (g.repository_id != null) return g;
-  const [byId, byPath] = [`id:${id}`, `repo:${g.repo}`];
   await env.DB.batch([
     env.DB.prepare("UPDATE gizlets SET repository_id = ? WHERE repo = ? AND repository_id IS NULL").bind(id, g.repo),
+    ...bindLinks(env, g.repo, id),
+  ]);
+  return { ...g, repository_id: id };
+}
+
+/**
+ * Statements that move a repository's path-bound links (set before its GitHub id was known) onto
+ * that id, holding the path's current link if the id has one already, as if replaced. For a batch
+ * with whatever records the id, so the two never disagree.
+ */
+export function bindLinks(env: Env, repo: string, id: number): D1PreparedStatement[] {
+  const [byId, byPath] = [`id:${id}`, `repo:${repo}`];
+  return [
     env.DB.prepare("UPDATE links SET expires_at = ?1 WHERE gizlet = ?2 AND expires_at IS NULL AND EXISTS (SELECT 1 FROM links o WHERE o.gizlet = ?3 AND o.expires_at IS NULL)").bind(
       Date.now() + LINK_HOLD_MS,
       byPath,
       byId,
     ),
     env.DB.prepare("UPDATE links SET gizlet = ?, repository_id = ? WHERE gizlet = ?").bind(byId, id, byPath),
-  ]);
-  return { ...g, repository_id: id };
+  ];
 }
 
 /** The short URL for an id, on the site's own host. */

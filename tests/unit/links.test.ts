@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import {
   adoptRepositoryId,
+  bindLinks,
   claimLink,
   currentLink,
   DEFAULT_LINK_MIN_LENGTH,
@@ -194,4 +195,17 @@ test("adopting an id that already has a current link keeps one current link, hol
   assert.equal(await currentLink(env, bound), "by-id");
   // Both still lead to the repository, under its new name.
   assert.equal((await resolveLink(env, "by-path"))?.gizlet.repo, "github.com/o/new");
+});
+
+test("links set before the id was known move onto it when indexing learns it", async () => {
+  const { db, env } = d1();
+  db.exec("INSERT INTO gizlets (repo, repository_id) VALUES ('github.com/o/web', NULL)");
+  await claimLink(env, { repo: "github.com/o/web", repository_id: null }, "set-by-admin", null, true);
+  // What src/registry.ts indexRelease batches with the row update when a publish brings the id.
+  db.exec("UPDATE gizlets SET repository_id = 9");
+  await (env as { DB: { batch: (s: unknown[]) => Promise<unknown> } }).DB.batch(bindLinks(env, "github.com/o/web", 9));
+  assert.equal(db.prepare("SELECT gizlet FROM links WHERE id = 'set-by-admin'").get()!.gizlet, "id:9");
+  // Another repository at the path later is not its target.
+  db.exec("DELETE FROM gizlets; INSERT INTO gizlets (repo, repository_id) VALUES ('github.com/o/web', 10)");
+  assert.equal(await resolveLink(env, "set-by-admin"), null);
 });

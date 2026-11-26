@@ -424,17 +424,29 @@ async function appHeaders(env: Env, installation: number): Promise<Headers> {
  * configured, else without credentials.
  */
 export async function repositoryIdAt(env: Env, ref: RepoRef): Promise<number | null | undefined> {
+  const r = await appGet(env, `/repos/${ref.owner}/${ref.name}`, ref.key);
+  return r && r.id;
+}
+
+/** Where the repository with a GitHub id is now, null when it is gone, or undefined when GitHub did not say. */
+export async function repositoryById(env: Env, id: number): Promise<RepoInfo | null | undefined> {
+  const r = await appGet(env, `/repositories/${id}`, String(id));
+  return r && { id: r.id, owner: r.owner.login, name: r.name, private: r.private };
+}
+
+/** A repository from the API, as the app (or anyone, without the app): null for a 404, undefined when GitHub did not say. */
+async function appGet(env: Env, path: string, what: string): Promise<{ id: number; name: string; private: boolean; owner: { login: string } } | null | undefined> {
   try {
     const installation = appConfigured(env) ? await anyInstallation(env) : null;
     const headers = installation === null ? new Headers({ accept: "application/vnd.github+json" }) : await appHeaders(env, installation);
-    const res = await ghFetch(`${env.GITHUB_API}/repos/${ref.owner}/${ref.name}`, { headers });
+    const res = await ghFetch(`${env.GITHUB_API}${path}`, { headers });
     if (!res.ok) {
       await res.body?.cancel();
       return res.status === 404 ? null : undefined;
     }
-    return ((await res.json()) as { id: number }).id;
+    return (await res.json()) as { id: number; name: string; private: boolean; owner: { login: string } };
   } catch (e) {
-    console.error("repository id lookup failed", ref.key, e);
+    console.error("repository lookup failed", what, e);
     return undefined;
   }
 }

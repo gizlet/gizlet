@@ -635,3 +635,29 @@ x-gizlet-host: gizlet.io
 retry: 20
 retry-interval: 250ms
 HTTP 404
+
+# A linked repository is renamed and another is created at its old path: the link follows the
+# repository to its new name. An admin link on a gizlet published from Actions (so with its id).
+PUT {{base}}/v1/admin/links/snail-home
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{admin_token}}
+{"repo": "github.com/fixture-org/rocket-snail"}
+HTTP 200
+
+POST {{fixture}}/_fixture/rename?repo=fixture-org/rocket-snail&to=fixture-org/rocket-snail-2
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/rocket-snail
+x-gizlet-host: api.gizlet.io
+[Options]
+delay: 3500
+HTTP 200
+
+GET {{base}}/snail-home
+x-gizlet-host: gizlet.io
+[Options]
+retry: 20
+retry-interval: 250ms
+HTTP 302
+[Asserts]
+header "Location" == "/github.com/fixture-org/rocket-snail-2"

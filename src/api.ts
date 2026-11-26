@@ -5,7 +5,7 @@ import { createAuth, devGithubUrl, devOutbox, siteDomains } from "./auth";
 import { featured, getGizlet, gizletDetail, LIST_SORTS, listGizlets, listReleases, packageJson, pickInstall, releaseJson, summary, VISIBILITIES, type GizletRow, type ListSort, type PackageRow, type ReleaseRow } from "./db";
 import { findHandheld, HANDHELDS, handheldJson, wantCounts, type Handheld } from "./devices";
 import type { Env } from "./env";
-import { appCanManage, canManage, githubUser, NotFound, reader, UpstreamError, UserTokenRejected } from "./github";
+import { appCanManage, canManage, githubUser, NotFound, repositoryIdAt, reader, UpstreamError, UserTokenRejected } from "./github";
 import { adoptRepositoryId, claimLink, getLink, LINK_MAX, LINK_MIN, linkProblem, minLengthOf, normalizeLinkId, releaseLink, resolveLink, shortLinkIn, shortUrl, type LinkProblem } from "./links";
 import { reportInfected } from "./mirror";
 import { AuthError, verifyActionsToken } from "./oidc";
@@ -628,8 +628,13 @@ api.put("/v1/admin/links/:id", async (c) => {
   const b = await c.req.json<{ repo?: unknown }>().catch(() => null);
   const r = typeof b?.repo === "string" ? parseRepoAddress(b.repo) : null;
   if (!r) return apiError(c, 400, "bad_request", 'body must be {"repo": "github.com/<owner>/<repo>"}');
-  const g = await getGizlet(c.env, r.key);
+  let g = await getGizlet(c.env, r.key);
   if (!g) return apiError(c, 404, "not_found", "gizlet is not indexed");
+  // Bound to the repository, not its path, wherever GitHub says which it is.
+  if (g.repository_id == null) {
+    const repositoryId = await repositoryIdAt(c.env, r);
+    if (typeof repositoryId === "number") g = await adoptRepositoryId(c.env, g, repositoryId);
+  }
   await claimLink(c.env, g, id, null, true);
   return c.json(linkJson(c, id, g));
 });
