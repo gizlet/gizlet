@@ -6,7 +6,7 @@ import { Hono, type Context } from "hono";
 import { html, raw } from "hono/html";
 import type { HtmlEscapedString } from "hono/utils/html";
 import { accountData, accountPage, type AccountUser } from "./account";
-import { withAuth } from "./api";
+import { siteHosts, withAuth } from "./api";
 import { dlUrl, gizletDetail } from "./db";
 import type { Env } from "./env";
 import { devicePage, devicesPage, findHandheld, wantCounts } from "./devices";
@@ -18,7 +18,7 @@ import { homePage } from "./home";
 import { mark } from "./mark";
 import { DEFAULT_LOCALE, LOCALE_NAMES, LOCALES, localized, matchLocale, MESSAGES, requestLocale, rich, scriptMessages, type Locale, type Messages } from "./i18n";
 import { ensureGizlet } from "./registry";
-import { currentLink, LINK_MAX, LINK_MIN, resolveLink } from "./links";
+import { currentLink, LINK_MAX, LINK_MIN, resolveLink, shortLinkIn } from "./links";
 import { parseRepoAddress, repoRef } from "./repo";
 
 type App = { Bindings: Env; Variables: { lang: Locale } };
@@ -123,6 +123,10 @@ site.get("/open", async (c) => {
   const url = c.req.query("url") ?? "";
   const r = parseRepoAddress(url);
   if (r) return c.redirect(`/${r.key}`, 302);
+  // A short link to a gizlet: gizlet.io/<id>.
+  const short = shortLinkIn(url, siteHosts(c.env));
+  const found = short ? await resolveLink(c.env, short) : null;
+  if (found) return c.redirect(`/${found.gizlet.repo}`, 302);
   return c.html(page(c, tr(c).meta.title, await homePage(c.env, langOf(c), url), { wide: true }), 400);
 });
 

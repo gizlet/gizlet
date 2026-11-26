@@ -14,6 +14,11 @@ GET {{base}}/v1/gizlets/github.com/fixture-org/on-demand
 x-gizlet-host: api.gizlet.io
 HTTP 200
 
+# Private, read through gizlet-bot.
+GET {{base}}/v1/gizlets/github.com/fixture-org/secret-gizlet
+x-gizlet-host: api.gizlet.io
+HTTP 200
+
 # Nothing there yet; ids that cannot be links say why.
 GET {{base}}/v1/links/hello-gizlet
 x-gizlet-host: api.gizlet.io
@@ -236,6 +241,47 @@ HTTP 302
 [Asserts]
 header "Location" == "/github.com/fixture-org/hello-gizlet"
 
+# Short links work wherever a repository address does: a console resolving what was typed, and the home page's box.
+GET {{base}}/v1/resolve?url=https%3A%2F%2Fgizlet.test%2Fhello-sushi%3Fref%3Dcard
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.repo" == "github.com/fixture-org/hello-gizlet"
+jsonpath "$.short_link" == "hello-sushi"
+
+GET {{base}}/v1/resolve?url=mirror.test%2FHello-Sushi
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.repo" == "github.com/fixture-org/hello-gizlet"
+
+GET {{base}}/v1/resolve?url=https%3A%2F%2Fevil.example%2Fhello-sushi
+x-gizlet-host: api.gizlet.io
+HTTP 400
+
+GET {{base}}/v1/resolve?url=gizlet.test%2Fnobody-here
+x-gizlet-host: api.gizlet.io
+HTTP 404
+
+GET {{base}}/open?url=gizlet.test%2Fhello-sushi
+x-gizlet-host: gizlet.io
+HTTP 302
+[Asserts]
+header "Location" == "/github.com/fixture-org/hello-gizlet"
+
+# A private repository: users' tokens cannot see it, so gizlet-bot reads their role there.
+PUT {{base}}/v1/me/gizlets/github.com/fixture-org/secret-gizlet/link
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{dev}}
+{"id": "secret-stash"}
+HTTP 200
+
+GET {{base}}/secret-stash
+x-gizlet-host: gizlet.io
+HTTP 302
+[Asserts]
+header "Location" == "/github.com/fixture-org/secret-gizlet"
+
 GET {{base}}/v1/links/hello-gizlet
 x-gizlet-host: api.gizlet.io
 HTTP 200
@@ -340,6 +386,14 @@ PUT {{base}}/v1/me/gizlets/github.com/fixture-org/rocket-snail/link
 x-gizlet-host: api.gizlet.io
 Authorization: Bearer {{mae}}
 {"id": "snail-mail"}
+HTTP 403
+[Asserts]
+jsonpath "$.error.code" == "forbidden"
+
+PUT {{base}}/v1/me/gizlets/github.com/fixture-org/secret-gizlet/link
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{mae}}
+{"id": "mae-secret"}
 HTTP 403
 [Asserts]
 jsonpath "$.error.code" == "forbidden"
@@ -534,3 +588,21 @@ jsonpath "$.sign_in_methods" not contains "github"
 GET {{base}}/hello-gizlet
 x-gizlet-host: gizlet.io
 HTTP 302
+
+# The repository at a link's path is replaced by another (the old one deleted, another created
+# there): on its next refresh the gizlet takes the new id, and the link leads nowhere.
+POST {{fixture}}/_fixture/replace?repo=fixture-org/on-demand
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/on-demand
+x-gizlet-host: api.gizlet.io
+[Options]
+delay: 3500
+HTTP 200
+
+GET {{base}}/on-demand-app
+x-gizlet-host: gizlet.io
+[Options]
+retry: 20
+retry-interval: 250ms
+HTTP 404

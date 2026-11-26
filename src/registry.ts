@@ -1,7 +1,7 @@
 /** Indexing releases into the registry, and deciding what is listed. */
 import { parse, type GizletRow, type ReleaseRow } from "./db";
 import type { Env, Waiter } from "./env";
-import { fetchGizletToml, NotFound, reader, type Reader, type RepoInfo } from "./github";
+import { fetchGizletToml, NotFound, reader, repositoryIdAt, type Reader, type RepoInfo } from "./github";
 import { queueMirror } from "./mirror";
 import type { RepoRef } from "./repo";
 import { compareVersions, IndexError, sameSpec, storedSpec } from "./schema";
@@ -211,6 +211,11 @@ export async function ensureGizlet(env: Env, ref: RepoRef, ctx?: Waiter): Promis
  * (a new tag, or a changed gizlet.toml at the tag), and its score. Does nothing unless it was last
  * checked at least `olderThanMs` ago; the check time is claimed first, in one statement, so
  * concurrent views refresh it once. False when another refresh had it.
+ *
+ * A gizlet bound to a GitHub repository id is only refreshed from the repository with that id: when
+ * the path now holds another repository (the old one deleted or moved, another created there), the
+ * gizlet takes the new repository's id, so short links bound to the old one lead nowhere
+ * (src/links.ts), and when GitHub cannot say, nothing is indexed this time.
  */
 export async function refreshGizlet(env: Env, ref: RepoRef, olderThanMs: number): Promise<boolean> {
   const now = Date.now();
@@ -221,6 +226,13 @@ export async function refreshGizlet(env: Env, ref: RepoRef, olderThanMs: number)
   try {
     const src = await reader(env, ref);
     const [tag, info] = await Promise.all([src.latestTag(), src.info()]);
+    const bound = await env.DB.prepare("SELECT repository_id FROM gizlets WHERE repo = ?").bind(ref.key).first<{ repository_id: number | null }>();
+    if (bound?.repository_id != null) {
+      // The app reads the repository with its id; the public web has none, so ask GitHub.
+      const id = info ? info.id : await repositoryIdAt(env, ref);
+      if (id === undefined) return true;
+      if (id !== bound.repository_id) await env.DB.prepare("UPDATE gizlets SET repository_id = ? WHERE repo = ?").bind(id, ref.key).run();
+    }
     if (info) {
       await env.DB.prepare("UPDATE gizlets SET private = ?, repository_id = coalesce(repository_id, ?), owner = ?, name_repo = ? WHERE repo = ?")
         .bind(info.private ? 1 : 0, info.id, info.owner, info.name, ref.key)

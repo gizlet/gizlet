@@ -126,7 +126,8 @@ export async function myGizlets(env: Env, pool: Pool, user: AccountUser) {
       const own = g.owner.toLowerCase() === login.toLowerCase();
       const seen = repos.get(g.repo);
       // The user's repository at this path must be the gizlet's, not another one created there since.
-      const manage = seen ? seen.manage && (g.repository_id == null || seen.id === g.repository_id) : own;
+      // Their token does not list private repositories; setting a link asks GitHub through the app.
+      const manage = seen ? seen.manage && (g.repository_id == null || seen.id === g.repository_id) : own || g.private === 1;
       return {
         ...summary(env, g),
         owner: g.owner,

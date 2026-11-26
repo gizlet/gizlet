@@ -384,6 +384,75 @@ export async function canManage(env: Pick<Env, "GITHUB_API">, token: string, ref
 
 // --- GitHub App authentication ------------------------------------------------------------------
 
+const appConfigured = (env: Env) => Boolean(env.GITHUB_APP_CLIENT_ID && env.GITHUB_APP_PRIVATE_KEY);
+
+let someInstallation: { id: Promise<number | null>; until: number } | undefined;
+
+/** Any installation of the app: its token reads public repositories at the app's rate limit. */
+function anyInstallation(env: Env): Promise<number | null> {
+  if (someInstallation && someInstallation.until > Date.now()) return someInstallation.id;
+  const id = (async () => {
+    const res = await appFetch(env, "/app/installations?per_page=1");
+    if (!res.ok) {
+      await res.body?.cancel();
+      return null;
+    }
+    return ((await res.json()) as { id: number }[])[0]?.id ?? null;
+  })().catch(() => null);
+  someInstallation = { id, until: Date.now() + INSTALLATION_TTL_MS };
+  return id;
+}
+
+async function appHeaders(env: Env, installation: number): Promise<Headers> {
+  return new Headers({ authorization: `Bearer ${await installationToken(env, installation)}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" });
+}
+
+/**
+ * GitHub's id for the repository at a path now (following a rename), null when there is none, or
+ * undefined when GitHub did not say. Asked with an app installation token where the app is
+ * configured, else without credentials.
+ */
+export async function repositoryIdAt(env: Env, ref: RepoRef): Promise<number | null | undefined> {
+  try {
+    const installation = appConfigured(env) ? await anyInstallation(env) : null;
+    const headers = installation === null ? new Headers({ accept: "application/vnd.github+json" }) : await appHeaders(env, installation);
+    const res = await ghFetch(`${env.GITHUB_API}/repos/${ref.owner}/${ref.name}`, { headers });
+    if (!res.ok) {
+      await res.body?.cancel();
+      return res.status === 404 ? null : undefined;
+    }
+    return ((await res.json()) as { id: number }).id;
+  } catch (e) {
+    console.error("repository id lookup failed", ref.key, e);
+    return undefined;
+  }
+}
+
+/**
+ * Like canManage, for a repository the app is installed on, asked by the user's GitHub login: users'
+ * tokens do not see private repositories (that would take the `repo` scope), the app does.
+ */
+export async function appCanManage(env: Env, ref: RepoRef, login: string, id: number | null): Promise<number | null> {
+  if (!appConfigured(env)) return null;
+  try {
+    const installation = await installationFor(env, ref);
+    if (installation === null) return null;
+    const headers = await appHeaders(env, installation);
+    const base = `${env.GITHUB_API}/repos/${ref.owner}/${ref.name}`;
+    const [repo, perm] = await Promise.all([ghFetch(base, { headers }), ghFetch(`${base}/collaborators/${encodeURIComponent(login)}/permission`, { headers })]);
+    if (!repo.ok || !perm.ok) {
+      await Promise.all([repo.body?.cancel(), perm.body?.cancel()]);
+      return null;
+    }
+    const r = (await repo.json()) as { id: number };
+    const p = (await perm.json()) as { role_name?: string };
+    return (p.role_name === "admin" || p.role_name === "maintain") && (id === null || r.id === id) ? r.id : null;
+  } catch (e) {
+    if (e instanceof TokenDenied || e instanceof UpstreamError) return null;
+    throw e;
+  }
+}
+
 /** Per isolate: the installation that covers each repository (null: none), and installation tokens. */
 const installations = new Map<string, { id: number | null; until: number }>();
 const tokens = new Map<number, { token: Promise<string>; until: number }>();

@@ -17,6 +17,9 @@
 // organizations and their permissions on the fixture repositories. GET /login/oauth/authorize
 // lists them as links in a browser; ?fixture_login=<login> picks one at once. A user's tokens can
 // be revoked (POST /_fixture/revoke?login=), as when someone removes the app on GitHub.
+// POST /_fixture/replace?repo= gives the repository at a path another GitHub id, as when it is
+// deleted and someone creates another at the same path. Users' tokens have no `repo` scope, so they
+// do not see private repositories; the app reads users' roles on the repositories it is installed on.
 //
 //   node tests/fixtures/server.mjs 18788
 import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
@@ -57,8 +60,11 @@ let nextAssetId = 1000;
 const hits = new Map();
 const hit = (key) => hits.set(key, (hits.get(key) ?? 0) + 1);
 
+/** Repositories replaced by another at the same path (POST /_fixture/replace), with their new id. */
+const REPLACED = new Map();
 /** A repository's GitHub id, stable per repository (the API, OIDC tokens and asset URLs agree). */
 function repoId(key) {
+  if (REPLACED.has(key)) return REPLACED.get(key);
   let h = 0x811c9dc5;
   for (const ch of key) h = Math.imul(h ^ ch.charCodeAt(0), 0x01000193) >>> 0;
   return 100000 + (h % 900000);
@@ -423,6 +429,11 @@ createServer(async (req, res) => {
     for (const [t, l] of userTokens) if (l === login) userTokens.delete(t);
     return json(200, { revoked: login });
   }
+  if (url.pathname === "/_fixture/replace" && req.method === "POST") {
+    const key = url.searchParams.get("repo");
+    REPLACED.set(key, repoId(key) + 1);
+    return json(200, { repo: key, id: repoId(key) });
+  }
 
   // github.com/login/oauth: the OAuth app's authorize page and token exchange.
   if (url.pathname === "/login/oauth/authorize") {
@@ -463,7 +474,7 @@ createServer(async (req, res) => {
   if (userParts) {
     const u = USERS[asUser];
     if (!u) return json(401, { message: "Bad credentials" });
-    const visible = [...repos.keys()].filter((key) => !key.startsWith("_") && u.perm(key));
+    const visible = [...repos.keys()].filter((key) => !key.startsWith("_") && !PRIVATE.has(key) && u.perm(key));
     const repoJson = (key) => {
       const [owner, name] = key.split("/");
       return { id: repoId(key), name, full_name: key, owner: { login: owner }, private: PRIVATE.has(key), permissions: permissions(u.perm(key)) };
@@ -498,6 +509,10 @@ createServer(async (req, res) => {
     tokens.add(t);
     return json(201, { token: t, expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString() });
   }
+  if (url.pathname === "/app/installations") {
+    if (!(await asApp())) return json(401, { message: "A JSON web token could not be decoded" });
+    return json(200, [{ id: INSTALLATION }]);
+  }
   if (parts[0] === "repos") {
     const [, owner, name, ...rest] = parts;
     const key = `${owner}/${name}`.toLowerCase();
@@ -508,7 +523,14 @@ createServer(async (req, res) => {
     }
     if (!bearer || !tokens.has(bearer)) return json(401, { message: "Bad credentials" });
     const repo = repos.get(key);
+    // Any token reads a public repository's metadata.
+    if (rest.length === 0 && repo && !PRIVATE.has(key) && !INSTALLED.has(key)) return json(200, { id: repoId(key), name, owner: { login: owner }, private: false });
     if (!repo || !INSTALLED.has(key)) return json(404, { message: "Not Found" });
+    if (rest[0] === "collaborators" && rest[2] === "permission" && rest.length === 3) {
+      const role = USERS[rest[1]]?.perm(key);
+      if (!role) return json(404, { message: "Not Found" });
+      return json(200, { permission: { maintain: "write", push: "write", pull: "read" }[role] ?? role, role_name: { push: "write", pull: "read" }[role] ?? role });
+    }
     hit(`api:${key}`);
     const release = (tag) => ({ tag_name: tag, assets: [...repo.tags[tag].ids].map(([n, assetId]) => ({ id: assetId, name: n })) });
     if (rest.length === 0) return json(200, { id: repoId(key), name, owner: { login: owner }, private: PRIVATE.has(key) });

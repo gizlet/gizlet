@@ -174,3 +174,14 @@ export async function adoptRepositoryId<T extends Gizlet>(env: Env, g: T, id: nu
 
 /** The short URL for an id, on the site's own host. */
 export const shortUrl = (env: Pick<Env, "SITE_ORIGIN">, id: string) => `${env.SITE_ORIGIN}/${id}`;
+
+/**
+ * The short link id in an address on one of the site's `hosts` (`gizlet.io/<id>`,
+ * `https://gizlet.io/<id>?...`), or null for anything else.
+ */
+export function shortLinkIn(input: string, hosts: string[]): string | null {
+  const m = /^(?:https?:\/\/)?([^/?#\s]+)\/([^/?#\s]+)\/?(?:[?#]\S*)?$/i.exec(input.trim());
+  if (!m || !hosts.includes(m[1]!.toLowerCase().replace(/^www\./, ""))) return null;
+  const id = normalizeLinkId(m[2]!);
+  return linkProblem(id) ? null : id;
+}

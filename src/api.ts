@@ -1,12 +1,12 @@
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { githubToken, myDevices, myGizlets, myWants, signInMethods, signOutDevice, type AccountUser } from "./account";
-import { createAuth, devGithubUrl, devOutbox } from "./auth";
+import { createAuth, devGithubUrl, devOutbox, siteDomains } from "./auth";
 import { featured, getGizlet, gizletDetail, LIST_SORTS, listGizlets, listReleases, packageJson, pickInstall, releaseJson, summary, VISIBILITIES, type GizletRow, type ListSort, type PackageRow, type ReleaseRow } from "./db";
 import { findHandheld, HANDHELDS, handheldJson, wantCounts, type Handheld } from "./devices";
 import type { Env } from "./env";
-import { canManage, NotFound, reader, UpstreamError, UserTokenRejected } from "./github";
-import { adoptRepositoryId, claimLink, getLink, LINK_MAX, LINK_MIN, linkProblem, minLengthOf, normalizeLinkId, releaseLink, resolveLink, shortUrl, type LinkProblem } from "./links";
+import { appCanManage, canManage, NotFound, reader, UpstreamError, UserTokenRejected } from "./github";
+import { adoptRepositoryId, claimLink, getLink, LINK_MAX, LINK_MIN, linkProblem, minLengthOf, normalizeLinkId, releaseLink, resolveLink, shortLinkIn, shortUrl, type LinkProblem } from "./links";
 import { reportInfected } from "./mirror";
 import { AuthError, verifyActionsToken } from "./oidc";
 import { ensureGizlet, indexRelease, setVisibility } from "./registry";
@@ -216,9 +216,19 @@ api.get(`${GIZLET}/install`, async (c) => {
   return c.json({ repo: r.gizlet.repo, id: r.gizlet.app_id, name: r.gizlet.name, kind: pkg.kind, version: pkg.version, tag: pkg.tag, package: packageJson(c.env, pkg) }, 200, { "cache-control": "no-store" });
 });
 
-api.get("/v1/resolve", (c) => {
+/** The hosts short links are on: the site's, and its mirrors' (SITE_DOMAINS). */
+export const siteHosts = (env: Env) => [new URL(env.SITE_ORIGIN).host.toLowerCase(), ...siteDomains(env)];
+
+/** Any way of writing a repository, or a short link to a gizlet (gizlet.io/<id>). */
+api.get("/v1/resolve", async (c) => {
   const url = c.req.query("url") ?? "";
-  const r = parseRepoAddress(url);
+  let r = parseRepoAddress(url);
+  const short = r ? null : shortLinkIn(url, siteHosts(c.env));
+  if (short) {
+    const found = await resolveLink(c.env, short);
+    if (!found) return apiError(c, 404, "not_found", `${short} leads nowhere`);
+    r = { owner: found.gizlet.owner, name: found.gizlet.name_repo, key: found.gizlet.repo };
+  }
   if (!r) return apiError(c, 400, "bad_request", `${JSON.stringify(url.slice(0, 200))} is not a GitHub repository address`);
   return c.json({
     repo: r.key,
@@ -227,6 +237,7 @@ api.get("/v1/resolve", (c) => {
     api_url: `${c.env.API_ORIGIN}/v1/gizlets/${r.key}`,
     share_url: `${c.env.SITE_ORIGIN}/${r.key}`,
     github_url: `https://github.com/${r.owner}/${r.name}`,
+    ...(short ? { short_link: short } : {}),
   });
 });
 
@@ -392,8 +403,9 @@ const MY_LINK = "/v1/me/gizlets/github.com/:owner/:repo/link";
 
 /**
  * The gizlet the route names, if the user may set its link now: admin or maintain on GitHub, asked
- * live. A gizlet indexed without GitHub's repository id (read from the public web) takes the id
- * GitHub just gave, so its links are bound to the repository rather than its path.
+ * live: with the user's token, or for a private repository (which that token cannot see) through
+ * the app installed on it. A gizlet indexed without GitHub's repository id (read from the public
+ * web) takes the id GitHub just gave, so its links are bound to the repository rather than its path.
  */
 async function managedGizlet(c: C, u: MeUser, pool: AuthPool): Promise<{ gizlet: GizletRow } | { error: Response }> {
   const r = ref(c);
@@ -404,12 +416,14 @@ async function managedGizlet(c: C, u: MeUser, pool: AuthPool): Promise<{ gizlet:
   const token = u.githubLogin ? await githubToken(pool, u.id) : null;
   if (!token) return { error: apiError(c, 403, "github_not_linked", "link GitHub first") };
   let id: number | null;
+  const repo = { owner: g.owner, name: g.name_repo, key: g.repo };
   try {
-    id = await canManage(c.env, token, { owner: g.owner, name: g.name_repo, key: g.repo }, g.repository_id ?? null);
+    id = await canManage(c.env, token, repo, g.repository_id ?? null);
   } catch (e) {
     if (e instanceof UserTokenRejected) return { error: apiError(c, 403, "github_relink", "GitHub no longer accepts the linked account; link GitHub again") };
     throw e;
   }
+  if (id === null && g.private === 1 && u.githubLogin) id = await appCanManage(c.env, repo, u.githubLogin, g.repository_id ?? null);
   if (id === null) return { error: apiError(c, 403, "forbidden", `only admins and maintainers of ${g.owner}/${g.name_repo} can set its short link`) };
   return { gizlet: await adoptRepositoryId(c.env, g, id) };
 }
