@@ -12,7 +12,7 @@ jsonpath "$.token" == null
 header "set-auth-token" not exists
 
 # Until the address is confirmed there is no session; each try mails a fresh link. This one
-# comes through a listed mirror (MIRROR_ORIGINS), so its link is on the mirror.
+# comes in through a mirror on a listed domain (SITE_DOMAINS), so its link is on that domain.
 POST {{base}}/v1/auth/sign-in/email
 x-gizlet-host: api.gizlet.io
 X-Forwarded-Host: api.mirror.test
@@ -60,7 +60,7 @@ HTTP 200
 jsonpath "$.user.email_verified" == true
 
 # Signing up again with the address answers like a new sign-up and mails the owner instead.
-# A host that is not a listed mirror changes nothing.
+# An unlisted domain gets links to the site.
 POST {{base}}/v1/auth/sign-up/email
 x-gizlet-host: api.gizlet.io
 X-Forwarded-Host: evil.example

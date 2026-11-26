@@ -49,7 +49,7 @@ pnpm exec wrangler d1 migrations apply gizlet --local --persist-to "$STATE/wrang
 pnpm exec wrangler dev --port "$DEV_PORT" --ip 127.0.0.1 --persist-to "$STATE/wrangler" --show-interactive-dev-session=false \
   --var DEV_HOST_OVERRIDE:1 \
   --var "SITE_ORIGIN:$SITE" \
-  --var "MIRROR_ORIGINS:mirror.test" \
+  --var "SITE_DOMAINS:mirror.test" \
   --var "GITHUB_WEB:$FIXTURE" \
   --var "GITHUB_RAW:$FIXTURE" \
   --var "GITHUB_API:$FIXTURE" \

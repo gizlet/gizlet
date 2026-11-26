@@ -43,14 +43,16 @@ nginx -t && nginx -s reload
 
 To deploy, point DNS for the mirror domain and its `www`, `api` and `dl` hosts at the server. Then get one certificate for all four names. nginx needs the certificate before it starts, so get the first one with `certbot certonly --standalone -d gizlet.xyz -d www.gizlet.xyz -d api.gizlet.xyz -d dl.gizlet.xyz`. Renewals can use `--webroot -w /var/www/acme`.
 
-Then list the mirror so that account emails sent from it link back to it. The list is the repository variable `MIRROR_ORIGINS` (comma-separated domains), passed to the Worker at deploy, so it needs no pull request: set it, then deploy `main` again.
+Anyone can run a mirror; it needs nothing from Gizlet. Only the links in the emails Gizlet sends (email confirmation, password reset) are different: they point at a domain only if Gizlet lists it, because they carry sign-in and reset tokens. To have a mirror's emails link back to it, ask the Gizlet maintainers to list its domain.
+
+The list is `SITE_DOMAINS`, comma-separated domains, one list for every domain alike (`gizlet.io` included). It is a repository variable passed to the Worker at deploy, so listing a domain needs no pull request:
 
 ```sh
-gh variable set MIRROR_ORIGINS --repo gizlet/gizlet --body "gizlet.xyz"
+gh variable set SITE_DOMAINS --repo gizlet/gizlet --body "gizlet.io,gizlet.xyz"
 gh workflow run ci.yml --repo gizlet/gizlet --ref main
 ```
 
-The Worker reads the mirror from the `X-Forwarded-Host` the proxy sends. Anyone can send that header to `gizlet.io`, so only listed domains (and their `api.` and `www.` hosts) count: links carry sign-in and reset tokens and must never point at another host.
+The Worker takes the request's domain from the `X-Forwarded-Host` the proxy sends (else the request's own host), and uses it if it, or its `api.` or `www.` host, is listed. Anyone can send that header, which is why the list exists.
 
 Check a rendered configuration with Docker, Hurl and openssl:
 
@@ -64,5 +66,5 @@ It sends real requests to `gizlet.io`. They only read, apart from one sign-in wi
 
 - **GitHub sign-in and linking** do not work on a mirror. The GitHub OAuth app's callback is `https://gizlet.io/v1/auth/callback/github`, so GitHub sends the browser back to `gizlet.io`, where the state cookie the mirror set is missing. Email and password sign-in and the device flow work.
 - **Rate limits.** Better Auth limits requests per `cf-connecting-ip`, and Cloudflare sets that to the mirror server's address. All of the mirror's users therefore share one sign-in rate limit.
-- **Emails** (email confirmation, password reset) link to the mirror only once it is listed in `MIRROR_ORIGINS` (below); until then they link to `gizlet.io`, and a user who cannot reach it cannot confirm their email.
+- **Emails** (email confirmation, password reset) link to the mirror only once its domain is in `SITE_DOMAINS` (above); until then they link to `gizlet.io`, and a user who cannot reach it cannot confirm their email.
 - A session on the mirror is separate from one on `gizlet.io`, since the cookies are per domain.
