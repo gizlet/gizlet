@@ -13,6 +13,11 @@
 // repository's release downloads until it is let go (POST /_fixture/hold?repo=, then
 // /_fixture/release-hold?repo=) and count requests (GET /_fixture/hits?key=&since=).
 //
+// It is also GitHub for the OAuth app accounts sign in and link with: the users in USERS, their
+// organizations and their permissions on the fixture repositories. GET /login/oauth/authorize
+// lists them as links in a browser; ?fixture_login=<login> picks one at once. A user's tokens can
+// be revoked (POST /_fixture/revoke?login=), as when someone removes the app on GitHub.
+//
 //   node tests/fixtures/server.mjs 18788
 import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
@@ -51,6 +56,29 @@ let nextAssetId = 1000;
 /** Request counts by key, e.g. latest:<repo>, api:<repo>, signed:<repo>. */
 const hits = new Map();
 const hit = (key) => hits.set(key, (hits.get(key) ?? 0) + 1);
+
+/** A repository's GitHub id, stable per repository (the API, OIDC tokens and asset URLs agree). */
+function repoId(key) {
+  let h = 0x811c9dc5;
+  for (const ch of key) h = Math.imul(h ^ ch.charCodeAt(0), 0x01000193) >>> 0;
+  return 100000 + (h % 900000);
+}
+
+// The OAuth app accounts sign in with, and its users. `perm` is a user's role on a fixture
+// repository: admin, maintain, push or pull, or null where they cannot see it.
+const OAUTH_CLIENT_ID = "Ov-fixture";
+const OAUTH_CLIENT_SECRET = "fixture-oauth-secret";
+const USERS = {
+  "fixture-dev": { id: 7001, name: "Fixture Dev", email: "dev@fixture.test", orgs: ["fixture-org"], perm: () => "admin" },
+  "fixture-maintainer": { id: 7002, name: "Mae Tainer", email: "mae@fixture.test", orgs: ["fixture-org"], perm: (key) => (key === "fixture-org/hello-gizlet" ? "maintain" : "push") },
+  "fixture-viewer": { id: 7003, name: "Vi Ewer", email: "vi@fixture.test", orgs: ["fixture-org"], perm: () => "pull" },
+  "fixture-loner": { id: 7004, name: "Lone Wolf", email: "lone@fixture.test", orgs: [], perm: () => null },
+};
+const ROLES = ["pull", "triage", "push", "maintain", "admin"];
+const permissions = (role) => Object.fromEntries(ROLES.map((r) => [r, ROLES.indexOf(r) <= ROLES.indexOf(role)]));
+/** One-time codes and access tokens of the OAuth app: code -> login, token -> login. */
+const oauthCodes = new Map();
+const userTokens = new Map();
 
 // 1×1 PNG.
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
@@ -326,7 +354,7 @@ addRelease("fixture-org/twin-a", "1.0.0", { targets: [["aarch64-unknown-linux-gn
 }
 
 async function token(repo, ref, visibility = "public") {
-  return new SignJWT({ repository: repo, repository_id: "424242", repository_owner: repo.split("/")[0], repository_visibility: visibility, ref, event_name: "push" })
+  return new SignJWT({ repository: repo, repository_id: String(repoId(repo.toLowerCase())), repository_owner: repo.split("/")[0], repository_visibility: visibility, ref, event_name: "push" })
     .setProtectedHeader({ alg: "RS256", kid: "fixture" })
     .setIssuer(issuer)
     .setAudience("https://api.gizlet.io")
@@ -390,6 +418,67 @@ createServer(async (req, res) => {
     addRelease(key, url.searchParams.get("version"), { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
     return json(201, { latest: repos.get(key).latest });
   }
+  if (url.pathname === "/_fixture/revoke" && req.method === "POST") {
+    const login = url.searchParams.get("login");
+    for (const [t, l] of userTokens) if (l === login) userTokens.delete(t);
+    return json(200, { revoked: login });
+  }
+
+  // github.com/login/oauth: the OAuth app's authorize page and token exchange.
+  if (url.pathname === "/login/oauth/authorize") {
+    if (url.searchParams.get("client_id") !== OAUTH_CLIENT_ID) return send(400, "unknown client_id");
+    const login = url.searchParams.get("fixture_login");
+    if (!USERS[login]) {
+      const links = Object.keys(USERS)
+        .map((l) => `<li><a href="${url.pathname}${url.search}&amp;fixture_login=${l}">Sign in as ${l}</a></li>`)
+        .join("");
+      return send(200, `<!doctype html><meta charset="utf-8"><title>Fixture GitHub</title><h1>Authorize the Gizlet fixture app</h1><ul>${links}</ul>`, { "content-type": "text/html; charset=utf-8" });
+    }
+    const code = randomBytes(10).toString("hex");
+    oauthCodes.set(code, login);
+    const back = new URL(url.searchParams.get("redirect_uri"));
+    back.searchParams.set("code", code);
+    back.searchParams.set("state", url.searchParams.get("state") ?? "");
+    return send(302, "", { location: back.href });
+  }
+  if (url.pathname === "/login/oauth/access_token" && req.method === "POST") {
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    const raw = Buffer.concat(chunks).toString();
+    const body = (req.headers["content-type"] ?? "").includes("json") ? JSON.parse(raw) : Object.fromEntries(new URLSearchParams(raw));
+    const basic = /^Basic (.+)$/.exec(req.headers.authorization ?? "")?.[1];
+    const [id, secret] = basic ? Buffer.from(basic, "base64").toString().split(":") : [body.client_id, body.client_secret];
+    if (id !== OAUTH_CLIENT_ID || secret !== OAUTH_CLIENT_SECRET) return json(200, { error: "incorrect_client_credentials" });
+    const login = oauthCodes.get(body.code);
+    if (!login) return json(200, { error: "bad_verification_code" });
+    oauthCodes.delete(body.code);
+    const t = `gho_fixture${randomBytes(12).toString("hex")}`;
+    userTokens.set(t, login);
+    return json(200, { access_token: t, token_type: "bearer", scope: "read:org,read:user,user:email" });
+  }
+
+  // api.github.com as a user who signed in with the OAuth app sees it.
+  const asUser = userTokens.get(/^Bearer (.+)$/i.exec(req.headers.authorization ?? "")?.[1] ?? "");
+  const userParts = parts[0] === "user" || (parts[0] === "repos" && /^Bearer gho_/i.test(req.headers.authorization ?? ""));
+  if (userParts) {
+    const u = USERS[asUser];
+    if (!u) return json(401, { message: "Bad credentials" });
+    const visible = [...repos.keys()].filter((key) => !key.startsWith("_") && u.perm(key));
+    const repoJson = (key) => {
+      const [owner, name] = key.split("/");
+      return { id: repoId(key), name, full_name: key, owner: { login: owner }, private: PRIVATE.has(key), permissions: permissions(u.perm(key)) };
+    };
+    const path = parts.join("/");
+    if (path === "user") return json(200, { id: u.id, login: asUser, name: u.name, email: u.email, avatar_url: `https://avatars.githubusercontent.com/u/${u.id}?v=4` });
+    if (path === "user/emails") return json(200, [{ email: u.email, primary: true, verified: true, visibility: "private" }]);
+    if (path === "user/orgs") return json(200, u.orgs.map((login) => ({ login })));
+    if (path === "user/repos") return json(200, (url.searchParams.get("page") ?? "1") === "1" ? visible.map(repoJson) : []);
+    if (parts[0] === "repos" && parts.length === 3) {
+      const key = `${parts[1]}/${parts[2]}`.toLowerCase();
+      return visible.includes(key) ? json(200, repoJson(key)) : json(404, { message: "Not Found" });
+    }
+    return json(404, { message: "Not Found" });
+  }
 
   // api.github.com as the app sees it.
   const bearer = /^Bearer (.+)$/.exec(req.headers.authorization ?? "")?.[1];
@@ -422,7 +511,7 @@ createServer(async (req, res) => {
     if (!repo || !INSTALLED.has(key)) return json(404, { message: "Not Found" });
     hit(`api:${key}`);
     const release = (tag) => ({ tag_name: tag, assets: [...repo.tags[tag].ids].map(([n, assetId]) => ({ id: assetId, name: n })) });
-    if (rest.length === 0) return json(200, { id: 900 + [...INSTALLED].indexOf(key), name, owner: { login: owner }, private: PRIVATE.has(key) });
+    if (rest.length === 0) return json(200, { id: repoId(key), name, owner: { login: owner }, private: PRIVATE.has(key) });
     if (rest.join("/") === "releases/latest") {
       hit(`latest:${key}`);
       return repo.latest ? json(200, release(repo.latest)) : json(404, { message: "Not Found" });
@@ -438,7 +527,7 @@ createServer(async (req, res) => {
     if (rest[0] === "releases" && rest[1] === "assets" && rest.length === 3) {
       const a = assets_.get(Number(rest[2]));
       if (!a || a.repo !== key) return json(404, { message: "Not Found" });
-      if (RELOCATED.has(key)) return send(301, "", { location: `${issuer}/repositories/${900 + [...INSTALLED].indexOf(key)}/releases/assets/${rest[2]}` });
+      if (RELOCATED.has(key)) return send(301, "", { location: `${issuer}/repositories/${repoId(key)}/releases/assets/${rest[2]}` });
       return serveAsset(a, Number(rest[2]));
     }
     return json(404, { message: "Not Found" });
@@ -447,7 +536,7 @@ createServer(async (req, res) => {
   if (parts[0] === "repositories" && parts[2] === "releases" && parts[3] === "assets" && parts.length === 5) {
     if (!bearer || !tokens.has(bearer)) return json(401, { message: "Bad credentials" });
     const a = assets_.get(Number(parts[4]));
-    if (!a || 900 + [...INSTALLED].indexOf(a.repo) !== Number(parts[1])) return json(404, { message: "Not Found" });
+    if (!a || repoId(a.repo) !== Number(parts[1])) return json(404, { message: "Not Found" });
     hit(`relocated:${a.repo}`);
     return serveAsset(a, Number(parts[4]));
   }

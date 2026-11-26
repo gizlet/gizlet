@@ -64,6 +64,8 @@ pnpm exec wrangler dev --port "$DEV_PORT" --ip 127.0.0.1 --persist-to "$STATE/wr
   --var "GITHUB_API:$FIXTURE" \
   --var "GITHUB_APP_CLIENT_ID:Iv-fixture" \
   --var "GITHUB_APP_PRIVATE_KEY:$APP_KEY" \
+  --var "GITHUB_CLIENT_ID:Ov-fixture" \
+  --var "GITHUB_CLIENT_SECRET:fixture-oauth-secret" \
   --var "REFRESH_AFTER_SECONDS:3" \
   --var "EXPLORE_PAGE_SIZE:2" \
   --var "OIDC_ISSUER:$FIXTURE" \

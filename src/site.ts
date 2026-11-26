@@ -5,6 +5,8 @@
 import { Hono, type Context } from "hono";
 import { html, raw } from "hono/html";
 import type { HtmlEscapedString } from "hono/utils/html";
+import { accountData, accountPage, type AccountUser } from "./account";
+import { withAuth } from "./api";
 import { dlUrl, gizletDetail } from "./db";
 import type { Env } from "./env";
 import { devicePage, devicesPage, findHandheld, wantCounts } from "./devices";
@@ -16,6 +18,7 @@ import { homePage } from "./home";
 import { mark } from "./mark";
 import { DEFAULT_LOCALE, LOCALE_NAMES, LOCALES, localized, matchLocale, MESSAGES, requestLocale, rich, scriptMessages, type Locale, type Messages } from "./i18n";
 import { ensureGizlet } from "./registry";
+import { currentLink, LINK_MAX, LINK_MIN, resolveLink } from "./links";
 import { parseRepoAddress, repoRef } from "./repo";
 
 type App = { Bindings: Env; Variables: { lang: Locale } };
@@ -196,28 +199,16 @@ site.get("/device", (c) => {
   );
 });
 
-site.get("/account", (c) => {
-  const t = tr(c).account;
-  return c.html(
-    page(
-      c,
-      `${t.title} · Gizlet`,
-      html`<h1>${t.title}</h1>
-<div id="account" class="card" hidden>
-  <p><b id="name"></b><br><span id="email"></span></p>
-  <p>${t.methods} <span id="methods"></span></p>
-  <p>${t.github} <span id="github-login"></span></p>
-  ${c.env.GITHUB_CLIENT_ID ? html`<button id="link-github" class="secondary">${t.link}</button>` : ""}
-  <button id="signout" class="secondary">${t.signOut}</button>
-</div>
-<h2>${t.wants}</h2>
-<ul id="wants" class="my-wants"></ul>
-<h2>${t.gizlets}</h2>
-<ul id="gizlets"></ul>
-<p id="message" role="status"></p>`,
-      { script: "account.js" },
-    ),
-  );
+/** The signed-in user's account (src/account.ts); signed out, the sign-in page comes back here. */
+site.get("/account", async (c) => {
+  const data = await withAuth(c, async ({ auth, pool }) => {
+    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    return session ? accountData(c.env, pool, session.user as AccountUser) : null;
+  });
+  if (!data) return c.redirect("/login?next=%2Faccount", 302);
+  const { body, styles } = accountPage(c.env, langOf(c), data, Boolean(c.env.GITHUB_CLIENT_ID));
+  c.header("cache-control", "private, no-store");
+  return c.html(page(c, `${tr(c).account.title} · Gizlet`, body, { wide: true, styles, script: "account.js" }));
 });
 
 /** Share page: github.com/<owner>/<repo>. Opening it on a device installs the gizlet. */
@@ -236,7 +227,8 @@ site.get("/github.com/:owner/:repo", async (c) => {
   const name = localized(d.names, d.name, lang);
   const href = themeHref([d.color]);
   const styles = [href, patternHref([d])].filter((s): s is string => !!s);
-  return c.html(page(c, `${name} · Gizlet`, await gizletPage(c.env, g, d, lang), { wide: true, styles, script: "devices.js" }));
+  const short = await currentLink(c.env, g);
+  return c.html(page(c, `${name} · Gizlet`, await gizletPage(c.env, g, d, lang, short), { wide: true, styles, script: "devices.js" }));
 });
 
 /** Pattern tiles (gizlet.toml `pattern`) of the gizlets a page shows: ?r=github.com/<owner>/<repo>, repeated (src/theme.ts). */
@@ -257,6 +249,14 @@ site.get("/_theme/:version/:file", (c) => {
   const m = THEME_FILE.exec(c.req.param("file"));
   if (!m || c.req.param("version") !== THEME_VERSION) return c.notFound();
   return c.body(themeCss(m[1]!.split("-")), 200, { "content-type": "text/css; charset=utf-8", "cache-control": "public, max-age=31536000, immutable" });
+});
+
+/** Short links (src/links.ts): gizlet.io/<id> opens the gizlet's page. Registered last, so the site's own paths win. */
+site.get(`/:id{[A-Za-z][A-Za-z0-9-]{${LINK_MIN - 1},${LINK_MAX - 1}}}`, async (c) => {
+  const r = await resolveLink(c.env, c.req.param("id").toLowerCase());
+  if (!r) return c.notFound();
+  const { search } = new URL(c.req.url);
+  return c.redirect(`/${r.gizlet.repo}${search}`, 302);
 });
 
 site.notFound((c) => {

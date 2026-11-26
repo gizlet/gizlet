@@ -315,6 +315,68 @@ function assetIds(rel: ReleaseJson): Map<string, number> {
   return new Map(rel.assets.map((a) => [a.name, a.id]));
 }
 
+// --- As a signed-in user ------------------------------------------------------------------------
+
+/** GitHub no longer accepts the user's token (revoked, or the OAuth app was removed): link GitHub again. */
+export class UserTokenRejected extends Error {}
+
+async function userFetch(env: Pick<Env, "GITHUB_API">, token: string, path: string): Promise<Response> {
+  const res = await ghFetch(`${env.GITHUB_API}${path}`, {
+    headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
+  });
+  if (res.status === 401) {
+    await res.body?.cancel();
+    throw new UserTokenRejected("GitHub rejected the linked account's token");
+  }
+  return res;
+}
+
+/** Whether repository permissions let a user manage a gizlet: admin or maintain. */
+const manages = (p: { admin?: boolean; maintain?: boolean } | undefined) => Boolean(p?.admin || p?.maintain);
+
+/**
+ * The repositories a user can see as owner, collaborator or organization member, by canonical key
+ * (github.com/<owner>/<name>, lowercase), with whether they may manage each. Up to 500.
+ */
+export async function userRepos(env: Pick<Env, "GITHUB_API">, token: string): Promise<Map<string, { manage: boolean }>> {
+  const out = new Map<string, { manage: boolean }>();
+  for (let page = 1; page <= 5; page++) {
+    const res = await userFetch(env, token, `/user/repos?per_page=100&page=${page}&affiliation=owner,collaborator,organization_member`);
+    if (!res.ok) {
+      await res.body?.cancel();
+      throw new UpstreamError(`GitHub answered ${res.status} for the user's repositories`);
+    }
+    const repos = (await res.json()) as { full_name: string; permissions?: { admin?: boolean; maintain?: boolean } }[];
+    for (const r of repos) out.set(`github.com/${r.full_name}`.toLowerCase(), { manage: manages(r.permissions) });
+    if (repos.length < 100) break;
+  }
+  return out;
+}
+
+/** The organizations a user belongs to, by login. */
+export async function userOrgs(env: Pick<Env, "GITHUB_API">, token: string): Promise<string[]> {
+  const res = await userFetch(env, token, "/user/orgs?per_page=100");
+  if (!res.ok) {
+    await res.body?.cancel();
+    throw new UpstreamError(`GitHub answered ${res.status} for the user's organizations`);
+  }
+  return ((await res.json()) as { login: string }[]).map((o) => o.login);
+}
+
+/** Whether the user may manage a repository now (admin or maintain), asked of GitHub. */
+export async function canManage(env: Pick<Env, "GITHUB_API">, token: string, ref: RepoRef): Promise<boolean> {
+  const res = await userFetch(env, token, `/repos/${ref.owner}/${ref.name}`);
+  if (res.status === 403 || res.status === 404) {
+    await res.body?.cancel();
+    return false;
+  }
+  if (!res.ok) {
+    await res.body?.cancel();
+    throw new UpstreamError(`GitHub answered ${res.status} for ${ref.key}`);
+  }
+  return manages(((await res.json()) as { permissions?: { admin?: boolean; maintain?: boolean } }).permissions);
+}
+
 // --- GitHub App authentication ------------------------------------------------------------------
 
 /** Per isolate: the installation that covers each repository (null: none), and installation tokens. */

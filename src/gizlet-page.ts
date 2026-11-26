@@ -40,9 +40,11 @@ function glyph(b: Control["button"], t: Messages) {
   return html`<span class="key face${b === "a" ? " a" : ""}">${b.toUpperCase()}</span>`;
 }
 
-export async function gizletPage(env: Env, g: GizletRow, d: Detail, lang: Locale) {
+/** `short` is the gizlet's short link id (src/links.ts), if it has one. */
+export async function gizletPage(env: Env, g: GizletRow, d: Detail, lang: Locale, short: string | null = null) {
   const t = MESSAGES[lang];
   const s = t.share;
+  const shortShown = short ? `${new URL(env.SITE_ORIGIN).host}/${short}` : null;
   const name = localized(d.names, d.name, lang);
   const description = localized(d.descriptions, d.description, lang);
   const about = await aboutHtml(env, g, lang);
@@ -71,7 +73,7 @@ export async function gizletPage(env: Env, g: GizletRow, d: Detail, lang: Locale
         <pre><code><span class="p">${source}/</span>${path}</code></pre>
       </div>
       ${installable ? "" : html`<p class="gz-wait">${s.checking}</p>`}
-      <p class="gz-facts">${d.version ? html`<span>${s.version(d.version)}</span>` : ""}${d.license ? html`<span>${d.license}</span>` : ""}<span>${updated}</span></p>
+      <p class="gz-facts">${shortShown ? html`<a class="gz-short" href="/${short}">${shortShown}</a>` : ""}${d.version ? html`<span>${s.version(d.version)}</span>` : ""}${d.license ? html`<span>${d.license}</span>` : ""}<span>${updated}</span></p>
     </div>
     <div class="rig gz-rig">
       <span class="cart rig-cart ${shell(d)}${patternClasses(d)}" aria-hidden="true"><span class="grip"></span><span class="label">${art(d)}</span></span>
@@ -119,6 +121,7 @@ ${d.screenshots.length
         <div><dt>${s.downloads}</dt><dd>${d.downloads}</dd></div>
         ${d.tags.length ? html`<div><dt>${s.tags}</dt><dd class="gz-tags">${d.tags.map((tag) => html`<span>${tag}</span>`)}</dd></div>` : ""}
         <div><dt>${s.source}</dt><dd><a href="${d.github_url}">${d.repo.replace(/^github\.com\//, "")}</a></dd></div>
+        ${shortShown ? html`<div><dt>${s.shortLink}</dt><dd><a href="/${short}">${shortShown}</a></dd></div>` : ""}
       </dl>
     </section>
     <section class="gz-card">

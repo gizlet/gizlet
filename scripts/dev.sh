@@ -7,6 +7,8 @@
 # PGlite, so nothing touches the network and every start is fresh. A few fixture gizlets are
 # published on start, among them tests/fixtures/repos/rocket-snail and a service, and approved for
 # listing; the admin token is `dev-admin`.
+# Linking GitHub on /account goes to the fixture's GitHub, which lets you pick a fixture user;
+# fixture-dev administers every fixture-org repository.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -67,6 +69,8 @@ pnpm exec wrangler dev --port "$PORT" --ip 127.0.0.1 --local-upstream "localhost
   --var "GITHUB_API:$FIXTURE" \
   --var "GITHUB_APP_CLIENT_ID:Iv-fixture" \
   --var "GITHUB_APP_PRIVATE_KEY:$APP_KEY" \
+  --var "GITHUB_CLIENT_ID:Ov-fixture" \
+  --var "GITHUB_CLIENT_SECRET:fixture-oauth-secret" \
   --var "OIDC_ISSUER:$FIXTURE" \
   --var "OIDC_JWKS_URL:$FIXTURE/.well-known/jwks" \
   --var "ADMIN_TOKEN:dev-admin" \

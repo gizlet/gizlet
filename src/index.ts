@@ -26,8 +26,8 @@ function route(req: Request, env: Env): { host: string; req: Request } {
   return { host: req.headers.get("x-gizlet-host") ?? url.hostname, req };
 }
 
-/** Account routes the site's own pages call, served on gizlet.io as on api.gizlet.io. */
-const isAccountPath = (path: string) => path.startsWith("/v1/auth/") || path === "/v1/me" || path.startsWith("/v1/me/");
+/** API routes the site's own pages call (the CSP allows no other origin), served on gizlet.io as on api.gizlet.io. */
+const isAccountPath = (path: string) => path.startsWith("/v1/auth/") || path === "/v1/me" || path.startsWith("/v1/me/") || path.startsWith("/v1/links/");
 
 export default {
   async fetch(request, env, ctx) {
