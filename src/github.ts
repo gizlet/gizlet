@@ -153,7 +153,12 @@ class AppReader implements Reader {
     this.web = web;
   }
 
-  private async api(path: string, init: RequestInit = {}): Promise<Response> {
+  private api(path: string, init: RequestInit = {}): Promise<Response> {
+    return this.apiUrl(`${this.env.GITHUB_API}/repos/${this.ref.owner}/${this.ref.name}${path}`, init);
+  }
+
+  /** An authenticated request to the GitHub API, at any URL on it. */
+  private async apiUrl(url: string, init: RequestInit = {}): Promise<Response> {
     let token: string;
     try {
       token = await installationToken(this.env, this.installation);
@@ -166,7 +171,7 @@ class AppReader implements Reader {
     headers.set("authorization", `Bearer ${token}`);
     headers.set("x-github-api-version", "2022-11-28");
     if (!headers.has("accept")) headers.set("accept", "application/vnd.github+json");
-    return ghFetch(`${this.env.GITHUB_API}/repos/${this.ref.owner}/${this.ref.name}${path}`, { ...init, headers });
+    return ghFetch(url, { ...init, headers });
   }
 
   /**
@@ -227,11 +232,19 @@ class AppReader implements Reader {
     if (!assets) return undefined;
     const id = assets.get(file);
     if (id === undefined) return null;
-    // A redirect goes to a signed URL on another host, which refuses our Authorization header,
-    // so it is followed separately, without it.
+    // A redirect to a signed URL on another host, which refuses our Authorization header, is
+    // followed separately, without it. One within the API (a renamed or transferred repository:
+    // /repositories/<id>/releases/assets/<id>) is followed here, with the same headers.
     const headers: Record<string, string> = { accept: "application/octet-stream" };
     if (range) headers.range = range;
-    const res = await this.api(`/releases/assets/${id}`, { headers, redirect: "manual" });
+    const init: RequestInit = { headers, redirect: "manual" };
+    let res = await this.api(`/releases/assets/${id}`, init);
+    for (let hops = 0; hops < 3 && res.status >= 300 && res.status < 400; hops++) {
+      const next = res.headers.get("location");
+      if (!next || !/^\/(repos|repositories)\//.test(next.startsWith(this.env.GITHUB_API) ? next.slice(this.env.GITHUB_API.length) : "")) break;
+      await res.body?.cancel();
+      res = await this.apiUrl(next, init);
+    }
     if (res.status === 200 || res.status === 206 || res.status === 416) return { response: res };
     await res.body?.cancel();
     if (this.denied(res)) return undefined;

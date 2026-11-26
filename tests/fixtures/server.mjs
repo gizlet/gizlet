@@ -36,6 +36,8 @@ const assets = new Map();
 const signed = new Map();
 /** Repositories whose asset API answers 200 with the bytes, which GitHub may do instead of a 302. */
 const DIRECT = new Set();
+/** Repositories renamed or moved: their asset API redirects to /repositories/<id>/releases/assets/<id>. */
+const RELOCATED = new Set();
 let nextAssetId = 1000;
 /** Request counts by key, e.g. latest:<repo>, api:<repo>, signed:<repo>. */
 const hits = new Map();
@@ -294,6 +296,10 @@ createServer(async (req, res) => {
     const count = hits.get(url.searchParams.get("key")) ?? 0;
     return json(200, { count, since: count - Number(url.searchParams.get("since") ?? 0) });
   }
+  if (url.pathname === "/_fixture/relocate" && req.method === "POST") {
+    RELOCATED.add(url.searchParams.get("repo"));
+    return json(200, { relocated: [...RELOCATED] });
+  }
   if (url.pathname === "/_fixture/direct" && req.method === "POST") {
     DIRECT.add(url.searchParams.get("repo"));
     return json(200, { direct: [...DIRECT] });
@@ -353,7 +359,24 @@ createServer(async (req, res) => {
     if (rest[0] === "releases" && rest[1] === "assets" && rest.length === 3) {
       const a = assets.get(Number(rest[2]));
       if (!a || a.repo !== key) return json(404, { message: "Not Found" });
-      if (req.headers.accept !== "application/octet-stream") return json(200, { id: Number(rest[2]), name: a.name });
+      if (RELOCATED.has(key)) return send(301, "", { location: `${issuer}/repositories/${900 + [...INSTALLED].indexOf(key)}/releases/assets/${rest[2]}` });
+      return serveAsset(a, Number(rest[2]));
+    }
+    return json(404, { message: "Not Found" });
+  }
+  // A relocated repository's asset, by repository id; needs the token and the Accept header again.
+  if (parts[0] === "repositories" && parts[2] === "releases" && parts[3] === "assets" && parts.length === 5) {
+    if (!bearer || !tokens.has(bearer)) return json(401, { message: "Bad credentials" });
+    const a = assets.get(Number(parts[4]));
+    if (!a || 900 + [...INSTALLED].indexOf(a.repo) !== Number(parts[1])) return json(404, { message: "Not Found" });
+    hit(`relocated:${a.repo}`);
+    return serveAsset(a, Number(parts[4]));
+  }
+  function serveAsset(a, assetId) {
+    const key = a.repo;
+    const repo = repos.get(key);
+    {
+      if (req.headers.accept !== "application/octet-stream") return json(200, { id: assetId, name: a.name });
       if (DIRECT.has(key)) {
         hit(`direct:${key}`);
         const file = repo.tags[a.tag].files.get(a.name);
@@ -375,7 +398,6 @@ createServer(async (req, res) => {
       signed.set(sig, a);
       return send(302, "", { location: `${issuer}/_signed/${sig}` });
     }
-    return json(404, { message: "Not Found" });
   }
   // A short-lived asset URL from the API. Like GitHub's, it refuses a second credential.
   if (parts[0] === "_signed") {

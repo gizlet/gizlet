@@ -160,6 +160,40 @@ header "content-length" == "4"
 header "cache-control" == "no-store"
 bytes == hex,504b0304;
 
+# After a rename or transfer, the asset API redirects within itself, to
+# /repositories/<id>/releases/assets/<id>; that is followed with the token and Accept header.
+POST {{fixture}}/_fixture/relocate?repo=fixture-org/secret-gizlet
+HTTP 200
+
+POST {{fixture}}/_fixture/release?repo=fixture-org/secret-gizlet&version=1.4.0
+HTTP 201
+
+GET {{fixture}}/token?repo=fixture-org/secret-gizlet&ref=refs/tags/v1.4.0&visibility=private
+HTTP 200
+[Captures]
+secret_token_14: jsonpath "$.value"
+
+POST {{base}}/v1/publish
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{secret_token_14}}
+{}
+HTTP 202
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/secret-gizlet/releases/v1.4.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "ready"
+jsonpath "$.warnings" count == 0
+
+GET {{fixture}}/_fixture/hits?key=relocated:fixture-org/secret-gizlet
+HTTP 200
+[Asserts]
+jsonpath "$.count" > 2
+
 GET {{fixture}}/_fixture/hits?key=direct:fixture-org/secret-gizlet
 HTTP 200
 [Asserts]
