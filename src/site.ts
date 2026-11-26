@@ -10,6 +10,7 @@ import type { Env } from "./env";
 import { devicePage, devicesPage, flashScript } from "./devices";
 import { explorePage } from "./explore";
 import { homePage } from "./home";
+import { mark } from "./mark";
 import { DEFAULT_LOCALE, LOCALE_NAMES, LOCALES, localized, matchLocale, MESSAGES, requestLocale, rich, scriptMessages, type Locale, type Messages } from "./i18n";
 import { ensureGizlet } from "./registry";
 import { parseRepoAddress, repoRef } from "./repo";
@@ -70,10 +71,10 @@ ${LOCALES.map((l) => html`<link rel="alternate" hreflang="${l}" href="${here}?la
 ${script ? html`${scriptMessages(t)}\n${raw(`<script type="module" src="/static/${script}"></script>`)}` : ""}
 </head>
 <body${wide ? raw(' class="home"') : ""}>
-<header class="wrap"><a class="brand" href="/" aria-label="${t.nav.brand}"><span class="px" aria-hidden="true">${raw("<i></i>".repeat(9))}</span>Gizlet</a><nav>${navLink(c, "/", t.nav.home)}${navLink(c, "/explore", t.nav.explore)}${navLink(c, "/install", t.nav.devices)}</nav><a class="login" href="/account">${t.nav.account}</a></header>
+<header class="wrap"><a class="brand" href="/" aria-label="${t.nav.brand}">${mark}Gizlet</a><nav>${navLink(c, "/", t.nav.home)}${navLink(c, "/explore", t.nav.explore)}${navLink(c, "/install", t.nav.devices)}</nav><a class="login" href="/account">${t.nav.account}</a></header>
 <main>${wide ? body : html`<div class="wrap narrow">${body}</div>`}</main>
 <footer><div class="wrap">
-  <span class="brand small"><span class="px" aria-hidden="true">${raw("<i></i>".repeat(9))}</span>Gizlet</span><a href="https://github.com/gizlet/gizlet">${t.footer.source}</a><a href="https://github.com/gizlet/os">${t.footer.os}</a><a href="https://github.com/gizlet/gizlet/blob/main/LICENSE">Apache-2.0</a>
+  <span class="brand small">${mark}Gizlet</span><a href="https://github.com/gizlet/gizlet">${t.footer.source}</a><a href="https://github.com/gizlet/os">${t.footer.os}</a><a href="https://github.com/gizlet/gizlet/blob/main/LICENSE">Apache-2.0</a>
   <nav class="langs" aria-label="${t.footer.language}">${LOCALES.map((l) => html`<a href="${langHref(c, l)}" hreflang="${l}" lang="${l}"${l === lang ? raw(' aria-current="true"') : ""}>${LOCALE_NAMES[l]}</a>`)}</nav>
 </div></footer>
 </body>
