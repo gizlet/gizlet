@@ -6,6 +6,7 @@
 import { html, raw } from "hono/html";
 import type { HtmlEscapedString } from "hono/utils/html";
 import { MESSAGES, rich, type Locale } from "./i18n";
+import { prompt } from "./mark";
 
 const OS_RELEASE = "https://github.com/gizlet/os/releases/latest/download";
 const OS_RAW = "https://raw.githubusercontent.com/gizlet/os/main/boards";
@@ -102,7 +103,7 @@ export function handheld(screen: HtmlEscapedString | Promise<HtmlEscapedString> 
 </div>`;
 }
 
-const bootScreen = html`<span class="boot"><span class="px">${raw("<i></i>".repeat(9))}</span>GIZLET OS</span>`;
+export const bootScreen = html`<span class="boot">${prompt}GIZLET OS</span>`;
 
 const haystack = (h: Handheld) => `${h.name} ${h.maker} ${h.soc} ${h.id}`.toLowerCase();
 

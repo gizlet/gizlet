@@ -48,9 +48,10 @@ code { font-family: var(--mono); font-size: .88em; background: #10111410; paddin
 /* Header and footer */
 header.wrap { display: flex; align-items: center; gap: 24px; height: 72px; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 900; font-size: 23px; letter-spacing: -0.02em; text-decoration: none; }
-.brand .px { display: grid; grid-template-columns: repeat(3, 6px); gap: 2px; }
-.brand .px i { width: 6px; height: 6px; border-radius: 1px; background: var(--ink); }
-.brand .px i:nth-child(even) { background: var(--cobalt); }
+.brand .mark { width: 34px; height: 34px; flex: none; transition: transform .18s; }
+a.brand:hover .mark { transform: rotate(-4deg) translateY(-2px); }
+a.brand:hover .mark .cur, .handheld .boot .cur { animation: blink 1.06s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
 header nav { margin-left: auto; display: flex; gap: 4px; }
 header nav a { padding: 8px 14px; font-weight: 600; font-size: 15px; text-decoration: none; border-radius: 10px; }
 header nav a:hover { background: #1011140d; }
@@ -61,8 +62,8 @@ footer { margin-top: 72px; border-top: 1px solid var(--line); }
 body.home footer { margin-top: 0; }
 footer .wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; padding-top: 28px; padding-bottom: 40px; font-size: 14px; color: var(--dim); }
 footer .brand.small { font-size: 16px; color: var(--ink); }
-footer .brand.small .px { grid-template-columns: repeat(3, 4px); gap: 1px; }
-footer .brand.small .px i { width: 4px; height: 4px; }
+footer .brand.small { gap: 6px; }
+footer .brand.small .mark { width: 22px; height: 22px; }
 footer a { text-decoration: none; }
 footer a:hover { color: var(--ink); text-decoration: underline; }
 footer .langs { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-left: auto; }
@@ -138,9 +139,7 @@ img.pic { object-fit: cover; background: #f4f5f7; }
 .handheld .sticks { display: flex; justify-content: space-around; margin-top: 1.4em; }
 .handheld .sticks i { width: 2.9em; height: 2.9em; background: radial-gradient(circle at 40% 35%, #5a5e68, #23252b); border: 2px solid var(--ink); border-radius: 50%; }
 .handheld .boot { display: grid; justify-items: center; gap: .8em; font: 700 .9em var(--mono); letter-spacing: .12em; }
-.handheld .boot .px { display: grid; grid-template-columns: repeat(3, .75em); gap: .2em; }
-.handheld .boot .px i { width: .75em; height: .75em; background: #fff; }
-.handheld .boot .px i:nth-child(even) { background: var(--sun); }
+.handheld .boot .prompt { width: 3.6em; height: 3.35em; }
 /* Now playing: the gizlet's cover fills the screen, its name on a tag in the corner. */
 .handheld .now { position: absolute; inset: .8em; overflow: hidden; border-radius: .4em; }
 .handheld .now .pic { display: block; width: 100%; height: 100%; }
@@ -173,7 +172,7 @@ a.rig-cart:hover { transform: rotate(-5deg) translateY(-10px); }
 .ticker .run { display: inline-block; animation: ticker 42s linear infinite; }
 .ticker i { display: inline-block; width: 9px; height: 9px; margin: 0 30px; vertical-align: 2px; background: var(--cobalt); }
 @keyframes ticker { to { transform: translateX(-50%); } }
-@media (prefers-reduced-motion: reduce) { .ticker .run { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .ticker .run, .cur { animation: none !important; } a.brand:hover .mark { transform: none; } }
 
 /* Home: shelves, how it works, developers, principles */
 .shelf { padding-top: 80px; padding-bottom: 8px; }
@@ -365,10 +364,18 @@ form.signing-up .signup { display: grid; }
   footer .langs { margin-left: 0; flex-basis: 100%; }
 }
 @media (max-width: 480px) {
-  .brand { font-size: 20px; }
-  .brand .px { display: none; }
+  /* The mark alone, so the nav and Account fit; the link keeps its aria-label. */
+  header .brand { gap: 0; font-size: 0; }
+  header .brand .mark { width: 32px; height: 32px; }
   .carts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
   .cart { padding: 24px 10px 10px; }
   .cart .name { font-size: 15px; }
   .cart .repo { display: none; }
+}
+@media (max-width: 360px) {
+  header.wrap { gap: 6px; padding-left: 12px; padding-right: 12px; }
+  header nav { gap: 0; }
+  header nav a { padding: 7px 6px; font-size: 13.5px; }
+  .login { padding: 8px 9px; font-size: 13.5px; }
+  header .brand .mark { width: 28px; height: 28px; }
 }
