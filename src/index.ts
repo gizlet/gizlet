@@ -36,7 +36,9 @@ export default {
     if (url.pathname.startsWith("/static/")) {
       const res = await env.ASSETS.fetch(req);
       const out = new Response(res.body, res);
-      out.headers.set("cache-control", "public, max-age=3600");
+      // Fonts never change under one name; the stylesheet and scripts are revalidated on every
+      // load (a 304 when unchanged), so a deploy shows at once and never pairs new pages with old CSS.
+      out.headers.set("cache-control", url.pathname.startsWith("/static/fonts/") ? "public, max-age=31536000, immutable" : "no-cache");
       return out;
     }
     switch (host) {

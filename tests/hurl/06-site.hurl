@@ -7,7 +7,7 @@ header "content-security-policy" contains "script-src 'self'"
 xpath "string(//h1)" contains "One link."
 body contains "href=\"/github.com/fixture-org/hello-gizlet\""
 body not contains "fixture-org/on-demand"
-body contains "/v1/publish"
+body contains "gizlet/template"
 
 # The home page's link box opens any way of writing a repository.
 GET {{base}}/open?url=https%3A%2F%2Fgithub.com%2FFixture-Org%2Fhello-gizlet%2Freleases
@@ -135,3 +135,67 @@ x-gizlet-host: gizlet.io
 HTTP 200
 [Asserts]
 xpath "string(//h1)" == "Hello Gizlet"
+
+# Devices: one table of handhelds; ?q= hides rows that do not match, ?status= filters.
+GET {{base}}/install?lang=en
+x-gizlet-host: gizlet.io
+HTTP 200
+[Asserts]
+xpath "count(//table[@class='hh-table']//tr[@data-search])" > 10
+xpath "string(//a[@href='/install/r36s'])" contains "R36S"
+body contains "/static/devices.js"
+
+GET {{base}}/install?q=rg351&lang=en
+x-gizlet-host: gizlet.io
+HTTP 200
+[Asserts]
+xpath "count(//tr[@data-search and not(@hidden)])" == 3
+
+GET {{base}}/install?status=supported&lang=en
+x-gizlet-host: gizlet.io
+HTTP 200
+[Asserts]
+xpath "count(//tr[@data-search])" == 1
+
+# A supported handheld's page gives one command that flashes it; /flash/ leads to the writer.
+GET {{base}}/install/r36s?lang=zh-CN
+x-gizlet-host: gizlet.io
+HTTP 200
+[Asserts]
+xpath "string(//h1)" == "R36S"
+body contains "/flash/r36s | bash"
+body contains "/flash/r36s.ps1 | iex"
+body contains "烧录 Gizlet OS"
+
+GET {{base}}/install/rg351p
+x-gizlet-host: gizlet.io
+HTTP 404
+
+GET {{base}}/flash/r36s
+x-gizlet-host: gizlet.io
+HTTP 302
+[Asserts]
+header "Location" == "https://raw.githubusercontent.com/gizlet/os/main/boards/gameconsole/r36s/flash.sh"
+
+GET {{base}}/flash/r36s.ps1
+x-gizlet-host: gizlet.io
+HTTP 302
+[Asserts]
+header "Location" endsWith "/r36s/flash.ps1"
+
+GET {{base}}/flash/nope
+x-gizlet-host: gizlet.io
+HTTP 404
+
+GET {{base}}/explore?q=hello&lang=en
+x-gizlet-host: gizlet.io
+HTTP 200
+[Asserts]
+body contains "href=\"/github.com/fixture-org/hello-gizlet\""
+
+# The old Devices address redirects to Install.
+GET {{base}}/devices?q=rg351
+x-gizlet-host: gizlet.io
+HTTP 301
+[Asserts]
+header "Location" == "/install?q=rg351"

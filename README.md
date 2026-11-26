@@ -16,7 +16,7 @@ One Cloudflare Worker serves every host:
 
 | Host | Serves |
 | --- | --- |
-| `gizlet.io` | The home page, share pages, sign-in, `/device` (approving a console), `/account` |
+| `gizlet.io` | The home page, `/explore`, `/install` (desktop downloads, handhelds and how to flash each), `/flash/<handheld>` (redirects to its card writer in gizlet/os), share pages, sign-in, `/device` (approving a console), `/account` |
 | `api.gizlet.io` | The JSON API, `/v1/...` |
 | `dl.gizlet.io` | Packages and art: `/github.com/<owner>/<repo>/<tag>/<file>` |
 | `www.gizlet.io` | Redirects to `gizlet.io` |
@@ -69,12 +69,14 @@ pnpm test:hurl sim        # the device simulation only
 | `src/index.ts` | Host routing, queue consumer, cron |
 | `src/api.ts`, `src/dl.ts`, `src/site.ts` | The three hosts |
 | `src/i18n.ts` | The site's languages (English, Simplified Chinese, Traditional Chinese, Japanese): `?lang=` (remembered in a `lang` cookie), else the cookie, else `Accept-Language`; every string of the pages and their scripts, and which of a gizlet's own `names`/`descriptions` to show |
-| `src/home.ts` | The home page: the featured gizlets as cartridges, a box that opens any repository link (`/open?url=`), and how to publish |
+| `src/home.ts` | The home page: the featured gizlets as cartridges, a box that opens any repository link (`/open?url=`), and how a gizlet is made |
+| `src/explore.ts` | `/explore`: listed gizlets with search and a category filter |
+| `src/devices.ts` | `/install`: macOS and Windows downloads, the table of handhelds (supported and requested), and `/install/<id>` with the one-line flash command; `/flash/<id>` redirects to the writer script |
 | `src/registry.ts`, `src/mirror.ts`, `src/check.ts` | Indexing, mirroring, static checks, visibility |
 | `src/auth.ts` | Better Auth options; one instance and connection per request |
 | `migrations/d1/` | The registry (D1) |
 | `migrations/pg/` | Accounts (Postgres); `node scripts/pg.ts generate <name>` writes the next one after changing `src/auth.ts` |
-| `public/static/` | The site's stylesheet (system fonts and no inline styles, as the CSP requires) and the account pages' scripts |
+| `public/static/` | The site's stylesheet (no inline styles, as the CSP requires), Schibsted Grotesk in `fonts/` (SIL OFL), and the pages' scripts |
 | `tests/hurl/`, `tests/sim/`, `tests/prod/` | Local suite, device simulation, production smoke checks |
 | `scripts/dev.sh` | `pnpm dev` |
 | `mirror/`, `tests/mirror/` | An nginx reverse proxy that serves every host under another domain (`gizlet.xyz`, `api.gizlet.xyz`, ...), and its checks; see [mirror/README.md](mirror/README.md). Links in account emails use the domain the request came in on, if the `SITE_DOMAINS` repository variable lists it, else `gizlet.io` |
