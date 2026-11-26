@@ -7,6 +7,8 @@ import { html, raw } from "hono/html";
 import type { HtmlEscapedString } from "hono/utils/html";
 import { gizletDetail } from "./db";
 import type { Env } from "./env";
+import { devicePage, devicesPage, flashScript } from "./devices";
+import { explorePage } from "./explore";
 import { homePage } from "./home";
 import { DEFAULT_LOCALE, LOCALE_NAMES, LOCALES, localized, matchLocale, MESSAGES, requestLocale, rich, scriptMessages, type Locale, type Messages } from "./i18n";
 import { ensureGizlet } from "./registry";
@@ -38,6 +40,9 @@ function langHref(c: C, lang: Locale): string {
   return `?${q}`;
 }
 
+const navLink = (c: C, path: string, text: string) =>
+  html`<a href="${path}"${c.req.path === path || (path !== "/" && c.req.path.startsWith(`${path}/`)) ? raw(' aria-current="page"') : ""}>${text}</a>`;
+
 interface PageOptions {
   script?: string;
   /** Pages that lay out their own `.wrap` containers (the home page); others get a narrow column. */
@@ -55,18 +60,18 @@ function page(c: C, title: string, body: HtmlEscapedString | Promise<HtmlEscaped
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title>
 <meta name="description" content="${t.meta.description}">
-<meta name="theme-color" content="#f2ede4">
+<meta name="theme-color" content="#eceef1">
+${lang === "en" ? raw('<link rel="preload" href="/static/fonts/schibsted-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin>') : ""}
 ${LOCALES.map((l) => html`<link rel="alternate" hreflang="${l}" href="${here}?lang=${l}">\n`)}<link rel="alternate" hreflang="x-default" href="${here}">
 <link rel="stylesheet" href="/static/site.css">
 ${script ? html`${scriptMessages(t)}\n${raw(`<script type="module" src="/static/${script}"></script>`)}` : ""}
 </head>
 <body${wide ? raw(' class="home"') : ""}>
-<header class="wrap"><a class="brand" href="/" aria-label="${t.nav.home}"><span class="px" aria-hidden="true">${raw("<i></i>".repeat(9))}</span>GIZLET</a><nav><a href="/#gizlets">${t.nav.gizlets}</a><a href="/#make">${t.nav.make}</a><a href="https://github.com/gizlet/os">${t.nav.os}</a></nav><a class="login" href="/account">${t.nav.account}</a></header>
+<header class="wrap"><a class="brand" href="/" aria-label="${t.nav.brand}"><span class="px" aria-hidden="true">${raw("<i></i>".repeat(9))}</span>Gizlet</a><nav>${navLink(c, "/", t.nav.home)}${navLink(c, "/explore", t.nav.explore)}${navLink(c, "/install", t.nav.devices)}</nav><a class="login" href="/account">${t.nav.account}</a></header>
 <main>${wide ? body : html`<div class="wrap narrow">${body}</div>`}</main>
 <footer><div class="wrap">
-  <span>© 2026 Gizlet</span><a href="https://github.com/gizlet/gizlet">${t.footer.source}</a><a href="https://github.com/gizlet/os">${t.footer.os}</a><a href="https://github.com/gizlet/gizlet/blob/main/LICENSE">Apache-2.0</a>
+  <span class="brand small"><span class="px" aria-hidden="true">${raw("<i></i>".repeat(9))}</span>Gizlet</span><a href="https://github.com/gizlet/gizlet">${t.footer.source}</a><a href="https://github.com/gizlet/os">${t.footer.os}</a><a href="https://github.com/gizlet/gizlet/blob/main/LICENSE">Apache-2.0</a>
   <nav class="langs" aria-label="${t.footer.language}">${LOCALES.map((l) => html`<a href="${langHref(c, l)}" hreflang="${l}" lang="${l}"${l === lang ? raw(' aria-current="true"') : ""}>${LOCALE_NAMES[l]}</a>`)}</nav>
-  <span class="keys">${t.footer.keys}</span>
 </div></footer>
 </body>
 </html>`;
@@ -97,6 +102,31 @@ site.get("/open", async (c) => {
   const r = parseRepoAddress(url);
   if (r) return c.redirect(`/${r.key}`, 302);
   return c.html(page(c, tr(c).meta.title, await homePage(c.env, langOf(c), url), { wide: true }), 400);
+});
+
+site.get("/explore", async (c) =>
+  c.html(page(c, `${tr(c).explore.title} · Gizlet`, await explorePage(c.env, langOf(c), { q: c.req.query("q"), category: c.req.query("category"), cursor: c.req.query("cursor") }), { wide: true })),
+);
+
+/** The page was called Devices first; keep old links working. */
+site.get("/devices", (c) => c.redirect(`/install${new URL(c.req.url).search}`, 301));
+site.get("/devices/:id", (c) => c.redirect(`/install/${encodeURIComponent(c.req.param("id"))}`, 301));
+
+site.get("/install", (c) =>
+  c.html(page(c, `${tr(c).devices.title} · Gizlet`, devicesPage(langOf(c), { q: c.req.query("q"), status: c.req.query("status") }), { wide: true, script: "devices.js" })),
+);
+
+site.get("/install/:id", (c) => {
+  const d = devicePage(langOf(c), c.req.param("id"), c.env.SITE_ORIGIN);
+  if (!d) return c.notFound();
+  return c.html(page(c, `${d.name} · ${tr(c).devices.title} · Gizlet`, d.body, { wide: true, script: "devices.js" }));
+});
+
+/** The writer for a supported handheld: `curl -fsSL gizlet.io/flash/r36s | bash`, or `/flash/r36s.ps1` for Windows. */
+site.get("/flash/:name", (c) => {
+  const to = flashScript(c.req.param("name"));
+  if (!to) return c.text("no such handheld\n", 404);
+  return c.redirect(to, 302);
 });
 
 site.get("/login", (c) => {
