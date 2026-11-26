@@ -12,6 +12,8 @@ type App = { Bindings: Env };
 export const dl = new Hono<App>();
 
 const TAG = /^[A-Za-z0-9._+-]{1,100}$/;
+const OS_TAG = /^v(?:0|[1-9][0-9]{0,8})(?:\.(?:0|[1-9][0-9]{0,8})){2}$/;
+const OS_FILE = /^[A-Za-z0-9_-][A-Za-z0-9_.-]*(?:\/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*$/;
 
 dl.get("/", (c) => c.redirect(c.env.SITE_ORIGIN, 302));
 
@@ -43,6 +45,42 @@ async function fromR2(c: Context<App>, key: string, file: string, cacheControl: 
   onDownload();
   return new Response(c.req.method === "HEAD" ? null : obj.body, { status, headers });
 }
+
+dl.on(["GET", "HEAD"], "/releases/latest/:script", async (c) => {
+  const script = c.req.param("script");
+  if (script !== "flash.sh" && script !== "flash.ps1") return c.text("Not found", 404);
+  const tags: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await c.env.BUCKET.list({ prefix: "releases/", delimiter: "/", cursor });
+    for (const directory of page.delimitedPrefixes) {
+      const tag = directory.slice("releases/".length, -1);
+      if (OS_TAG.test(tag)) tags.push(tag);
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+  const version = new Intl.Collator("en", { numeric: true });
+  tags.sort((first, second) => version.compare(second, first));
+  for (const tag of tags) {
+    if (await c.env.BUCKET.head(`releases/${tag}/manifest.json`)) {
+      c.header("cache-control", "public, max-age=60");
+      return c.redirect(`/releases/${tag}/${script}`, 302);
+    }
+  }
+  return c.text("Not found", 404);
+});
+
+dl.on(["GET", "HEAD"], "/releases/:tag/:file{.+}", async (c) => {
+  const tag = c.req.param("tag");
+  const file = c.req.param("file");
+  if (!OS_TAG.test(tag) || !OS_FILE.test(file)) return c.text("Not found", 404);
+  const prefix = `releases/${tag}/`;
+  if (file !== "manifest.json" && !(await c.env.BUCKET.head(`${prefix}manifest.json`))) {
+    return c.text("Not found", 404);
+  }
+  const response = await fromR2(c, prefix + file, file, "public, max-age=31536000, immutable", null, () => {});
+  return response ?? c.text("Not found", 404);
+});
 
 /** Redirect to the newest compatible package, given ?target= (and ?tier=) or X-Gizlet-Target. */
 dl.get("/github.com/:owner/:repo", async (c) => {

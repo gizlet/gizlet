@@ -18,7 +18,7 @@ One Cloudflare Worker serves every host:
 | --- | --- |
 | `gizlet.io` | The home page, `/explore`, `/install` (desktop downloads, handhelds and how to flash each), `/flash/<handheld>` (redirects to its card writer in gizlet/os), gizlet pages, sign-in, `/device` (approving a console), `/account` (with the handhelds you want) |
 | `api.gizlet.io` | The JSON API, `/v1/...` |
-| `dl.gizlet.io` | Packages and art: `/github.com/<owner>/<repo>/<tag>/<file>` |
+| `dl.gizlet.io` | Packages and art at `/github.com/<owner>/<repo>/<tag>/<file>` and Gizlet OS files at `/releases/<tag>/<file>`. `/releases/latest/flash.sh` and `/releases/latest/flash.ps1` redirect to the newest completed OS version. |
 | `www.gizlet.io` | Redirects to `gizlet.io` |
 
 - **Describing a gizlet**: its repository has a `gizlet.toml` at the root, and each `.gzl` package carries a `manifest.json` its build generates from it. Both are specified in [docs/gizlet-toml.md](docs/gizlet-toml.md); [tests/fixtures/repos/rocket-snail](tests/fixtures/repos/rocket-snail) is a worked example.
