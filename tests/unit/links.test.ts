@@ -174,3 +174,24 @@ test("a gizlet indexed without GitHub's id takes the one GitHub confirms, and so
   assert.equal(await resolveLink(env, "later-one"), null);
   assert.equal(await resolveLink(env, "early-one"), null);
 });
+
+test("adopting an id that already has a current link keeps one current link, holding the path's", async () => {
+  const { db, env } = d1();
+  // Linked under its old name, then indexed from the web under its new one and linked there too.
+  await claimLink(env, { repo: "github.com/o/old", repository_id: 7 }, "by-id", "u1");
+  const renamed = { repo: "github.com/o/new", repository_id: null };
+  db.exec("INSERT INTO gizlets (repo, repository_id) VALUES ('github.com/o/new', NULL)");
+  await claimLink(env, renamed, "by-path", "u1");
+  const bound = await adoptRepositoryId(env, renamed, 7);
+  const rows = db.prepare("SELECT id, gizlet, expires_at FROM links ORDER BY id").all() as { id: string; gizlet: string; expires_at: number | null }[];
+  assert.deepEqual(
+    rows.map((r) => [r.id, r.gizlet, r.expires_at === null]),
+    [
+      ["by-id", "id:7", true],
+      ["by-path", "id:7", false],
+    ],
+  );
+  assert.equal(await currentLink(env, bound), "by-id");
+  // Both still lead to the repository, under its new name.
+  assert.equal((await resolveLink(env, "by-path"))?.gizlet.repo, "github.com/o/new");
+});

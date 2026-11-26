@@ -18,7 +18,8 @@
 // lists them as links in a browser; ?fixture_login=<login> picks one at once. A user's tokens can
 // be revoked (POST /_fixture/revoke?login=), as when someone removes the app on GitHub.
 // POST /_fixture/replace?repo= gives the repository at a path another GitHub id, as when it is
-// deleted and someone creates another at the same path. Users' tokens have no `repo` scope, so they
+// deleted and someone creates another at the same path; POST /_fixture/hide?repo=&hidden=1|0 takes
+// a public repository off GitHub for a while, as when it is made private. Users' tokens have no `repo` scope, so they
 // do not see private repositories; the app reads users' roles on the repositories it is installed on.
 //
 //   node tests/fixtures/server.mjs 18788
@@ -62,6 +63,8 @@ const hit = (key) => hits.set(key, (hits.get(key) ?? 0) + 1);
 
 /** Repositories replaced by another at the same path (POST /_fixture/replace), with their new id. */
 const REPLACED = new Map();
+/** Public repositories off GitHub for now (POST /_fixture/hide). */
+const HIDDEN = new Set();
 /** A repository's GitHub id, stable per repository (the API, OIDC tokens and asset URLs agree). */
 function repoId(key) {
   if (REPLACED.has(key)) return REPLACED.get(key);
@@ -434,6 +437,12 @@ createServer(async (req, res) => {
     REPLACED.set(key, repoId(key) + 1);
     return json(200, { repo: key, id: repoId(key) });
   }
+  if (url.pathname === "/_fixture/hide" && req.method === "POST") {
+    const key = url.searchParams.get("repo");
+    if (url.searchParams.get("hidden") === "0") HIDDEN.delete(key);
+    else HIDDEN.add(key);
+    return json(200, { repo: key, hidden: HIDDEN.has(key) });
+  }
 
   // github.com/login/oauth: the OAuth app's authorize page and token exchange.
   if (url.pathname === "/login/oauth/authorize") {
@@ -524,6 +533,10 @@ createServer(async (req, res) => {
     if (!bearer || !tokens.has(bearer)) return json(401, { message: "Bad credentials" });
     const repo = repos.get(key);
     // Any token reads a public repository's metadata.
+    if (rest.length === 0 && HIDDEN.has(key)) {
+      hit(`gone:${key}`);
+      return json(404, { message: "Not Found" });
+    }
     if (rest.length === 0 && repo && !PRIVATE.has(key) && !INSTALLED.has(key)) return json(200, { id: repoId(key), name, owner: { login: owner }, private: false });
     if (!repo || !INSTALLED.has(key)) return json(404, { message: "Not Found" });
     if (rest[0] === "collaborators" && rest[2] === "permission" && rest.length === 3) {
@@ -602,7 +615,7 @@ createServer(async (req, res) => {
   // github.com and raw.githubusercontent.com: public repositories only.
   const [owner, name, ...rest] = parts;
   const key = `${owner}/${name}`.toLowerCase();
-  const repo = PRIVATE.has(key) ? undefined : repos.get(key);
+  const repo = PRIVATE.has(key) || HIDDEN.has(key) ? undefined : repos.get(key);
   if (!repo) return send(404, "Not Found");
   if (rest.join("/") === "releases/latest") {
     hit(`latest:${key}`);

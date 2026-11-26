@@ -591,6 +591,35 @@ HTTP 302
 
 # The repository at a link's path is replaced by another (the old one deleted, another created
 # there): on its next refresh the gizlet takes the new id, and the link leads nowhere.
+# Before that it goes away for a while (deleted, or made private): the gizlet keeps its id, so its
+# links lead there again once it is back.
+POST {{fixture}}/_fixture/hide?repo=fixture-org/on-demand
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/on-demand
+x-gizlet-host: api.gizlet.io
+[Options]
+delay: 3500
+HTTP 200
+
+# The refresh asked GitHub, which showed nothing there.
+GET {{fixture}}/_fixture/hits?key=gone:fixture-org/on-demand
+[Options]
+retry: 20
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.count" > 0
+
+POST {{fixture}}/_fixture/hide?repo=fixture-org/on-demand&hidden=0
+HTTP 200
+
+GET {{base}}/on-demand-app
+x-gizlet-host: gizlet.io
+HTTP 302
+[Asserts]
+header "Location" == "/github.com/fixture-org/on-demand"
+
 POST {{fixture}}/_fixture/replace?repo=fixture-org/on-demand
 HTTP 200
 

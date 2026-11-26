@@ -215,7 +215,9 @@ export async function ensureGizlet(env: Env, ref: RepoRef, ctx?: Waiter): Promis
  * A gizlet bound to a GitHub repository id is only refreshed from the repository with that id: when
  * the path now holds another repository (the old one deleted or moved, another created there), the
  * gizlet takes the new repository's id, so short links bound to the old one lead nowhere
- * (src/links.ts), and when GitHub cannot say, nothing is indexed this time.
+ * (src/links.ts). When the path holds no repository GitHub shows (deleted, or made private for a
+ * while) or GitHub cannot say, the gizlet keeps its id, so its links work again if it comes back,
+ * and nothing is indexed this time.
  */
 export async function refreshGizlet(env: Env, ref: RepoRef, olderThanMs: number): Promise<boolean> {
   const now = Date.now();
@@ -230,7 +232,7 @@ export async function refreshGizlet(env: Env, ref: RepoRef, olderThanMs: number)
     if (bound?.repository_id != null) {
       // The app reads the repository with its id; the public web has none, so ask GitHub.
       const id = info ? info.id : await repositoryIdAt(env, ref);
-      if (id === undefined) return true;
+      if (id === undefined || id === null) return true;
       if (id !== bound.repository_id) await env.DB.prepare("UPDATE gizlets SET repository_id = ? WHERE repo = ?").bind(id, ref.key).run();
     }
     if (info) {

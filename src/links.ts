@@ -161,13 +161,21 @@ export async function releaseLink(env: Env, g: Gizlet): Promise<string | null> {
 /**
  * Bind a gizlet indexed without GitHub's repository id (read from the public web) to the id GitHub
  * just confirmed, with the links it already has: from then on they follow the repository, and
- * another repository created at its path is another gizlet.
+ * another repository created at its path is another gizlet. If the repository already has a current
+ * id under that GitHub id (indexed under its old name, say), the path's current one is held, as if
+ * replaced, so the gizlet keeps one current id.
  */
 export async function adoptRepositoryId<T extends Gizlet>(env: Env, g: T, id: number): Promise<T> {
   if (g.repository_id != null) return g;
+  const [byId, byPath] = [`id:${id}`, `repo:${g.repo}`];
   await env.DB.batch([
     env.DB.prepare("UPDATE gizlets SET repository_id = ? WHERE repo = ? AND repository_id IS NULL").bind(id, g.repo),
-    env.DB.prepare("UPDATE links SET gizlet = ?, repository_id = ? WHERE gizlet = ?").bind(`id:${id}`, id, `repo:${g.repo}`),
+    env.DB.prepare("UPDATE links SET expires_at = ?1 WHERE gizlet = ?2 AND expires_at IS NULL AND EXISTS (SELECT 1 FROM links o WHERE o.gizlet = ?3 AND o.expires_at IS NULL)").bind(
+      Date.now() + LINK_HOLD_MS,
+      byPath,
+      byId,
+    ),
+    env.DB.prepare("UPDATE links SET gizlet = ?, repository_id = ? WHERE gizlet = ?").bind(byId, id, byPath),
   ]);
   return { ...g, repository_id: id };
 }
