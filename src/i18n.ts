@@ -47,6 +47,12 @@ export function negotiate(header: string | null | undefined): Locale {
   return DEFAULT_LOCALE;
 }
 
+/** The `lang` cookie's locale, if it names one. */
+export const cookieLocale = (cookie: string | null | undefined): Locale | null => matchLocale(/(?:^|[;,]\s*)lang=([^;,\s]+)/.exec(cookie ?? "")?.[1]);
+
+/** A request's language without `?lang=`: the `lang` cookie, then Accept-Language. */
+export const requestLocale = (headers: Headers | undefined): Locale => cookieLocale(headers?.get("cookie")) ?? negotiate(headers?.get("accept-language"));
+
 /** Tags to try, in order, in a gizlet's own per-language map before its default text. */
 const FALLBACKS: Record<Locale, string[]> = {
   en: ["en", "en-us", "en-gb"],
@@ -146,6 +152,15 @@ const en = {
   login: { title: "Sign in", email: "Email", password: "Password", name: "Name", submit: "Sign in", toggle: "Create an account instead", github: "Continue with GitHub" },
   device: { title: "Connect a device", text: "Enter the code shown on your handheld.", code: "Code", allow: "Allow", deny: "Deny" },
   account: { title: "Account", methods: "Sign-in methods:", github: "GitHub:", link: "Link GitHub", signOut: "Sign out", gizlets: "Your gizlets" },
+  /** Account emails; `url` is the link to open. */
+  mail: {
+    verifySubject: "Confirm your email for Gizlet",
+    verifyText: (url: string) => `Open this link to confirm your email and finish creating your Gizlet account:\n\n${url}\n\nThe link works for 24 hours. If you did not sign up for Gizlet, ignore this email.`,
+    existingSubject: "You already have a Gizlet account",
+    existingText: (url: string) => `Someone tried to create a Gizlet account with this email, but you already have one. Sign in here:\n\n${url}\n\nIf it was not you, ignore this email; your account has not changed.`,
+    resetSubject: "Reset your Gizlet password",
+    resetText: (url: string) => `Open this link to choose a new password:\n\n${url}\n\nIf you did not ask for this, ignore this email.`,
+  },
   /** For public/static/*.js; `{name}` placeholders are filled in there. */
   js: {
     signIn: "Sign in",
@@ -161,6 +176,7 @@ const en = {
     noGizlets: "No gizlets in your repositories yet.",
     linkToSee: "Link GitHub to see the gizlets in your repositories.",
     requestFailed: "Something went wrong ({status}).",
+    checkInbox: "Almost done: we sent a link to {email}. Open it to confirm your email and finish creating your account.",
     methods: { email: "Email", github: "GitHub" } as Record<string, string>,
     visibility: { listed: "listed", unlisted: "unlisted", blocked: "blocked" } as Record<string, string>,
     errors: {
@@ -169,6 +185,10 @@ const en = {
       USER_ALREADY_EXISTS: "There is already an account with this email.",
       USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL: "There is already an account with this email.",
       PASSWORD_TOO_SHORT: "The password must be at least 10 characters.",
+      EMAIL_NOT_VERIFIED: "Confirm your email first. We sent a new link to your inbox.",
+      TOKEN_EXPIRED: "This link has expired. Sign in to get a new one.",
+      INVALID_TOKEN: "This link is not valid. Sign in to get a new one.",
+      USER_NOT_FOUND: "There is no account for this link.",
     } as Record<string, string>,
   },
 };
@@ -231,6 +251,14 @@ const zhCN: Messages = {
   login: { title: "登录", email: "邮箱", password: "密码", name: "昵称", submit: "登录", toggle: "改为创建账号", github: "使用 GitHub 继续" },
   device: { title: "连接设备", text: "输入掌机上显示的代码。", code: "代码", allow: "允许", deny: "拒绝" },
   account: { title: "账号", methods: "登录方式：", github: "GitHub：", link: "关联 GitHub", signOut: "退出登录", gizlets: "我的 gizlet" },
+  mail: {
+    verifySubject: "确认你的 Gizlet 邮箱",
+    verifyText: (url) => `打开下面的链接，确认邮箱并完成 Gizlet 账号注册：\n\n${url}\n\n链接 24 小时内有效。如果你没有注册 Gizlet，请忽略这封邮件。`,
+    existingSubject: "你已经有 Gizlet 账号了",
+    existingText: (url) => `有人尝试用这个邮箱注册 Gizlet，但你已经有账号了。在这里登录：\n\n${url}\n\n如果不是你本人操作，请忽略这封邮件，你的账号没有任何变化。`,
+    resetSubject: "重置你的 Gizlet 密码",
+    resetText: (url) => `打开下面的链接设置新密码：\n\n${url}\n\n如果你没有申请重置密码，请忽略这封邮件。`,
+  },
   js: {
     signIn: "登录",
     createAccount: "创建账号",
@@ -245,6 +273,7 @@ const zhCN: Messages = {
     noGizlets: "你的仓库里还没有 gizlet。",
     linkToSee: "关联 GitHub 后，可以看到你仓库中的 gizlet。",
     requestFailed: "出错了（{status}）。",
+    checkInbox: "就差一步：我们已向 {email} 发送了一封邮件，打开其中的链接确认邮箱即可完成注册。",
     methods: { email: "邮箱", github: "GitHub" },
     visibility: { listed: "已上架", unlisted: "仅链接可见", blocked: "已封禁" },
     errors: {
@@ -253,6 +282,10 @@ const zhCN: Messages = {
       USER_ALREADY_EXISTS: "该邮箱已注册。",
       USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL: "该邮箱已注册。",
       PASSWORD_TOO_SHORT: "密码至少需要 10 个字符。",
+      EMAIL_NOT_VERIFIED: "请先确认邮箱。我们已向你的邮箱发送了新的确认链接。",
+      TOKEN_EXPIRED: "链接已过期。请重新登录以获取新链接。",
+      INVALID_TOKEN: "链接无效。请重新登录以获取新链接。",
+      USER_NOT_FOUND: "这个链接对应的账号不存在。",
     },
   },
 };
@@ -313,6 +346,14 @@ const zhTW: Messages = {
   login: { title: "登入", email: "電子郵件", password: "密碼", name: "名稱", submit: "登入", toggle: "改為建立帳號", github: "使用 GitHub 繼續" },
   device: { title: "連接裝置", text: "輸入掌機上顯示的代碼。", code: "代碼", allow: "允許", deny: "拒絕" },
   account: { title: "帳號", methods: "登入方式：", github: "GitHub：", link: "連結 GitHub", signOut: "登出", gizlets: "我的 gizlet" },
+  mail: {
+    verifySubject: "確認你的 Gizlet 電子郵件",
+    verifyText: (url) => `開啟下面的連結，確認電子郵件並完成 Gizlet 帳號註冊：\n\n${url}\n\n連結 24 小時內有效。如果你沒有註冊 Gizlet，請忽略這封郵件。`,
+    existingSubject: "你已經有 Gizlet 帳號了",
+    existingText: (url) => `有人嘗試用這個電子郵件註冊 Gizlet，但你已經有帳號了。在這裡登入：\n\n${url}\n\n如果不是你本人操作，請忽略這封郵件，你的帳號沒有任何變化。`,
+    resetSubject: "重設你的 Gizlet 密碼",
+    resetText: (url) => `開啟下面的連結設定新密碼：\n\n${url}\n\n如果你沒有申請重設密碼，請忽略這封郵件。`,
+  },
   js: {
     signIn: "登入",
     createAccount: "建立帳號",
@@ -327,6 +368,7 @@ const zhTW: Messages = {
     noGizlets: "你的儲存庫裡還沒有 gizlet。",
     linkToSee: "連結 GitHub 後，即可看到你儲存庫中的 gizlet。",
     requestFailed: "發生錯誤（{status}）。",
+    checkInbox: "就差一步：我們已寄送郵件到 {email}，開啟其中的連結確認電子郵件即可完成註冊。",
     methods: { email: "電子郵件", github: "GitHub" },
     visibility: { listed: "已上架", unlisted: "僅限連結", blocked: "已封鎖" },
     errors: {
@@ -335,6 +377,10 @@ const zhTW: Messages = {
       USER_ALREADY_EXISTS: "此電子郵件已註冊。",
       USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL: "此電子郵件已註冊。",
       PASSWORD_TOO_SHORT: "密碼至少需要 10 個字元。",
+      EMAIL_NOT_VERIFIED: "請先確認電子郵件。我們已寄送新的確認連結到你的信箱。",
+      TOKEN_EXPIRED: "連結已過期。請重新登入以取得新連結。",
+      INVALID_TOKEN: "連結無效。請重新登入以取得新連結。",
+      USER_NOT_FOUND: "這個連結對應的帳號不存在。",
     },
   },
 };
@@ -395,6 +441,14 @@ const ja: Messages = {
   login: { title: "ログイン", email: "メールアドレス", password: "パスワード", name: "名前", submit: "ログイン", toggle: "アカウントを作成する", github: "GitHub で続ける" },
   device: { title: "デバイスを接続", text: "携帯機に表示されたコードを入力してください。", code: "コード", allow: "許可", deny: "拒否" },
   account: { title: "アカウント", methods: "ログイン方法：", github: "GitHub：", link: "GitHub を連携", signOut: "ログアウト", gizlets: "あなたの gizlet" },
+  mail: {
+    verifySubject: "Gizlet のメールアドレスを確認してください",
+    verifyText: (url) => `次のリンクを開いてメールアドレスを確認し、Gizlet アカウントの作成を完了してください：\n\n${url}\n\nリンクの有効期限は 24 時間です。Gizlet に登録した覚えがない場合は、このメールを無視してください。`,
+    existingSubject: "Gizlet アカウントはすでにあります",
+    existingText: (url) => `このメールアドレスで Gizlet アカウントを作成しようとしましたが、すでにアカウントがあります。こちらからログインしてください：\n\n${url}\n\n心当たりがない場合は、このメールを無視してください。アカウントは変更されていません。`,
+    resetSubject: "Gizlet のパスワードを再設定",
+    resetText: (url) => `次のリンクを開いて新しいパスワードを設定してください：\n\n${url}\n\n心当たりがない場合は、このメールを無視してください。`,
+  },
   js: {
     signIn: "ログイン",
     createAccount: "アカウントを作成",
@@ -409,6 +463,7 @@ const ja: Messages = {
     noGizlets: "あなたのリポジトリには、まだ gizlet がありません。",
     linkToSee: "GitHub を連携すると、あなたのリポジトリの gizlet が表示されます。",
     requestFailed: "エラーが発生しました（{status}）。",
+    checkInbox: "あと少しです：{email} にリンクを送りました。リンクを開いてメールアドレスを確認すると、アカウントの作成が完了します。",
     methods: { email: "メールアドレス", github: "GitHub" },
     visibility: { listed: "公開中", unlisted: "リンク限定", blocked: "ブロック済み" },
     errors: {
@@ -417,6 +472,10 @@ const ja: Messages = {
       USER_ALREADY_EXISTS: "このメールアドレスはすでに登録されています。",
       USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL: "このメールアドレスはすでに登録されています。",
       PASSWORD_TOO_SHORT: "パスワードは 10 文字以上にしてください。",
+      EMAIL_NOT_VERIFIED: "先にメールアドレスを確認してください。新しい確認リンクを送りました。",
+      TOKEN_EXPIRED: "リンクの有効期限が切れています。もう一度ログインすると新しいリンクが届きます。",
+      INVALID_TOKEN: "リンクが正しくありません。もう一度ログインすると新しいリンクが届きます。",
+      USER_NOT_FOUND: "このリンクのアカウントは存在しません。",
     },
   },
 };

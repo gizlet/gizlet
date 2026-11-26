@@ -2,7 +2,7 @@
 // suite. It plays three parts against the running Worker, as gizlet/os will:
 //
 //   developer  publishes a release from "GitHub Actions" (an OIDC token from the fixture server)
-//   player     signs up on gizlet.io and approves the console's code at /device
+//   player     signs up on gizlet.io, confirms the email and approves the console's code at /device
 //   console    signs in with the device flow, opens a share link, downloads the package in
 //              two parts (a dropped connection, then a Range resume), verifies its sha256,
 //              unpacks it and checks manifest.toml and the entry executable
@@ -69,10 +69,19 @@ if (pending.error !== "authorization_pending") fail(`expected authorization_pend
 
 // --- player approves on a phone ----------------------------------------------------------------
 const email = `sim-${Date.now()}@example.com`;
-const signUp = await call("gizlet.io", "POST", "/v1/auth/sign-up/email", { origin: SITE, body: { email, password: "pocket computer 1", name: "Sim Player" } });
+const signUp = await call("gizlet.io", "POST", "/v1/auth/sign-up/email", { origin: SITE, body: { email, password: "pocket computer 1", name: "Sim Player", callbackURL: "/login?verified=1&next=%2Fdevice" } });
 await json(signUp, 200);
-const web = signUp.headers.get("set-auth-token") ?? fail("sign-up returned no session token");
-log("player", `signed up as ${email}`);
+if (signUp.headers.get("set-auth-token")) fail("sign-up signed in before the email was confirmed");
+log("player", `signed up as ${email}; no session until the email is confirmed`);
+
+// The local Worker keeps account mail in an outbox instead of sending it.
+const mail = await json(await call("api.gizlet.io", "GET", `/v1/dev/mail?to=${encodeURIComponent(email)}`), 200);
+const link = mail.link ?? fail("the sign-up email has no link");
+if (!link.startsWith(`${SITE}/v1/auth/verify-email?`)) fail(`the sign-up email links to ${link}`);
+const verified = await call("gizlet.io", "GET", link.slice(SITE.length));
+if (verified.status !== 302) fail(`opening the email link: ${verified.status}`);
+const web = verified.headers.get("set-auth-token") ?? fail("the email link did not sign the player in");
+log("player", `opened the link in "${mail.subject}" and is signed in`);
 
 const claimed = await json(await call("gizlet.io", "GET", `/v1/auth/device?user_code=${encodeURIComponent(code.user_code)}`, { token: web }), 200);
 if (claimed.client_id !== "gizlet-os") fail(`device request is for ${claimed.client_id}`);

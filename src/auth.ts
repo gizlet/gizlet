@@ -5,11 +5,16 @@
  * Sign-in: email + password, GitHub, and the OAuth device flow (RFC 8628) for consoles:
  * the console shows a code, the user approves it at gizlet.io/device, and the console gets a
  * bearer token for the same account.
+ *
+ * An email account has no session until its address is confirmed: sign-up mails a link, and
+ * opening it verifies the address and signs the user in. Signing in unconfirmed mails a new one.
  */
 import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { bearer } from "better-auth/plugins/bearer";
 import { deviceAuthorization } from "better-auth/plugins/device-authorization";
 import { Pool } from "pg";
+// With its extension: Node runs this file too (tests, scripts/pg.ts).
+import { MESSAGES, requestLocale } from "./i18n.ts";
 
 /** The settings auth needs; a subset of the Worker's Env so scripts can build the same schema. */
 export interface AuthEnv {
@@ -19,9 +24,10 @@ export interface AuthEnv {
   BETTER_AUTH_SECRET: string;
   GITHUB_CLIENT_ID?: string;
   GITHUB_CLIENT_SECRET?: string;
-  POSTMARK_TOKEN?: string;
+  /** Cloudflare Email Sending, from MAIL_FROM. */
+  MAIL?: SendEmail;
   MAIL_FROM: string;
-  /** "1" for local runs (pnpm dev, tests): account emails are logged instead of sent. */
+  /** "1" for local runs (pnpm dev, tests): account emails are logged and kept in devOutbox instead of sent. */
   DEV_HOST_OVERRIDE?: string;
 }
 
@@ -29,26 +35,41 @@ export interface AuthEnv {
 export const DEVICE_CLIENTS = ["gizlet-os", "gizlet-cli"];
 
 /**
- * Whether account emails can go out: through Postmark, or into the log on local runs. Mail
- * carries reset links, so production never logs it; without Postmark it has no password reset.
+ * Whether account emails can go out: through Cloudflare Email Sending, or into the log on local
+ * runs. Mail carries sign-in links, so production never logs it.
  */
 function canSendMail(env: AuthEnv): boolean {
-  return Boolean(env.POSTMARK_TOKEN) || env.DEV_HOST_OVERRIDE === "1";
+  return Boolean(env.MAIL) || env.DEV_HOST_OVERRIDE === "1";
 }
 
-async function sendMail(env: AuthEnv, to: string, subject: string, text: string): Promise<void> {
-  if (!env.POSTMARK_TOKEN) {
-    if (env.DEV_HOST_OVERRIDE !== "1") throw new Error("mail is not configured");
-    console.log(`mail to ${to}: ${subject}\n${text}`);
+export interface Mail {
+  to: string;
+  subject: string;
+  text: string;
+}
+
+/** Mail of local runs, newest last, for the tests to follow links in (GET /v1/dev/mail). */
+export const devOutbox: Mail[] = [];
+
+/** "Name <address>" or a bare address. */
+export function parseAddress(s: string): { name: string; email: string } | string {
+  const m = /^\s*(.*?)\s*<([^<>\s]+)>\s*$/.exec(s);
+  return m ? { name: m[1]!.replace(/^"|"$/g, ""), email: m[2]! } : s.trim();
+}
+
+async function sendMail(env: AuthEnv, mail: Mail): Promise<void> {
+  if (env.DEV_HOST_OVERRIDE === "1") {
+    console.log(`mail to ${mail.to}: ${mail.subject}\n${mail.text}`);
+    devOutbox.push({ ...mail, to: mail.to.toLowerCase() });
+    if (devOutbox.length > 200) devOutbox.shift();
     return;
   }
-  const res = await fetch("https://api.postmarkapp.com/email", {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json", "x-postmark-server-token": env.POSTMARK_TOKEN },
-    body: JSON.stringify({ From: env.MAIL_FROM, To: to, Subject: subject, TextBody: text, MessageStream: "outbound" }),
-  });
-  if (!res.ok) console.error(`postmark answered ${res.status}: ${await res.text()}`);
+  if (!env.MAIL) throw new Error("mail is not configured");
+  await env.MAIL.send({ from: parseAddress(env.MAIL_FROM), to: mail.to, subject: mail.subject, text: mail.text });
 }
+
+/** Account emails in the language of the request that caused them. */
+const mailText = (request: Request | undefined) => MESSAGES[requestLocale(request?.headers)].mail;
 
 /** Keep the user's GitHub login current; it ties the account to the gizlets in their repositories. */
 async function syncGithubLogin(env: AuthEnv, pool: Pool, account: { providerId: string; userId: string; accessToken?: string | null }): Promise<void> {
@@ -74,9 +95,37 @@ export function authOptions(env: AuthEnv, pool: Pool): BetterAuthOptions {
     emailAndPassword: {
       enabled: true,
       minPasswordLength: 10,
+      // No session until the address is confirmed. Signing up again with a taken address
+      // answers like a new sign-up (no account enumeration) and mails the owner instead.
+      requireEmailVerification: true,
       revokeSessionsOnPasswordReset: true,
+      onExistingUserSignUp: async ({ user }, request) => {
+        const t = mailText(request);
+        await sendMail(env, { to: user.email, subject: t.existingSubject, text: t.existingText(`${env.SITE_ORIGIN}/login`) });
+      },
       // Without it, Better Auth answers password-reset requests with an error instead.
-      sendResetPassword: canSendMail(env) ? async ({ user, url }) => sendMail(env, user.email, "Reset your Gizlet password", `Open this link to choose a new password:\n\n${url}\n\nIf you did not ask for this, ignore this email.`) : undefined,
+      sendResetPassword: canSendMail(env)
+        ? async ({ user, url }, request) => {
+            const t = mailText(request);
+            await sendMail(env, { to: user.email, subject: t.resetSubject, text: t.resetText(url) });
+          }
+        : undefined,
+      // The reset link went to the address, so it is confirmed too.
+      onPasswordReset: async ({ user }) => {
+        await pool.query(`UPDATE "user" SET "emailVerified" = true WHERE id = $1`, [user.id]);
+      },
+    },
+    emailVerification: {
+      sendOnSignUp: true,
+      sendOnSignIn: true,
+      autoSignInAfterVerification: true,
+      expiresIn: 24 * 60 * 60,
+      sendVerificationEmail: canSendMail(env)
+        ? async ({ user, url }, request) => {
+            const t = mailText(request);
+            await sendMail(env, { to: user.email, subject: t.verifySubject, text: t.verifyText(url) });
+          }
+        : undefined,
     },
     socialProviders: github ? { github: { ...github, scope: ["read:user", "user:email"] } } : {},
     account: {
