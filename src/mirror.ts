@@ -187,12 +187,14 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
 
 /**
  * A malware scan found one revision of a release infected. In one transaction: record the scan,
- * fail the revision whatever state it is in (a running job cannot undo it) and remember its
- * packages' sha256, so no later re-index serves those bytes. False when the release has moved on.
+ * fail the revision whatever state it is in (a running job cannot undo it), remember its
+ * packages' sha256, so no later re-index serves those bytes, and fail every other release whose
+ * current revision has any of them (the same files released under another tag or repository).
+ * False when the release has moved on.
  */
 export async function reportInfected(env: Env, job: MirrorJob, report: string, error: string): Promise<boolean> {
   const now = Date.now();
-  const [res] = await env.DB.batch([
+  const [res, , quarantined] = (await env.DB.batch([
     env.DB.prepare("UPDATE releases SET scan = 'infected', scan_report = ?, status = 'failed', error = ?, updated_at = ? WHERE repo = ? AND tag = ? AND revision = ?").bind(
       report,
       error,
@@ -204,8 +206,10 @@ export async function reportInfected(env: Env, job: MirrorJob, report: string, e
     env.DB.prepare(
       "INSERT OR IGNORE INTO infected (sha256, repo, tag, error, created_at) SELECT sha256, repo, tag, ?, ? FROM packages WHERE repo = ? AND tag = ? AND revision = ? AND EXISTS (SELECT 1 FROM releases WHERE repo = ?3 AND tag = ?4 AND revision = ?5)",
     ).bind(error, now, job.repo, job.tag, job.revision),
-  ]);
+    env.DB.prepare(`UPDATE releases SET status = 'failed', error = ?, updated_at = ? WHERE status != 'failed' AND EXISTS (${INFECTED_PACKAGES}) RETURNING repo, tag, revision`).bind(error, now),
+  ])) as [D1Result, D1Result, D1Result<MirrorJob>];
   if (!res!.meta.changes) return false;
+  for (const other of quarantined!.results) await settle(env, other, "failed");
   await settle(env, job, "failed");
   return true;
 }

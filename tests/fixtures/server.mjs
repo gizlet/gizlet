@@ -243,6 +243,18 @@ addRelease("fixture-org/secret-gizlet", "1.2.0", { targets: [["aarch64-unknown-l
 addRelease("fixture-org/hidden", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 // Scanned infected by tests/hurl/08-marks.hurl.
 addRelease("fixture-org/infected", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+// The same files released in two repositories; 08-marks.hurl reports twin-a infected.
+addRelease("fixture-org/twin-a", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+{
+  const src = repos.get("fixture-org/twin-a").tags["v1.0.0"];
+  const ids = new Map();
+  for (const name of src.files.keys()) {
+    const assetId = nextAssetId++;
+    ids.set(name, assetId);
+    assets.set(assetId, { repo: "fixture-org/twin-b", tag: "v1.0.0", name });
+  }
+  repos.set("fixture-org/twin-b", { tags: { "v1.0.0": { files: src.files, ids } }, latest: "v1.0.0" });
+}
 
 async function token(repo, ref, visibility = "public") {
   return new SignJWT({ repository: repo, repository_id: "424242", repository_owner: repo.split("/")[0], repository_visibility: visibility, ref, event_name: "push" })

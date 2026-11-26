@@ -184,6 +184,68 @@ GET {{base}}/github.com/fixture-org/infected/v1.0.0/dev.fixture.infected-1.0.0-a
 x-gizlet-host: dl.gizlet.io
 HTTP 410
 
+# The same bytes released elsewhere are quarantined with it: twin-b ships twin-a's files.
+GET {{base}}/v1/gizlets/github.com/fixture-org/twin-a
+x-gizlet-host: api.gizlet.io
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/twin-b
+x-gizlet-host: api.gizlet.io
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/twin-a/releases/v1.0.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "ready"
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/twin-b/releases/v1.0.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Captures]
+twin_sha: jsonpath "$.packages[0].sha256"
+[Asserts]
+jsonpath "$.status" == "ready"
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/twin-a/releases/v1.0.0
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.packages[0].sha256" == "{{twin_sha}}"
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/twin-b/install?target=aarch64-unknown-linux-gnu&tier=lite
+x-gizlet-host: api.gizlet.io
+HTTP 200
+
+POST {{base}}/v1/admin/gizlets/github.com/fixture-org/twin-a/releases/v1.0.0/scan
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{admin_token}}
+{"result": "infected", "note": "Linux.Trojan.Twin"}
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "failed"
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/twin-b/releases/v1.0.0
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "failed"
+jsonpath "$.error" contains "Linux.Trojan.Twin"
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/twin-b/install?target=aarch64-unknown-linux-gnu&tier=lite
+x-gizlet-host: api.gizlet.io
+HTTP 404
+
+GET {{base}}/github.com/fixture-org/twin-b/v1.0.0/dev.fixture.twina-1.0.0-aarch64-unknown-linux-gnu-lite.gzl
+x-gizlet-host: dl.gizlet.io
+HTTP 410
+
 # --- Ratings ------------------------------------------------------------------------------------
 
 POST {{base}}/v1/auth/sign-up/email
