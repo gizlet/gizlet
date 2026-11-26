@@ -1,17 +1,38 @@
-// A stand-in for github.com, raw.githubusercontent.com and the Actions OIDC issuer, used by
-// tests/run-local.sh. It serves releases of fixture repositories with real `.gzl` packages
-// (zips with manifest.toml and an entry executable) and signs OIDC tokens with a throwaway key.
+// A stand-in for github.com, raw.githubusercontent.com, api.github.com (as the GitHub App
+// gizlet-bot sees it) and the Actions OIDC issuer, used by tests/run-local.sh. It serves releases
+// of fixture repositories with real `.gzl` packages (zips with manifest.toml and an entry
+// executable) and signs OIDC tokens with a throwaway key.
+//
+// The app is installed on the repositories in INSTALLED; PRIVATE ones are not on the web at all.
+// Its private key is GET /_fixture/app-key, its client id APP_CLIENT_ID. Tests can add a release
+// (POST /_fixture/release?repo=&version=) and count requests (GET /_fixture/hits?key=&since=).
 //
 //   node tests/fixtures/server.mjs 18788
 import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { crc32, deflateRawSync } from "node:zlib";
-import { exportJWK, SignJWT } from "jose";
+import { exportJWK, jwtVerify, SignJWT } from "jose";
 
 const port = Number(process.argv[2] ?? 18788);
 const issuer = `http://127.0.0.1:${port}`;
 const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const jwk = { ...(await exportJWK(publicKey)), kid: "fixture", alg: "RS256", use: "sig" };
+
+// The GitHub App. GitHub issues PKCS#1 keys.
+const APP_CLIENT_ID = "Iv-fixture";
+const INSTALLATION = 77;
+const app = generateKeyPairSync("rsa", { modulusLength: 2048 });
+const APP_KEY = app.privateKey.export({ type: "pkcs1", format: "pem" });
+const INSTALLED = new Set(["fixture-org/hello-gizlet", "fixture-org/secret-gizlet"]);
+const PRIVATE = new Set(["fixture-org/secret-gizlet", "fixture-org/hidden"]);
+const tokens = new Set();
+/** Asset id -> { repo, tag, name }, and signed download URLs: sig -> the same. */
+const assets = new Map();
+const signed = new Map();
+let nextAssetId = 1000;
+/** Request counts by key, e.g. latest:<repo>, api:<repo>, signed:<repo>. */
+const hits = new Map();
+const hit = (key) => hits.set(key, (hits.get(key) ?? 0) + 1);
 
 // 1×1 PNG.
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
@@ -177,8 +198,14 @@ function addRelease(repo, version, { category = "game", lie = false, targets, pa
   files.set("gizlet.json", Buffer.from(JSON.stringify(index, null, 2)));
   // Release assets gizlet.json does not name; never served.
   for (const name of extra) files.set(name, gzl({ id, version, target: "x86_64-unknown-linux-gnu", tier: "lite" }));
+  const ids = new Map();
+  for (const name of files.keys()) {
+    const assetId = nextAssetId++;
+    ids.set(name, assetId);
+    assets.set(assetId, { repo, tag, name });
+  }
   const r = repos.get(repo) ?? { tags: {}, latest: null };
-  r.tags[tag] = { files };
+  r.tags[tag] = { files, ids };
   r.latest = tag;
   repos.set(repo, r);
 }
@@ -200,10 +227,20 @@ addRelease("fixture-org/unicode-path", "0.1.0", { problem: "unicode-path", targe
 addRelease("fixture-org/gzl-icon", "0.1.0", { iconName: "unchecked.gzl", extra: ["unchecked.gzl"], targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 addRelease("fixture-org/case", "0.1.0", { problem: "case", targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 addRelease("fixture-org/literal-toml", "0.1.0", { literal: true, targets: [["aarch64-unknown-linux-gnu", "lite"]] });
-repos.set("fixture-org/no-index", { tags: { "v1.0.0": { files: new Map([["other.zip", Buffer.from("x")]]) } }, latest: "v1.0.0" });
+repos.set("fixture-org/no-index", { tags: { "v1.0.0": { files: new Map([["other.zip", Buffer.from("x")]]), ids: new Map() } }, latest: "v1.0.0" });
+// Visited by tests/hurl/07-refresh.hurl, which adds releases while it runs.
+addRelease("fixture-org/refresh-me", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+// Private, with the app installed: read only through the API. Three releases, so the oldest is pruned from R2.
+addRelease("fixture-org/secret-gizlet", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+addRelease("fixture-org/secret-gizlet", "1.1.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+addRelease("fixture-org/secret-gizlet", "1.2.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+// Private, without the app: Gizlet cannot see it.
+addRelease("fixture-org/hidden", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+// Scanned infected by tests/hurl/08-marks.hurl.
+addRelease("fixture-org/infected", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 
-async function token(repo, ref) {
-  return new SignJWT({ repository: repo, repository_id: "424242", repository_owner: repo.split("/")[0], repository_visibility: "public", ref, event_name: "push" })
+async function token(repo, ref, visibility = "public") {
+  return new SignJWT({ repository: repo, repository_id: "424242", repository_owner: repo.split("/")[0], repository_visibility: visibility, ref, event_name: "push" })
     .setProtectedHeader({ alg: "RS256", kid: "fixture" })
     .setIssuer(issuer)
     .setAudience("https://api.gizlet.io")
@@ -224,13 +261,89 @@ createServer(async (req, res) => {
   if (url.pathname === "/token") {
     const repo = url.searchParams.get("repo") ?? "fixture-org/hello-gizlet";
     const ref = url.searchParams.get("ref") ?? "refs/tags/v0.1.0";
-    return send(200, JSON.stringify({ value: await token(repo, ref) }), { "content-type": "application/json" });
+    const visibility = url.searchParams.get("visibility") ?? "public";
+    return send(200, JSON.stringify({ value: await token(repo, ref, visibility) }), { "content-type": "application/json" });
   }
   if (url.pathname === "/healthz") return send(200, "ok");
+  const json = (status, body) => send(status, JSON.stringify(body), { "content-type": "application/json" });
+
+  // Test controls.
+  if (url.pathname === "/_fixture/app-key") return send(200, APP_KEY, { "content-type": "text/plain" });
+  if (url.pathname === "/_fixture/hits") {
+    const count = hits.get(url.searchParams.get("key")) ?? 0;
+    return json(200, { count, since: count - Number(url.searchParams.get("since") ?? 0) });
+  }
+  if (url.pathname === "/_fixture/release" && req.method === "POST") {
+    const key = url.searchParams.get("repo");
+    if (!repos.has(key)) return json(404, { message: "no such fixture repository" });
+    addRelease(key, url.searchParams.get("version"), { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+    return json(201, { latest: repos.get(key).latest });
+  }
+
+  // api.github.com as the app sees it.
+  const bearer = /^Bearer (.+)$/.exec(req.headers.authorization ?? "")?.[1];
+  const asApp = async () => {
+    try {
+      await jwtVerify(bearer ?? "", app.publicKey, { issuer: APP_CLIENT_ID, algorithms: ["RS256"] });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (parts[0] === "app" && parts[1] === "installations" && parts[3] === "access_tokens" && req.method === "POST") {
+    if (!(await asApp())) return json(401, { message: "A JSON web token could not be decoded" });
+    if (Number(parts[2]) !== INSTALLATION) return json(404, { message: "Not Found" });
+    const t = `ghs_fixture${randomBytes(12).toString("hex")}`;
+    tokens.add(t);
+    return json(201, { token: t, expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString() });
+  }
+  if (parts[0] === "repos") {
+    const [, owner, name, ...rest] = parts;
+    const key = `${owner}/${name}`.toLowerCase();
+    if (rest.join("/") === "installation") {
+      if (!(await asApp())) return json(401, { message: "A JSON web token could not be decoded" });
+      return INSTALLED.has(key) ? json(200, { id: INSTALLATION }) : json(404, { message: "Not Found" });
+    }
+    if (!bearer || !tokens.has(bearer)) return json(401, { message: "Bad credentials" });
+    const repo = repos.get(key);
+    if (!repo || !INSTALLED.has(key)) return json(404, { message: "Not Found" });
+    hit(`api:${key}`);
+    const release = (tag) => ({ tag_name: tag, assets: [...repo.tags[tag].ids].map(([n, assetId]) => ({ id: assetId, name: n })) });
+    if (rest.length === 0) return json(200, { id: 900 + [...INSTALLED].indexOf(key), name, owner: { login: owner }, private: PRIVATE.has(key) });
+    if (rest.join("/") === "releases/latest") {
+      hit(`latest:${key}`);
+      return repo.latest ? json(200, release(repo.latest)) : json(404, { message: "Not Found" });
+    }
+    if (rest[0] === "releases" && rest[1] === "tags" && rest.length === 3) return repo.tags[rest[2]] ? json(200, release(rest[2])) : json(404, { message: "Not Found" });
+    if (rest[0] === "releases" && rest[1] === "assets" && rest.length === 3) {
+      const a = assets.get(Number(rest[2]));
+      if (!a || a.repo !== key) return json(404, { message: "Not Found" });
+      if (req.headers.accept !== "application/octet-stream") return json(200, { id: Number(rest[2]), name: a.name });
+      const sig = randomBytes(16).toString("hex");
+      signed.set(sig, a);
+      return send(302, "", { location: `${issuer}/_signed/${sig}` });
+    }
+    return json(404, { message: "Not Found" });
+  }
+  // A short-lived asset URL from the API. Like GitHub's, it refuses a second credential.
+  if (parts[0] === "_signed") {
+    const a = signed.get(parts[1]);
+    if (!a) return send(404, "Not Found");
+    if (req.headers.authorization) return send(400, "Only one auth mechanism allowed");
+    hit(`signed:${a.repo}`);
+    const file = repos.get(a.repo).tags[a.tag].files.get(a.name);
+    return send(200, file, { "content-length": String(file.length), "content-type": "application/octet-stream" });
+  }
+
+  // github.com and raw.githubusercontent.com: public repositories only.
   const [owner, name, ...rest] = parts;
-  const repo = repos.get(`${owner}/${name}`.toLowerCase());
+  const key = `${owner}/${name}`.toLowerCase();
+  const repo = PRIVATE.has(key) ? undefined : repos.get(key);
   if (!repo) return send(404, "Not Found");
-  if (rest.join("/") === "releases/latest") return send(302, "", { location: `https://github.com/${owner}/${name}/releases/tag/${repo.latest}` });
+  if (rest.join("/") === "releases/latest") {
+    hit(`latest:${key}`);
+    return send(302, "", { location: `https://github.com/${owner}/${name}/releases/tag/${repo.latest}` });
+  }
   if (rest[0] === "releases" && rest[1] === "download" && rest.length === 4) {
     const file = repo.tags[rest[2]]?.files.get(rest[3]);
     if (!file) return send(404, "Not Found");

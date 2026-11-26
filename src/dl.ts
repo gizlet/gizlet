@@ -2,7 +2,7 @@
 import { Hono, type Context } from "hono";
 import { packageUrl, pickInstall, type ReleaseRow } from "./db";
 import type { Env } from "./env";
-import { assetUrl } from "./github";
+import { assetUrl, reader } from "./github";
 import { artKey, contentType, indexedFiles, packageKey } from "./mirror";
 import { ensureGizlet } from "./registry";
 import { repoRef } from "./repo";
@@ -68,7 +68,9 @@ dl.on(["GET", "HEAD"], "/github.com/:owner/:repo/:tag/:file", async (c) => {
   if (!r || !TAG.test(tag) || !isAssetName(file)) return c.text("Not found", 404);
   // One statement, so the status, the index and the package row all belong to one revision.
   const [g, rel] = await Promise.all([
-    c.env.DB.prepare("SELECT owner, name_repo, visibility FROM gizlets WHERE repo = ?").bind(r.key).first<{ owner: string; name_repo: string; visibility: string }>(),
+    c.env.DB.prepare("SELECT owner, name_repo, visibility, private FROM gizlets WHERE repo = ?")
+      .bind(r.key)
+      .first<{ owner: string; name_repo: string; visibility: string; private: number }>(),
     c.env.DB.prepare(
       `SELECT r.status, r.index_json, p.sha256 FROM releases r
          LEFT JOIN packages p ON p.repo = r.repo AND p.tag = r.tag AND p.revision = r.revision AND p.file = ?
@@ -109,7 +111,15 @@ dl.on(["GET", "HEAD"], "/github.com/:owner/:repo/:tag/:file", async (c) => {
   const res = await fromR2(c, key, file, cacheControl, countDownload);
   if (res) return res;
   // Not mirrored (an older ready release, pruned from R2): hand off to GitHub. The client
-  // checks the package against the sha256 the API gave it.
+  // checks the package against the sha256 the API gave it. A private repository's assets have
+  // no public URL, so the GitHub App asks for a short-lived one, which is never cached.
+  if (g.private) {
+    const url = await (await reader(c.env, { owner: g.owner, name: g.name_repo, key: r.key })).downloadUrl(tag, file);
+    if (!url) return c.text("Not found", 404);
+    countDownload();
+    c.header("cache-control", "no-store");
+    return c.redirect(url, 302);
+  }
   countDownload();
   return c.redirect(assetUrl(c.env, g.owner, g.name_repo, tag, file), 302);
 });

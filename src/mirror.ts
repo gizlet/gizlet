@@ -10,7 +10,7 @@
 import { checkPackage } from "./check";
 import type { PackageRow, ReleaseRow } from "./db";
 import type { Env, MirrorJob } from "./env";
-import { assetUrl, ghFetch, readCapped, UpstreamError } from "./github";
+import { readCapped, reader, UpstreamError } from "./github";
 import { refreshLatest } from "./registry";
 import { compareVersions, MAX_PACKAGE_BYTES, type ReleaseIndex } from "./schema";
 
@@ -55,8 +55,7 @@ class Rejected extends Error {}
 class Superseded extends Error {}
 
 /** Stream a GitHub release asset into R2 under `key`; R2 rejects it unless it matches `sha256`. */
-async function copyToR2(env: Env, url: string, key: string, file: string, sha256: string, size: number): Promise<void> {
-  const res = await ghFetch(url);
+async function copyToR2(env: Env, res: Response, key: string, file: string, sha256: string, size: number): Promise<void> {
   if (res.status === 404) {
     await res.body?.cancel();
     throw new Rejected(`${file} is missing from the GitHub release`);
@@ -120,13 +119,14 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
   const warnings: string[] = [];
   try {
     if (!(await setStatus(env, job, "mirroring", null))) throw new Superseded();
+    const src = await reader(env, { owner: g.owner, name: g.name_repo, key: job.repo });
     for (const p of pkgs) {
       const key = packageKey(job.repo, job.tag, p.sha256, p.file);
       if ((await env.BUCKET.head(key))?.customMetadata?.sha256 === p.sha256) continue;
-      await copyToR2(env, assetUrl(env, g.owner, g.name_repo, job.tag, p.file), key, p.file, p.sha256, p.size);
+      await copyToR2(env, await src.asset(job.tag, p.file), key, p.file, p.sha256, p.size);
     }
     for (const file of indexedFiles(index).art) {
-      const res = await ghFetch(assetUrl(env, g.owner, g.name_repo, job.tag, file));
+      const res = await src.asset(job.tag, file);
       if (!res.ok) {
         await res.body?.cancel();
         warnings.push(`${file} is missing from the GitHub release`);
@@ -158,6 +158,16 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
   if (!index.description) warnings.push("gizlet.json has no description");
   if (!(await setStatus(env, job, "ready", null, warnings, true))) return;
   await settle(env, job, "ready");
+}
+
+/**
+ * Fail one revision of a release after it was decided (a malware scan found something): nothing
+ * of it is served from then on. False when the release has moved on to another revision.
+ */
+export async function rejectRelease(env: Env, job: MirrorJob, error: string): Promise<boolean> {
+  if (!(await setStatus(env, job, "failed", error))) return false;
+  await settle(env, job, "failed");
+  return true;
 }
 
 /**
@@ -198,7 +208,7 @@ export async function requeueStuck(env: Env): Promise<void> {
   }
 }
 
-/** Keep only the newest KEEP_MIRRORED_RELEASES releases in R2; older downloads redirect to GitHub. */
+/** Keep only the newest KEEP_MIRRORED_RELEASES releases in R2; older downloads redirect to GitHub (src/dl.ts). */
 export async function pruneMirrors(env: Env, repo: string): Promise<void> {
   const keep = Math.max(1, Number.parseInt(env.KEEP_MIRRORED_RELEASES, 10) || 2);
   const { results } = await env.DB.prepare("SELECT * FROM releases WHERE repo = ? AND status = 'ready' AND mirrored = 1").bind(repo).all<ReleaseRow>();

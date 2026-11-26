@@ -21,7 +21,7 @@ function keySet(env: Env) {
 
 export class AuthError extends Error {}
 
-/** Verify a GitHub Actions OIDC token for the store audience. */
+/** Verify a GitHub Actions OIDC token for the store audience. Private repositories are checked by the caller. */
 export async function verifyActionsToken(env: Env, token: string): Promise<ActionsClaims> {
   let payload: JWTPayload;
   try {
@@ -37,9 +37,6 @@ export async function verifyActionsToken(env: Env, token: string): Promise<Actio
   const c = payload as ActionsClaims;
   if (typeof c.repository !== "string" || !c.repository.includes("/") || typeof c.repository_id !== "string") {
     throw new AuthError("token has no repository claim");
-  }
-  if (c.repository_visibility && c.repository_visibility !== "public") {
-    throw new AuthError("only public repositories can publish");
   }
   return c;
 }
