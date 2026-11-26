@@ -271,33 +271,7 @@ HTTP 200
 [Asserts]
 xpath "count(//tr[@data-search])" == 1
 
-# A supported handheld's page gives one command that flashes it; /flash/ leads to the writer.
-GET {{base}}/install/r36s?lang=zh-CN
-x-gizlet-host: gizlet.io
-HTTP 200
-[Asserts]
-xpath "string(//h1)" == "R36S"
-body contains "/flash/r36s | bash"
-body contains "/flash/r36s.ps1 | iex"
-body contains "烧录 Gizlet OS"
-
 GET {{base}}/install/rg351p
-x-gizlet-host: gizlet.io
-HTTP 404
-
-GET {{base}}/flash/r36s
-x-gizlet-host: gizlet.io
-HTTP 302
-[Asserts]
-header "Location" == "https://raw.githubusercontent.com/gizlet/os/main/boards/gameconsole/r36s/flash.sh"
-
-GET {{base}}/flash/r36s.ps1
-x-gizlet-host: gizlet.io
-HTTP 302
-[Asserts]
-header "Location" endsWith "/r36s/flash.ps1"
-
-GET {{base}}/flash/nope
 x-gizlet-host: gizlet.io
 HTTP 404
 

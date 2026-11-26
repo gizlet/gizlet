@@ -7,7 +7,8 @@ import { html, raw } from "hono/html";
 import type { HtmlEscapedString } from "hono/utils/html";
 import { dlUrl, gizletDetail } from "./db";
 import type { Env } from "./env";
-import { devicePage, devicesPage, flashScript, wantCounts } from "./devices";
+import { devicePage, devicesPage, findHandheld, wantCounts } from "./devices";
+import { latestR36sRelease } from "./os-release";
 import { explorePage } from "./explore";
 import { gizletPage } from "./gizlet-page";
 import { MAX_THEMES, patternHref, patternRule, THEME_FILE, THEME_VERSION, themeCss, themeHref } from "./theme";
@@ -135,17 +136,24 @@ site.get("/install", async (c) => {
   return c.html(page(c, `${tr(c).devices.title} · Gizlet`, body, { wide: true, script: "devices.js" }));
 });
 
-site.get("/install/:id", (c) => {
-  const d = devicePage(langOf(c), c.req.param("id"), c.env.SITE_ORIGIN);
+site.get("/install/:id", async (c) => {
+  const handheld = findHandheld(c.req.param("id"));
+  if (handheld?.status !== "supported") return c.notFound();
+  const release = await latestR36sRelease(c.env.BUCKET, c.env.DL_ORIGIN).catch((error: unknown) => {
+    console.error("Could not load the R36S release", error);
+    return null;
+  });
+  const d = devicePage(langOf(c), handheld.id, release);
   if (!d) return c.notFound();
   return c.html(page(c, `${d.name} · ${tr(c).devices.title} · Gizlet`, d.body, { wide: true, script: "devices.js" }));
 });
 
 /** The writer for a supported handheld: `curl -fsSL gizlet.io/flash/r36s | bash`, or `/flash/r36s.ps1` for Windows. */
 site.get("/flash/:name", (c) => {
-  const to = flashScript(c.req.param("name"));
-  if (!to) return c.text("no such handheld\n", 404);
-  return c.redirect(to, 302);
+  const match = /^([a-z0-9-]+?)(\.sh|\.ps1)?$/.exec(c.req.param("name"));
+  if (!match || findHandheld(match[1]!)?.status !== "supported") return c.text("no such handheld\n", 404);
+  const script = match[2] === ".ps1" ? "flash.ps1" : "flash.sh";
+  return c.redirect(`${c.env.DL_ORIGIN}/releases/latest/${script}`, 302);
 });
 
 site.get("/login", (c) => {

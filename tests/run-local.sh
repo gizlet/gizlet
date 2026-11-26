@@ -50,6 +50,11 @@ APP_KEY=$(curl -fsS "$FIXTURE/_fixture/app-key" | awk '{printf "%s\\n", $0}') ||
 pnpm exec wrangler d1 migrations apply gizlet --local --persist-to "$STATE/wrangler" >"$STATE/migrate.log" 2>&1 \
   || { cat "$STATE/migrate.log"; exit 1; }
 
+pnpm exec wrangler r2 object put gizlet-assets/releases/v0.2.10/manifest.json \
+  --file tests/fixtures/os-release.json --local --persist-to "$STATE/wrangler"
+pnpm exec wrangler r2 object put gizlet-assets/releases/v0.3.0/flash.sh \
+  --file tests/fixtures/os-release.json --local --persist-to "$STATE/wrangler"
+
 pnpm exec wrangler dev --port "$DEV_PORT" --ip 127.0.0.1 --persist-to "$STATE/wrangler" --show-interactive-dev-session=false \
   --var DEV_HOST_OVERRIDE:1 \
   --var "SITE_ORIGIN:$SITE" \
