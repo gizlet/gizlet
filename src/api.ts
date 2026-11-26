@@ -400,7 +400,7 @@ async function managedGizlet(c: C, u: MeUser, pool: AuthPool): Promise<{ gizlet:
   const token = u.githubLogin ? await githubToken(pool, u.id) : null;
   if (!token) return { error: apiError(c, 403, "github_not_linked", "link GitHub first") };
   try {
-    if (!(await canManage(c.env, token, { owner: g.owner, name: g.name_repo, key: g.repo }))) {
+    if (!(await canManage(c.env, token, { owner: g.owner, name: g.name_repo, key: g.repo }, g.repository_id ?? null))) {
       return { error: apiError(c, 403, "forbidden", `only admins and maintainers of ${g.owner}/${g.name_repo} can set its short link`) };
     }
   } catch (e) {

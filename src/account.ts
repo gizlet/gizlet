@@ -89,7 +89,7 @@ export async function myGizlets(env: Env, pool: Pool, user: AccountUser) {
   const min = minLengthOf(user.linkMinLength);
   if (!login) return { github_login: null, github: null, link_min_length: min, gizlets: [] };
   const token = await githubToken(pool, user.id);
-  let repos = new Map<string, { manage: boolean }>();
+  let repos = new Map<string, { id: number; manage: boolean }>();
   const owners = [login];
   let github: GithubState = token ? "ok" : "relink";
   if (token) {
@@ -124,6 +124,9 @@ export async function myGizlets(env: Env, pool: Pool, user: AccountUser) {
       const rel = releases.find((r) => r.repo === g.repo);
       const id = links.get(g.repo);
       const own = g.owner.toLowerCase() === login.toLowerCase();
+      const seen = repos.get(g.repo);
+      // The user's repository at this path must be the gizlet's, not another one created there since.
+      const manage = seen ? seen.manage && (g.repository_id == null || seen.id === g.repository_id) : own;
       return {
         ...summary(env, g),
         owner: g.owner,
@@ -131,7 +134,7 @@ export async function myGizlets(env: Env, pool: Pool, user: AccountUser) {
         release: rel ? { tag: rel.tag, status: rel.status, error: rel.error } : null,
         checks: checkState(rel?.status),
         link: id ? { id, url: shortUrl(env, id) } : null,
-        can_link: g.visibility !== "blocked" && (repos.get(g.repo)?.manage ?? own),
+        can_link: g.visibility !== "blocked" && manage,
       };
     }),
   };

@@ -49,6 +49,8 @@ export const minLengthOf = (n: number | null | undefined) => (typeof n === "numb
 
 export interface LinkRow {
   id: string;
+  /** The gizlet it belongs to (gizletKey): `id:<GitHub repository id>`, or `repo:<repository>` where the id is unknown. */
+  gizlet: string;
   repo: string;
   repository_id: number | null;
   user_id: string | null;
@@ -57,9 +59,16 @@ export interface LinkRow {
   created_at: number;
 }
 
-/** Whether a link belongs to a gizlet: the same GitHub repository id where both know it, else the same repository. */
-export const sameGizlet = (l: Pick<LinkRow, "repo" | "repository_id">, g: Pick<GizletRow, "repo" | "repository_id">) =>
-  l.repository_id != null && g.repository_id != null ? l.repository_id === g.repository_id : l.repo === g.repo;
+type Gizlet = Pick<GizletRow, "repo" | "repository_id">;
+
+/** A gizlet's identity in `links.gizlet`: its GitHub repository id where known, else its repository. */
+export const gizletKey = (g: Gizlet) => (g.repository_id != null ? `id:${g.repository_id}` : `repo:${g.repo}`);
+
+/** The keys a gizlet's links may carry: its id, and its repository from before the id was known. */
+const keysOf = (g: Gizlet) => JSON.stringify(g.repository_id != null ? [`id:${g.repository_id}`, `repo:${g.repo}`] : [`repo:${g.repo}`]);
+
+/** Whether a link belongs to a gizlet. A link bound to a repository id never belongs to another repository at its path. */
+export const sameGizlet = (l: Pick<LinkRow, "gizlet">, g: Gizlet) => (JSON.parse(keysOf(g)) as string[]).includes(l.gizlet);
 
 const live = (l: LinkRow, now: number) => l.expires_at === null || l.expires_at > now;
 
@@ -67,11 +76,16 @@ export async function getLink(env: Env, id: string): Promise<LinkRow | null> {
   return env.DB.prepare("SELECT * FROM links WHERE id = ?").bind(id).first<LinkRow>();
 }
 
-/** The gizlet a link points at: by repository id (the newest name it was indexed under), else by repository. */
+/**
+ * The gizlet a link points at: by repository id (the newest name it was indexed under). Its old
+ * path only counts while the gizlet there has no other id: a repository deleted and created again
+ * at the same path is another gizlet.
+ */
 async function linkTarget(env: Env, l: LinkRow): Promise<GizletRow | null> {
   if (l.repository_id != null) {
     const g = await env.DB.prepare("SELECT * FROM gizlets WHERE repository_id = ? ORDER BY updated_at DESC LIMIT 1").bind(l.repository_id).first<GizletRow>();
     if (g) return g;
+    return env.DB.prepare("SELECT * FROM gizlets WHERE repo = ? AND repository_id IS NULL").bind(l.repo).first<GizletRow>();
   }
   return env.DB.prepare("SELECT * FROM gizlets WHERE repo = ?").bind(l.repo).first<GizletRow>();
 }
@@ -86,22 +100,19 @@ export async function resolveLink(env: Env, id: string): Promise<{ link: LinkRow
 }
 
 /** A gizlet's current id, if it has one. */
-export async function currentLink(env: Env, g: Pick<GizletRow, "repo" | "repository_id">): Promise<string | null> {
-  const row =
-    g.repository_id != null
-      ? await env.DB.prepare("SELECT id FROM links WHERE expires_at IS NULL AND (repository_id = ? OR (repository_id IS NULL AND repo = ?))").bind(g.repository_id, g.repo).first<{ id: string }>()
-      : await env.DB.prepare("SELECT id FROM links WHERE expires_at IS NULL AND repo = ?").bind(g.repo).first<{ id: string }>();
+export async function currentLink(env: Env, g: Gizlet): Promise<string | null> {
+  const row = await env.DB.prepare("SELECT id FROM links WHERE expires_at IS NULL AND gizlet IN (SELECT value FROM json_each(?)) ORDER BY created_at DESC LIMIT 1")
+    .bind(keysOf(g))
+    .first<{ id: string }>();
   return row?.id ?? null;
 }
 
 /** Current ids of many gizlets, by repository. */
-export async function currentLinks(env: Env, gizlets: Pick<GizletRow, "repo" | "repository_id">[]): Promise<Map<string, string>> {
+export async function currentLinks(env: Env, gizlets: Gizlet[]): Promise<Map<string, string>> {
   if (!gizlets.length) return new Map();
-  const ids = gizlets.map((g) => g.repository_id).filter((n): n is number => n != null);
-  const { results } = await env.DB.prepare(
-    "SELECT * FROM links WHERE expires_at IS NULL AND (repo IN (SELECT value FROM json_each(?1)) OR repository_id IN (SELECT value FROM json_each(?2)))",
-  )
-    .bind(JSON.stringify(gizlets.map((g) => g.repo)), JSON.stringify(ids))
+  const keys = gizlets.flatMap((g) => JSON.parse(keysOf(g)) as string[]);
+  const { results } = await env.DB.prepare("SELECT * FROM links WHERE expires_at IS NULL AND gizlet IN (SELECT value FROM json_each(?)) ORDER BY created_at DESC")
+    .bind(JSON.stringify(keys))
     .all<LinkRow>();
   const out = new Map<string, string>();
   for (const g of gizlets) {
@@ -117,30 +128,36 @@ export type ClaimResult = { ok: true; id: string } | { ok: false; code: "taken" 
  * Make `id` the gizlet's current id. Its previous id, if any, is held for LINK_HOLD_MS. An id held
  * for this gizlet may be taken back; one live for another gizlet is `taken`, unless `force` (admins),
  * which moves it.
+ *
+ * One batch (a transaction) checks and writes, so concurrent claims cannot both win an id, and the
+ * `links_current` index keeps one current id per gizlet.
  */
-export async function claimLink(env: Env, g: Pick<GizletRow, "repo" | "repository_id">, id: string, userId: string | null, force = false): Promise<ClaimResult> {
+export async function claimLink(env: Env, g: Gizlet, id: string, userId: string | null, force = false): Promise<ClaimResult> {
   const now = Date.now();
-  const existing = await getLink(env, id);
-  if (existing && live(existing, now) && !sameGizlet(existing, g) && !force) return { ok: false, code: "taken" };
-  const previous = await currentLink(env, g);
-  if (previous === id) return { ok: true, id };
-  const stmts: D1PreparedStatement[] = [];
-  if (previous) stmts.push(env.DB.prepare("UPDATE links SET expires_at = ? WHERE id = ?").bind(now + LINK_HOLD_MS, previous));
-  stmts.push(
+  const keys = keysOf(g);
+  const [, claimed] = await env.DB.batch([
+    // Hold the gizlet's other current ids, if `id` is free for it.
     env.DB.prepare(
-      `INSERT INTO links (id, repo, repository_id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?, NULL, ?)
-       ON CONFLICT (id) DO UPDATE SET repo = excluded.repo, repository_id = excluded.repository_id, user_id = excluded.user_id, expires_at = NULL, created_at = excluded.created_at`,
-    ).bind(id, g.repo, g.repository_id ?? null, userId, now),
-  );
-  await env.DB.batch(stmts);
-  return { ok: true, id };
+      `UPDATE links SET expires_at = ?1 WHERE expires_at IS NULL AND gizlet IN (SELECT value FROM json_each(?2)) AND id != ?3
+         AND (?4 OR NOT EXISTS (SELECT 1 FROM links o WHERE o.id = ?3 AND o.gizlet NOT IN (SELECT value FROM json_each(?2)) AND (o.expires_at IS NULL OR o.expires_at > ?5)))`,
+    ).bind(now + LINK_HOLD_MS, keys, id, force ? 1 : 0, now),
+    // Take `id`: new, already the gizlet's, lapsed, or moved by an admin.
+    env.DB.prepare(
+      `INSERT INTO links (id, gizlet, repo, repository_id, user_id, expires_at, created_at) VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6)
+       ON CONFLICT (id) DO UPDATE SET gizlet = excluded.gizlet, repo = excluded.repo, repository_id = excluded.repository_id, user_id = excluded.user_id,
+         expires_at = NULL, created_at = excluded.created_at
+       WHERE ?7 OR links.gizlet IN (SELECT value FROM json_each(?8)) OR (links.expires_at IS NOT NULL AND links.expires_at <= ?6)`,
+    ).bind(id, gizletKey(g), g.repo, g.repository_id ?? null, userId, now, force ? 1 : 0, keys),
+  ]);
+  return claimed!.meta.changes > 0 ? { ok: true, id } : { ok: false, code: "taken" };
 }
 
 /** Stop using the gizlet's current id; it keeps working, and stays the gizlet's, for LINK_HOLD_MS. */
-export async function releaseLink(env: Env, g: Pick<GizletRow, "repo" | "repository_id">): Promise<string | null> {
-  const id = await currentLink(env, g);
-  if (id) await env.DB.prepare("UPDATE links SET expires_at = ? WHERE id = ?").bind(Date.now() + LINK_HOLD_MS, id).run();
-  return id;
+export async function releaseLink(env: Env, g: Gizlet): Promise<string | null> {
+  const row = await env.DB.prepare("UPDATE links SET expires_at = ? WHERE expires_at IS NULL AND gizlet IN (SELECT value FROM json_each(?)) RETURNING id")
+    .bind(Date.now() + LINK_HOLD_MS, keysOf(g))
+    .first<{ id: string }>();
+  return row?.id ?? null;
 }
 
 /** The short URL for an id, on the site's own host. */

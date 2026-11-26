@@ -336,18 +336,18 @@ const manages = (p: { admin?: boolean; maintain?: boolean } | undefined) => Bool
 
 /**
  * The repositories a user can see as owner, collaborator or organization member, by canonical key
- * (github.com/<owner>/<name>, lowercase), with whether they may manage each. Up to 500.
+ * (github.com/<owner>/<name>, lowercase), with GitHub's id and whether they may manage each. Up to 500.
  */
-export async function userRepos(env: Pick<Env, "GITHUB_API">, token: string): Promise<Map<string, { manage: boolean }>> {
-  const out = new Map<string, { manage: boolean }>();
+export async function userRepos(env: Pick<Env, "GITHUB_API">, token: string): Promise<Map<string, { id: number; manage: boolean }>> {
+  const out = new Map<string, { id: number; manage: boolean }>();
   for (let page = 1; page <= 5; page++) {
     const res = await userFetch(env, token, `/user/repos?per_page=100&page=${page}&affiliation=owner,collaborator,organization_member`);
     if (!res.ok) {
       await res.body?.cancel();
       throw new UpstreamError(`GitHub answered ${res.status} for the user's repositories`);
     }
-    const repos = (await res.json()) as { full_name: string; permissions?: { admin?: boolean; maintain?: boolean } }[];
-    for (const r of repos) out.set(`github.com/${r.full_name}`.toLowerCase(), { manage: manages(r.permissions) });
+    const repos = (await res.json()) as { id: number; full_name: string; permissions?: { admin?: boolean; maintain?: boolean } }[];
+    for (const r of repos) out.set(`github.com/${r.full_name}`.toLowerCase(), { id: r.id, manage: manages(r.permissions) });
     if (repos.length < 100) break;
   }
   return out;
@@ -363,8 +363,11 @@ export async function userOrgs(env: Pick<Env, "GITHUB_API">, token: string): Pro
   return ((await res.json()) as { login: string }[]).map((o) => o.login);
 }
 
-/** Whether the user may manage a repository now (admin or maintain), asked of GitHub. */
-export async function canManage(env: Pick<Env, "GITHUB_API">, token: string, ref: RepoRef): Promise<boolean> {
+/**
+ * Whether the user may manage a repository now (admin or maintain), asked of GitHub. `id` must be
+ * the repository's GitHub id where known: another repository created at the path does not count.
+ */
+export async function canManage(env: Pick<Env, "GITHUB_API">, token: string, ref: RepoRef, id: number | null): Promise<boolean> {
   const res = await userFetch(env, token, `/repos/${ref.owner}/${ref.name}`);
   if (res.status === 403 || res.status === 404) {
     await res.body?.cancel();
@@ -374,7 +377,8 @@ export async function canManage(env: Pick<Env, "GITHUB_API">, token: string, ref
     await res.body?.cancel();
     throw new UpstreamError(`GitHub answered ${res.status} for ${ref.key}`);
   }
-  return manages(((await res.json()) as { permissions?: { admin?: boolean; maintain?: boolean } }).permissions);
+  const r = (await res.json()) as { id: number; permissions?: { admin?: boolean; maintain?: boolean } };
+  return (id === null || r.id === id) && manages(r.permissions);
 }
 
 // --- GitHub App authentication ------------------------------------------------------------------
