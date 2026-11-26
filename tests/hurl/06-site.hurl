@@ -184,7 +184,8 @@ HTTP 200
 header "content-language" == "en"
 header "vary" contains "Accept-Language"
 xpath "string(/html/@lang)" == "en"
-xpath "string(//footer//a[@aria-current])" == "English"
+xpath "string(//header//details[@class='langs']//a[@aria-current])" == "English"
+xpath "count(//header//details[@class='langs']//a[@hreflang])" == 4
 
 GET {{base}}/
 x-gizlet-host: gizlet.io
