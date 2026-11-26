@@ -43,8 +43,11 @@ export function cart(g: Summary, t: Messages, lang: Locale) {
 </a>`;
 }
 
-const ticker = (t: Messages) =>
-  html`<div class="ticker" aria-hidden="true"><div class="run">${[0, 1].map(() => t.home.facts.map((f) => html`<span>${f}</span><i></i>`))}</div></div>`;
+const ticker = (t: Messages) => {
+  const cycle = html`<div class="cycle">${t.home.facts.map((fact) => html`<span>${fact}</span><i></i>`)}</div>`;
+  return html`<div class="ticker" aria-hidden="true"><div class="run">${cycle}${cycle}</div></div>
+<script type="module" src="/static/ticker.js"></script>`;
+};
 
 export async function homePage(env: Env, lang: Locale, badUrl?: string) {
   const t = MESSAGES[lang];

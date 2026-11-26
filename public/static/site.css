@@ -173,9 +173,11 @@ a.rig-cart:hover { transform: rotate(-5deg) translateY(-10px); }
 
 /* Home: ticker */
 .ticker { overflow: hidden; padding: 15px 0; white-space: nowrap; color: var(--ink); background: var(--sun); border-bottom: 2px solid var(--ink); font-weight: 820; font-size: 16px; text-transform: uppercase; letter-spacing: .02em; }
-.ticker .run { display: inline-block; animation: ticker 42s linear infinite; }
+.ticker .run { display: flex; width: max-content; animation: ticker 42s linear infinite paused; }
+.ticker .run.scrolling { animation-play-state: running; }
+.ticker .cycle { flex: none; }
 .ticker i { display: inline-block; width: 9px; height: 9px; margin: 0 30px; vertical-align: 2px; background: var(--cobalt); }
-@keyframes ticker { to { transform: translateX(-50%); } }
+@keyframes ticker { to { transform: translateX(var(--ticker-step, 0px)); } }
 @media (prefers-reduced-motion: reduce) { .ticker .run, .cur { animation: none !important; } a.brand:hover .mark { transform: none; } }
 
 /* Home: shelves, how it works, developers, principles */
