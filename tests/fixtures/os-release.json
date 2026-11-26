@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "tag": "v0.2.10",
+  "boards": {
+    "gameconsole": {
+      "r36s": {
+        "image": {
+          "path": "boards/gameconsole/r36s/gizlet-os-r36s.img.gz",
+          "checksum": "boards/gameconsole/r36s/SHA256SUMS"
+        },
+        "flash_scripts": {
+          "macos_linux": "boards/gameconsole/r36s/flash.sh",
+          "windows": "boards/gameconsole/r36s/flash.ps1"
+        }
+      }
+    }
+  }
+}

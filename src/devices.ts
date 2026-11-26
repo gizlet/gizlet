@@ -1,7 +1,6 @@
 /**
  * Devices: the desktop builds, every handheld we know of in one searchable table, and for each
- * supported handheld a page on writing Gizlet OS to its card with one command. The commands use
- * `/flash/<id>` on this site, which redirects to the writer scripts in gizlet/os. Signed-in users
+ * supported handheld a page on writing a released Gizlet OS image to its card. Signed-in users
  * press "I want it" on handhelds that are not supported yet (the `wants` table).
  */
 import { html, raw } from "hono/html";
@@ -9,9 +8,9 @@ import type { HtmlEscapedString } from "hono/utils/html";
 import type { Env } from "./env";
 import { MESSAGES, rich, type Locale } from "./i18n";
 import { prompt } from "./mark";
+import type { R36sRelease } from "./os-release";
 
 const OS_RELEASE = "https://github.com/gizlet/os/releases/latest/download";
-const OS_RAW = "https://raw.githubusercontent.com/gizlet/os/main/boards";
 
 export type Status = "supported" | "wanted";
 
@@ -29,9 +28,7 @@ interface Supported extends Handheld {
   /** Body colour of the drawing: a class in site.css. */
   body: string;
   specs: { soc: string; cpu: string; gpu: string; ram: string; screen: string; storage: string };
-  /** One card image per panel; `panel` is a key of `devices.panels`. */
-  images: { panel: string; file: string }[];
-  /** The board's directory in gizlet/os, which holds flash.sh and flash.ps1. */
+  panels: string[];
   board: string;
 }
 
@@ -52,11 +49,8 @@ export const SUPPORTED: Supported[] = [
       screen: '3.5", 640×480 IPS',
       storage: "microSD (TF1)",
     },
-    images: [
-      { panel: "original", file: "gizlet-os-r36s.img.gz" },
-      { panel: "v30p4", file: "gizlet-os-r36s-v30-panel4.img.gz" },
-    ],
-    board: "gameconsole/r36s",
+    panels: ["original", "v30p4"],
+    board: "gameconsole.r36s",
   },
 ];
 
@@ -98,14 +92,6 @@ const DESKTOP = {
     { label: "Arm64", file: "Gizlet-Windows-arm64.msi" },
   ],
 };
-
-/** `/flash/<id>` and `/flash/<id>.ps1`: where the writer script for a supported handheld lives. */
-export function flashScript(name: string): string | null {
-  const m = /^([a-z0-9-]+?)(\.sh|\.ps1)?$/.exec(name);
-  const d = m && SUPPORTED.find((s) => s.id === m[1]);
-  if (!m || !d) return null;
-  return `${OS_RAW}/${d.board}/${m[2] === ".ps1" ? "flash.ps1" : "flash.sh"}`;
-}
 
 /** A handheld drawn in CSS, the cartridges' companion. `screen` is what it shows. */
 export function handheld(screen: HtmlEscapedString | Promise<HtmlEscapedString> | string, body = "", extra = "") {
@@ -211,13 +197,13 @@ export function devicesPage(lang: Locale, query: { q?: string; status?: string }
 }
 
 /** One supported handheld: what it is and how to flash Gizlet OS to its card. */
-export function devicePage(lang: Locale, id: string, siteOrigin: string) {
+export function devicePage(lang: Locale, id: string, release: R36sRelease | null) {
   const d = SUPPORTED.find((s) => s.id === id);
   if (!d) return null;
   const t = MESSAGES[lang].devices;
   const keys = Object.keys(d.specs) as (keyof Supported["specs"])[];
-  const sh = `curl -fsSL ${siteOrigin}/flash/${d.id} | bash`;
-  const ps1 = `irm ${siteOrigin}/flash/${d.id}.ps1 | iex`;
+  const sh = release && `curl -fsSL ${release.shell} | bash -s -- --board ${d.board}`;
+  const ps1 = release && `& ([scriptblock]::Create((irm ${release.powershell}))) -Board ${d.board}`;
   const cmd = (label: string, prompt: string, line: string) => html`<div class="cmd">
         <div class="cmd-head"><span>${label}</span><button type="button" class="copy-btn" data-copy="${line}" data-done="${t.copied}" hidden>${t.copy}</button></div>
         <pre><code><span class="p" aria-hidden="true">${prompt}</span>${line}</code></pre>
@@ -245,6 +231,8 @@ export function devicePage(lang: Locale, id: string, siteOrigin: string) {
 
 <section id="flash" class="flash-guide">
   <h2 class="section-title">${t.flashTitle}</h2>
+  ${release && sh && ps1 ? html`
+  <p>${t.release} <b>${release.tag}</b></p>
   <p class="lede">${t.flashLede}</p>
   <ol class="flash-steps">
     ${step(1, t.steps[0]!)}
@@ -255,7 +243,7 @@ export function devicePage(lang: Locale, id: string, siteOrigin: string) {
   <div class="flash-aside">
     <div>
       <h3>${t.panelsTitle}</h3>
-      <ul class="panel-list">${d.images.map((i) => html`<li>${t.panels[i.panel] ?? i.panel}</li>`)}</ul>
+      <ul class="panel-list">${d.panels.map((panel) => html`<li>${t.panels[panel] ?? panel}</li>`)}</ul>
       <p>${rich(t.panelHelp)}</p>
     </div>
     <div>
@@ -265,12 +253,11 @@ export function devicePage(lang: Locale, id: string, siteOrigin: string) {
   </div>
   <details class="manual">
     <summary>${t.manual}</summary>
-    <p>${t.manualText}</p>
-    <div class="images">${d.images.map(
-      (i) => html`<div class="image"><div><b>${t.panels[i.panel] ?? i.panel}</b><code>${i.file}</code></div><a class="btn small" href="${OS_RELEASE}/${i.file}">${t.download}</a></div>`,
-    )}</div>
-    <p class="note"><a href="${OS_RELEASE}/SHA256SUMS">${t.checksums}</a></p>
+    <p>${t.manualText} ${t.manualPanel}</p>
+    <div class="images"><div class="image"><div><b>${t.panels.original}</b><code>${release.filename}</code></div><a class="btn small" href="${release.image}">${t.download}</a></div></div>
+    <p class="note"><a href="${release.checksum}">${t.checksums}</a></p>
   </details>
+  ` : html`<p role="status">${t.releaseUnavailable}</p>`}
 </section>
 </div>`,
   };

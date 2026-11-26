@@ -182,6 +182,9 @@ const en = {
     specsTitle: "Specs",
     specs: { soc: "SoC", cpu: "CPU", gpu: "GPU", ram: "RAM", screen: "Screen", storage: "Storage" },
     flashTitle: "Flash Gizlet OS",
+    release: "Gizlet OS release",
+    releaseUnavailable: "The R36S release is unavailable. Reload this page to try again.",
+    manualPanel: "The image defaults to the original panel. Use the writer above for Panel 4.",
     flashLede: "The writer downloads the image for your screen, checks it and writes the card. It asks before it erases anything.",
     steps: [
       { title: "Put a microSD card in your computer", text: "Use a spare card and keep the stock card as a backup. Everything on the card you write is erased." },
@@ -373,6 +376,9 @@ const zhCN: Messages = {
     specsTitle: "规格",
     specs: { soc: "SoC", cpu: "CPU", gpu: "GPU", ram: "内存", screen: "屏幕", storage: "存储" },
     flashTitle: "烧录 Gizlet OS",
+    release: "Gizlet OS 发布版本",
+    releaseUnavailable: "暂时无法获取 R36S 的发布版本。请刷新页面重试。",
+    manualPanel: "镜像默认使用原版屏幕。Panel 4 请使用上面的烧录工具。",
     flashLede: "烧录工具会下载适合你屏幕的镜像，校验后写入。擦除任何东西之前，它都会先问你。",
     steps: [
       { title: "把 microSD 卡插到电脑上", text: "用一张备用卡，原厂卡留作备份。被烧录的卡上原有内容会全部清空。" },
@@ -560,6 +566,9 @@ const zhTW: Messages = {
     specsTitle: "規格",
     specs: { soc: "SoC", cpu: "CPU", gpu: "GPU", ram: "記憶體", screen: "螢幕", storage: "儲存空間" },
     flashTitle: "燒錄 Gizlet OS",
+    release: "Gizlet OS 發行版本",
+    releaseUnavailable: "暫時無法取得 R36S 的發行版本。請重新整理頁面再試。",
+    manualPanel: "映像預設使用原版螢幕。Panel 4 請使用上方的燒錄工具。",
     flashLede: "燒錄工具會下載適合你螢幕的映像檔，校驗後寫入。清除任何資料之前，它都會先問你。",
     steps: [
       { title: "把 microSD 卡插到電腦上", text: "用一張備用卡，原廠卡留作備份。被燒錄的卡上原有內容會全部清除。" },
@@ -747,6 +756,9 @@ const ja: Messages = {
     specsTitle: "スペック",
     specs: { soc: "SoC", cpu: "CPU", gpu: "GPU", ram: "メモリ", screen: "画面", storage: "ストレージ" },
     flashTitle: "Gizlet OS を書き込む",
+    release: "Gizlet OS リリース",
+    releaseUnavailable: "R36S 用リリースを取得できません。ページを再読み込みしてください。",
+    manualPanel: "イメージは初期型パネル用です。Panel 4 には上の書き込みツールを使ってください。",
     flashLede: "書き込みツールが画面に合ったイメージをダウンロードし、検証してから書き込みます。消去する前には必ず確認します。",
     steps: [
       { title: "microSD カードをパソコンに挿す", text: "予備のカードを使い、純正カードはバックアップとして取っておきましょう。書き込むカードの中身はすべて消えます。" },
