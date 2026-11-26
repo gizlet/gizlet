@@ -6,6 +6,15 @@
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 }
+/* CJK: the system's CJK sans first for each script, no negative tracking, room for taller glyphs. */
+:root:lang(zh-CN) { --sans: system-ui, -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", sans-serif; }
+:root:lang(zh-TW) { --sans: system-ui, -apple-system, "PingFang TC", "Microsoft JhengHei", "Noto Sans CJK TC", "Noto Sans TC", sans-serif; }
+:root:lang(ja) { --sans: system-ui, -apple-system, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo", "Noto Sans CJK JP", "Noto Sans JP", sans-serif; }
+:lang(zh) h1, :lang(zh) h2, :lang(zh) h3, :lang(ja) h1, :lang(ja) h2, :lang(ja) h3 { letter-spacing: 0; line-height: 1.2; }
+:lang(zh) .hero h1, :lang(ja) .hero h1 { font-size: clamp(44px, 6vw, 72px); line-height: 1.12; letter-spacing: 0.01em; }
+:lang(zh) .hero p, :lang(zh) .make p, :lang(ja) .hero p, :lang(ja) .make p { line-height: 1.75; }
+:lang(ja) .hero h1 { font-size: clamp(40px, 5.4vw, 64px); }
+:lang(zh) .stamp, :lang(zh) .btn, :lang(zh) .caption, :lang(ja) .stamp, :lang(ja) .btn, :lang(ja) .caption { letter-spacing: .04em; }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body { margin: 0; font: 16px/1.5 var(--sans); color: var(--ink); background: var(--paper) radial-gradient(#1a181614 1px, transparent 1px) 0 0 / 12px 12px; -webkit-font-smoothing: antialiased; }
@@ -32,7 +41,9 @@ footer { margin-top: 64px; border-top: 3px solid var(--ink); }
 footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 24px; padding: 24px 32px; font: 700 12px var(--mono); text-transform: uppercase; color: var(--dim); }
 footer a { text-decoration: none; }
 footer a:hover { color: var(--ink); }
-footer .keys { margin-left: auto; }
+footer .langs { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-left: auto; text-transform: none; }
+footer .langs a[aria-current] { color: var(--ink); border-bottom: 2px solid var(--accent); }
+footer .keys { margin-left: 12px; }
 body.home footer { margin-top: 0; }
 
 /* Buttons and stamps */
@@ -146,6 +157,7 @@ form.signing-up .signup { display: grid; }
   .steps, .pillars { grid-template-columns: 1fr; }
   footer .wrap { padding: 20px 18px; }
   footer .keys { display: none; }
+  footer .langs { margin-left: 0; flex-basis: 100%; }
 }
 @media (max-width: 480px) {
   .brand { font-size: 22px; }

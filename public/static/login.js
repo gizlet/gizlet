@@ -1,4 +1,4 @@
-import { call, message, nextPath } from "./auth.js";
+import { call, message, nextPath, t } from "./auth.js";
 
 const form = document.querySelector("#signin");
 const submit = form.querySelector("button[type=submit]");
@@ -10,8 +10,8 @@ toggle.addEventListener("click", () => {
   signingUp = !signingUp;
   form.classList.toggle("signing-up", signingUp);
   form.password.autocomplete = signingUp ? "new-password" : "current-password";
-  submit.textContent = signingUp ? "Create account" : "Sign in";
-  toggle.textContent = signingUp ? "I already have an account" : "Create an account instead";
+  submit.textContent = signingUp ? t.createAccount : t.signIn;
+  toggle.textContent = signingUp ? t.toggleSignUp : t.toggleSignIn;
 });
 
 form.addEventListener("submit", async (e) => {

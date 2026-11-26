@@ -1,4 +1,10 @@
 // Shared helpers for the account pages: JSON calls to Better Auth at /v1/auth.
+
+/** The page's strings in its language, from the JSON block the server writes (src/i18n.ts). */
+export const t = JSON.parse(globalThis.document?.querySelector("#i18n")?.textContent ?? "{}");
+
+/** Fill `{name}` placeholders. */
+export const fmt = (s, vars = {}) => s.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m));
 export const message = (text) => {
   document.querySelector("#message").textContent = text;
 };
@@ -11,7 +17,7 @@ export async function call(path, body) {
     credentials: "same-origin",
   });
   const data = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(data?.message ?? data?.error_description ?? `request failed (${res.status})`);
+  if (!res.ok) throw new Error(t.errors?.[data?.code] ?? data?.message ?? data?.error_description ?? fmt(t.requestFailed, { status: res.status }));
   return data;
 }
 
