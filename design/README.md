@@ -4,17 +4,19 @@
 
 ## Icon
 
-A lowercase g whose bowl is a rounded square, a handheld, with a sun yellow (`#ffd23a`) screen in it; the g is ink (`#101114`). It has no background of its own, so it sits on white, the site's grey or any light surface. Where a background is required, it is white. The bowl is square and the tail turns a rounded corner and ends flat, to keep it apart from Galp's round orange g and Gojek's ring and dot.
+A cobalt (`#2b45ff`) handheld, tilted like the cartridges, whose dark (`#101114`) screen shows a sun yellow (`#ffd23a`) g and a white cursor, as at a shell prompt: a pocket Linux computer. It is all colour, so it holds on white, the site's grey and dark tabs without a dark-mode variant. Where a background is required, it is white.
+
+On the site the mark is inline (`src/mark.ts`), so the cursor can blink: in the header when the logo is hovered, and always on the boot screen of the handhelds drawn in CSS, which show only the g and cursor. Neither moves under `prefers-reduced-motion`.
 
 | File | Use |
 | --- | --- |
-| `icon/mark.svg` | The mark, transparent, screen in a gap like a bezel (the workflow templates in gizlet/.github use it) |
+| `icon/mark.svg` | The mark, transparent (the workflow templates in gizlet/.github use it) |
 | `icon/on-white.svg`, `icon/avatar.png` | On white, 1024 px: the GitHub organization avatar |
-| `public/static/icon.svg` | Favicon: no gap, since it closes up below 48 px |
-| `public/static/favicon.ico` | 16, 32 and 48 px PNGs of `icon.svg`, ink only |
+| `public/static/icon.svg` | Favicon, the same drawing as `icon/mark.svg` |
+| `public/static/favicon.ico` | 16, 32 and 48 px PNGs of `icon.svg` |
 | `public/static/apple-touch-icon.png` | `on-white.svg` at 180 px |
 
-The SVG marks turn the g white when the viewer is in dark mode (`prefers-color-scheme`), so the favicon stays visible in dark tabs; the PNGs and the ICO cannot. PNGs are rendered from the SVGs in headless Chromium.
+`src/mark.ts` repeats the drawing; change it together with the SVG files. PNGs are rendered from the SVGs in headless Chromium.
 
 ## What the site leaves out
 
