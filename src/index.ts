@@ -45,8 +45,6 @@ export default {
       case "dl.gizlet.io":
         return dl.fetch(req, env, ctx);
       case "www.gizlet.io":
-      case "store.gizlet.io":
-        // The store moved to gizlet.io; old share links keep working.
         return Response.redirect(`${env.SITE_ORIGIN}${url.pathname}${url.search}`, 301);
       default:
         if (isAccountPath(url.pathname)) return api.fetch(req, env, ctx);

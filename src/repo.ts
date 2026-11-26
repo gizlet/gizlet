@@ -36,7 +36,3 @@ export function parseRepoAddress(input: string): RepoRef | null {
   if (parts.length < 2) return null;
   return repoRef(parts[0]!, parts[1]!);
 }
-
-export function storeUrl(origin: string, r: { key: string } | string): string {
-  return `${origin}/${typeof r === "string" ? r : r.key}`;
-}

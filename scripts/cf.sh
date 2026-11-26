@@ -3,7 +3,7 @@
 #
 #   pnpm cf deploy
 #   pnpm cf tail
-#   pnpm cf d1 migrations apply gizlet-store --remote
+#   pnpm cf d1 migrations apply gizlet --remote
 set -euo pipefail
 cd "$(dirname "$0")/.."
 if [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]]; then

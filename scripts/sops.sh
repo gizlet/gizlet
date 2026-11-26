@@ -7,7 +7,7 @@
 #   scripts/sops.sh exec-env secrets/deploy.enc.yaml 'npx wrangler deploy'
 set -euo pipefail
 
-KEYCHAIN_SERVICE="io.gizlet.store.sops.age"
+KEYCHAIN_SERVICE="io.gizlet.sops.age"
 
 if [[ -z "${SOPS_AGE_KEY:-}" ]]; then
   if ! command -v security >/dev/null 2>&1; then

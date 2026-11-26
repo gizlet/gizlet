@@ -19,7 +19,7 @@ One Cloudflare Worker serves every host:
 | `gizlet.io` | Share pages, sign-in, `/device` (approving a console), `/account` |
 | `api.gizlet.io` | The JSON API, `/v1/...` |
 | `dl.gizlet.io` | Packages and art: `/github.com/<owner>/<repo>/<tag>/<file>` |
-| `store.gizlet.io`, `www.gizlet.io` | Redirects to `gizlet.io` |
+| `www.gizlet.io` | Redirects to `gizlet.io` |
 
 - **Publishing** (`src/api.ts`, `src/registry.ts`): a release workflow posts a GitHub Actions OIDC token to `POST /v1/publish`. The repository comes from the token, never the body. The Worker reads the release's `gizlet.json` from github.com (`src/github.ts`, validated in `src/schema.ts`) and stores it in D1. A repository is also indexed on first sight, when someone opens its link.
 - **Mirroring and checks** run on a Queue (`src/mirror.ts`): each package is streamed from GitHub into R2 with its `sha256` enforced by R2, then checked (`src/check.ts`) without loading it whole, using R2 range reads. A `.gzl` must be a zip with a valid `manifest.toml` that matches `gizlet.json` (`id`, `version`, `target`) and names an `entry` executable for the package's target: an ELF executable of that machine on Linux, a Mach-O executable of that CPU type (or a universal binary with that slice) on macOS, a PE image of that machine on Windows. Packages are at most 1 GiB; icon, cover and screenshots must be PNG, JPEG or WebP. Entry names must be ASCII or flagged UTF-8, match their local headers, carry no renaming extra field (Info-ZIP Unicode Path), be canonical relative paths (no absolute, empty, `.` or `..` segments) and must not land on the same place as another entry by case or Unicode form. No symlinks, devices, setuid files, encryption or ZIP64. A release that fails is not served at all; one that passes is `ready`. Each re-index of a tag bumps the release's `revision`; a job only acts on the revision it was queued for, packages are stored in R2 under their sha256, and a cron every 10 minutes queues again any release left in `pending`, `mirroring` or `checking` for 30 minutes.
@@ -78,14 +78,14 @@ pnpm test:hurl sim        # the device simulation only
 
 ## Credentials and deployment
 
-Credentials are SOPS files encrypted to one age key, as in the old `gizlet/store`:
+Credentials are SOPS files encrypted to one age key:
 
 | File | Contents |
 | --- | --- |
-| `secrets/deploy.enc.yaml` | `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, `DATABASE_URL` (Neon, for migrations) |
-| `secrets/worker.enc.yaml` | Worker secrets for `wrangler secret bulk`: `ADMIN_TOKEN`, `BETTER_AUTH_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `POSTMARK_TOKEN` |
+| `secrets/deploy.enc.yaml` | `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, `DATABASE_URL` (Neon's direct endpoint, not `-pooler`, for migrations) |
+| `secrets/worker.enc.yaml` | Worker secrets, uploaded with each version by `wrangler deploy --secrets-file`: `ADMIN_TOKEN`, `BETTER_AUTH_SECRET`, and optionally `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `POSTMARK_TOKEN` |
 
-The age identity is in the macOS login Keychain (service `io.gizlet.store.sops.age`, account = your user name) and in the repository secret `SOPS_AGE_KEY`. `scripts/sops.sh` uses whichever is available:
+The age identity is in the macOS login Keychain (service `io.gizlet.sops.age`, account = your user name) and in the repository secret `SOPS_AGE_KEY`. `scripts/sops.sh` uses whichever is available:
 
 ```sh
 scripts/sops.sh edit secrets/worker.enc.yaml
@@ -99,11 +99,11 @@ CI follows the [gizlet/.github](https://github.com/gizlet/.github) setup, as in 
 | --- | --- |
 | `triage.yml` | On every pull-request push, gizlet-bot comments `/ci` and `/codex-review` for the head, which starts the two workflows below. A writer's comment with either command runs it again. GitHub-hosted, never checks out PR code. |
 | `codex-review.yml` | The `Codex Code Review` check. GitHub-hosted. |
-| `ci.yml` | The `CI` check: typecheck, a Worker bundle, the Hurl suite and the device simulation, with no secrets. On `main`, then the deploy: decrypt the credentials, apply the D1 and Postgres migrations, update Worker secrets, deploy and run `tests/prod`. It is skipped until the SOPS files are committed. |
+| `ci.yml` | The `CI` check: typecheck, a Worker bundle, the Hurl suite and the device simulation, with no secrets. On `main`, then the deploy: decrypt the credentials, apply the D1 and Postgres migrations, deploy with the Worker secrets and run `tests/prod`. |
 
 Build, test and deploy run on the runner the `RUNNERS` organization variable maps to `linux-x64`, falling back to GitHub's Ubuntu runner. Comment-triggered workflows run their copy on `main`, so a pull request that changes them is tested by the old ones.
 
-Cloudflare resources: Worker `gizlet` with custom domains for the five hosts, D1 `gizlet`, R2 bucket `gizlet-assets`, Queues `gizlet-mirror` and `gizlet-mirror-dlq`, Hyperdrive config for the Neon database (Workers Paid plan). The GitHub OAuth app's callback URL is `https://gizlet.io/v1/auth/callback/github`.
+Cloudflare resources: Worker `gizlet` with custom domains for the four hosts, D1 `gizlet` and R2 bucket `gizlet-assets` (both in APAC), Queues `gizlet-mirror` and `gizlet-mirror-dlq`, Hyperdrive config `gizlet` for the Neon database (Singapore, direct endpoint) with query caching off, so a revoked session is never served from cache. The GitHub OAuth app's callback URL is `https://gizlet.io/v1/auth/callback/github`.
 
 ## License
 

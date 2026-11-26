@@ -21,13 +21,24 @@ export interface AuthEnv {
   GITHUB_CLIENT_SECRET?: string;
   POSTMARK_TOKEN?: string;
   MAIL_FROM: string;
+  /** "1" for local runs (pnpm dev, tests): account emails are logged instead of sent. */
+  DEV_HOST_OVERRIDE?: string;
 }
 
 /** Device flow clients: Gizlet OS and the gizlet CLI. */
 export const DEVICE_CLIENTS = ["gizlet-os", "gizlet-cli"];
 
+/**
+ * Whether account emails can go out: through Postmark, or into the log on local runs. Mail
+ * carries reset links, so production never logs it; without Postmark it has no password reset.
+ */
+function canSendMail(env: AuthEnv): boolean {
+  return Boolean(env.POSTMARK_TOKEN) || env.DEV_HOST_OVERRIDE === "1";
+}
+
 async function sendMail(env: AuthEnv, to: string, subject: string, text: string): Promise<void> {
   if (!env.POSTMARK_TOKEN) {
+    if (env.DEV_HOST_OVERRIDE !== "1") throw new Error("mail is not configured");
     console.log(`mail to ${to}: ${subject}\n${text}`);
     return;
   }
@@ -64,7 +75,8 @@ export function authOptions(env: AuthEnv, pool: Pool): BetterAuthOptions {
       enabled: true,
       minPasswordLength: 10,
       revokeSessionsOnPasswordReset: true,
-      sendResetPassword: async ({ user, url }) => sendMail(env, user.email, "Reset your Gizlet password", `Open this link to choose a new password:\n\n${url}\n\nIf you did not ask for this, ignore this email.`),
+      // Without it, Better Auth answers password-reset requests with an error instead.
+      sendResetPassword: canSendMail(env) ? async ({ user, url }) => sendMail(env, user.email, "Reset your Gizlet password", `Open this link to choose a new password:\n\n${url}\n\nIf you did not ask for this, ignore this email.`) : undefined,
     },
     socialProviders: github ? { github: { ...github, scope: ["read:user", "user:email"] } } : {},
     account: {

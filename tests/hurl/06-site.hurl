@@ -35,9 +35,9 @@ HTTP 200
 [Asserts]
 body contains "/device/"
 
-# Old store links move to gizlet.io.
+# www redirects to gizlet.io, keeping the path and query.
 GET {{base}}/github.com/fixture-org/hello-gizlet?x=1
-x-gizlet-host: store.gizlet.io
+x-gizlet-host: www.gizlet.io
 HTTP 301
 [Asserts]
 header "Location" == "{{site}}/github.com/fixture-org/hello-gizlet?x=1"
