@@ -68,6 +68,7 @@ pnpm test:hurl sim        # the device simulation only
 | --- | --- |
 | `src/index.ts` | Host routing, queue consumer, cron |
 | `src/api.ts`, `src/dl.ts`, `src/site.ts` | The three hosts |
+| `src/i18n.ts` | The site's languages (English, Simplified Chinese, Traditional Chinese, Japanese): `?lang=` (remembered in a `lang` cookie), else the cookie, else `Accept-Language`; every string of the pages and their scripts, and which of a gizlet's own `names`/`descriptions` to show |
 | `src/home.ts` | The home page: the featured gizlets as cartridges, a box that opens any repository link (`/open?url=`), and how to publish |
 | `src/registry.ts`, `src/mirror.ts`, `src/check.ts` | Indexing, mirroring, static checks, visibility |
 | `src/auth.ts` | Better Auth options; one instance and connection per request |
