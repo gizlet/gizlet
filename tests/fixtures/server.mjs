@@ -5,7 +5,10 @@
 //
 // The app is installed on the repositories in INSTALLED; PRIVATE ones are not on the web at all.
 // Its private key is GET /_fixture/app-key, its client id APP_CLIENT_ID. Tests can add a release
-// (POST /_fixture/release?repo=&version=) and count requests (GET /_fixture/hits?key=&since=).
+// (POST /_fixture/release?repo=&version=), rewrite a release's description around the same
+// packages (POST /_fixture/describe?repo=&tag=&description=), make the API hand over asset bytes
+// directly instead of redirecting (POST /_fixture/direct?repo=) and count requests
+// (GET /_fixture/hits?key=&since=).
 //
 //   node tests/fixtures/server.mjs 18788
 import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
@@ -29,6 +32,8 @@ const tokens = new Set();
 /** Asset id -> { repo, tag, name }, and signed download URLs: sig -> the same. */
 const assets = new Map();
 const signed = new Map();
+/** Repositories whose asset API answers 200 with the bytes, which GitHub may do instead of a 302. */
+const DIRECT = new Set();
 let nextAssetId = 1000;
 /** Request counts by key, e.g. latest:<repo>, api:<repo>, signed:<repo>. */
 const hits = new Map();
@@ -273,6 +278,18 @@ createServer(async (req, res) => {
     const count = hits.get(url.searchParams.get("key")) ?? 0;
     return json(200, { count, since: count - Number(url.searchParams.get("since") ?? 0) });
   }
+  if (url.pathname === "/_fixture/direct" && req.method === "POST") {
+    DIRECT.add(url.searchParams.get("repo"));
+    return json(200, { direct: [...DIRECT] });
+  }
+  if (url.pathname === "/_fixture/describe" && req.method === "POST") {
+    const files = repos.get(url.searchParams.get("repo"))?.tags[url.searchParams.get("tag")]?.files;
+    if (!files) return json(404, { message: "no such fixture release" });
+    const index = JSON.parse(files.get("gizlet.json"));
+    index.description = url.searchParams.get("description");
+    files.set("gizlet.json", Buffer.from(JSON.stringify(index, null, 2)));
+    return json(200, index);
+  }
   if (url.pathname === "/_fixture/release" && req.method === "POST") {
     const key = url.searchParams.get("repo");
     if (!repos.has(key)) return json(404, { message: "no such fixture repository" });
@@ -319,6 +336,11 @@ createServer(async (req, res) => {
       const a = assets.get(Number(rest[2]));
       if (!a || a.repo !== key) return json(404, { message: "Not Found" });
       if (req.headers.accept !== "application/octet-stream") return json(200, { id: Number(rest[2]), name: a.name });
+      if (DIRECT.has(key)) {
+        hit(`direct:${key}`);
+        const file = repo.tags[a.tag].files.get(a.name);
+        return send(200, file, { "content-length": String(file.length), "content-type": "application/octet-stream" });
+      }
       const sig = randomBytes(16).toString("hex");
       signed.set(sig, a);
       return send(302, "", { location: `${issuer}/_signed/${sig}` });

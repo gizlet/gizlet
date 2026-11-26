@@ -157,6 +157,33 @@ HTTP 202
 [Asserts]
 jsonpath "$.status" == "failed"
 
+# Nor does a gizlet.json that changes only its description around the same packages: the
+# verdict belongs to their sha256, so the new revision is failed without being checked again.
+POST {{fixture}}/_fixture/describe?repo=fixture-org/infected&tag=v1.0.0&description=Now%20with%20a%20new%20description
+HTTP 200
+
+POST {{base}}/v1/publish
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{infected_token}}
+{}
+HTTP 202
+[Asserts]
+jsonpath "$.status" == "failed"
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/infected/releases/v1.0.0
+x-gizlet-host: api.gizlet.io
+[Options]
+delay: 500ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "failed"
+jsonpath "$.revision" > 1
+jsonpath "$.error" contains "Linux.Trojan.Fixture"
+
+GET {{base}}/github.com/fixture-org/infected/v1.0.0/dev.fixture.infected-1.0.0-aarch64-unknown-linux-gnu-lite.gzl
+x-gizlet-host: dl.gizlet.io
+HTTP 410
+
 # --- Ratings ------------------------------------------------------------------------------------
 
 POST {{base}}/v1/auth/sign-up/email
@@ -213,6 +240,39 @@ HTTP 200
 [Asserts]
 jsonpath "$.rating.count" == 1
 jsonpath "$.rating.average" == 4
+
+# A second account's rating adds to the aggregate.
+POST {{base}}/v1/auth/sign-up/email
+x-gizlet-host: api.gizlet.io
+Origin: {{site}}
+{"email": "rater2-{{run}}@example.com", "password": "correct horse battery", "name": "Rater 2", "callbackURL": "/account"}
+HTTP 200
+
+GET {{base}}/v1/dev/mail?to=rater2-{{run}}@example.com
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Captures]
+rater2_verify: jsonpath "$.link" regex "token=([^&]+)"
+
+GET {{base}}/v1/auth/verify-email?token={{rater2_verify}}&callbackURL=%2Faccount
+x-gizlet-host: gizlet.io
+HTTP 302
+[Captures]
+rater2: header "set-auth-token"
+
+PUT {{base}}/v1/me/ratings/github.com/fixture-org/hello-gizlet
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{rater2}}
+{"stars": 5}
+HTTP 200
+[Asserts]
+jsonpath "$.rating.count" == 2
+jsonpath "$.rating.average" == 4.5
+
+DELETE {{base}}/v1/me/ratings/github.com/fixture-org/hello-gizlet
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{rater2}}
+HTTP 204
 
 GET {{base}}/v1/me/ratings/github.com/fixture-org/hello-gizlet
 x-gizlet-host: api.gizlet.io

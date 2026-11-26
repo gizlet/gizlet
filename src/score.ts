@@ -20,61 +20,53 @@ export const ADMIN_MARKS: readonly Mark[] = ["awesome"];
 const PRIOR_STARS = 3;
 const PRIOR_VOTES = 5;
 
-export interface ScoreInput {
-  ratingCount: number;
-  ratingSum: number;
-  downloads: number;
-  marks: readonly string[];
-  /** Warnings of the newest ready release; null when no release is ready. */
-  warnings: number | null;
+/** 25 points for downloads. D1 has no log10, so this part is computed here and passed in. */
+export function downloadPoints(downloads: number): number {
+  return 25 * Math.min(1, Math.log10(1 + Math.max(0, downloads)) / 4);
 }
 
-export function computeScore(s: ScoreInput): number {
-  const mean = (PRIOR_STARS * PRIOR_VOTES + s.ratingSum) / (PRIOR_VOTES + s.ratingCount);
-  const rating = (mean - 1) / 4;
-  const downloads = Math.min(1, Math.log10(1 + Math.max(0, s.downloads)) / 4);
-  const checks = s.warnings === null ? 0 : s.warnings === 0 ? 1 : 0.5;
-  const score = 40 * rating + 25 * downloads + 15 * checks + (s.marks.includes("scanned") ? 10 : 0) + (s.marks.includes("awesome") ? 10 : 0);
-  return Math.round(Math.min(100, Math.max(0, score)));
-}
+/**
+ * The score, in SQL, from a row `x` with n and s (rating count and star sum), ready_tag and
+ * warnings (the newest ready release, and its warning count), scanned, awesome (0/1) and dl
+ * (downloadPoints).
+ */
+export const SCORE_SQL = `CAST(round(min(100, max(0,
+    40 * ((${PRIOR_STARS * PRIOR_VOTES} + x.s) / (${PRIOR_VOTES}.0 + x.n) - 1) / 4
+    + x.dl
+    + 15 * (CASE WHEN x.ready_tag IS NULL THEN 0 WHEN x.warnings = 0 THEN 1 ELSE 0.5 END)
+    + 10 * x.scanned + 10 * x.awesome))) AS INTEGER)`;
 
 /** The mean rating, to two decimals, or null without ratings. */
 export function ratingAverage(count: number, sum: number): number | null {
   return count ? Math.round((sum / count) * 100) / 100 : null;
 }
 
-function warningCount(json: string | null): number {
-  try {
-    const w: unknown = JSON.parse(json ?? "[]");
-    return Array.isArray(w) ? w.length : 0;
-  } catch {
-    return 0;
-  }
-}
-
-/** Recompute a gizlet's marks, rating aggregate and score from what they depend on. */
+/**
+ * Recompute a gizlet's marks, rating aggregate and score from what they depend on, in one
+ * statement: every input is read when it runs, so concurrent rescores cannot write stale
+ * aggregates over newer ones. Only the download points are read before it; downloads only grow,
+ * and the next rescore catches up.
+ */
 export async function rescore(env: Env, repo: string): Promise<void> {
-  const [{ results: gs }, { results: marks }, { results: agg }] = (await env.DB.batch([
-    env.DB.prepare(
-      `SELECT g.downloads, r.scan, r.warnings, r.tag AS ready_tag FROM gizlets g
-         LEFT JOIN releases r ON r.repo = g.repo AND r.tag = g.latest_tag AND r.status = 'ready'
-        WHERE g.repo = ?`,
-    ).bind(repo),
-    env.DB.prepare("SELECT mark FROM marks WHERE repo = ?").bind(repo),
-    env.DB.prepare("SELECT count(*) AS n, coalesce(sum(stars), 0) AS s FROM ratings WHERE repo = ?").bind(repo),
-  ])) as [D1Result<{ downloads: number; scan: string | null; warnings: string | null; ready_tag: string | null }>, D1Result<{ mark: string }>, D1Result<{ n: number; s: number }>];
-  const g = gs[0];
+  const g = await env.DB.prepare("SELECT downloads FROM gizlets WHERE repo = ?").bind(repo).first<{ downloads: number }>();
   if (!g) return;
-  const set = new Set(marks.map((m) => m.mark).filter((m) => ADMIN_MARKS.includes(m as Mark)));
-  if (g.ready_tag && g.scan === "clean") set.add("scanned");
-  const list = MARKS.filter((m) => set.has(m));
-  const { n, s } = agg[0] ?? { n: 0, s: 0 };
-  const score = computeScore({
-    ratingCount: n,
-    ratingSum: s,
-    downloads: g.downloads,
-    marks: list,
-    warnings: g.ready_tag ? warningCount(g.warnings) : null,
-  });
-  await env.DB.prepare("UPDATE gizlets SET marks = ?, rating_count = ?, rating_sum = ?, score = ? WHERE repo = ?").bind(JSON.stringify(list), n, s, score, repo).run();
+  await env.DB.prepare(
+    `UPDATE gizlets SET rating_count = x.n, rating_sum = x.s, score = ${SCORE_SQL},
+       -- In the order of MARKS.
+       marks = CASE WHEN x.awesome AND x.scanned THEN '["awesome","scanned"]' WHEN x.awesome THEN '["awesome"]'
+                    WHEN x.scanned THEN '["scanned"]' ELSE '[]' END
+     FROM (SELECT g.repo,
+             (SELECT count(*) FROM ratings WHERE repo = g.repo) AS n,
+             (SELECT coalesce(sum(stars), 0) FROM ratings WHERE repo = g.repo) AS s,
+             r.tag AS ready_tag,
+             json_array_length(coalesce(r.warnings, '[]')) AS warnings,
+             coalesce(r.scan = 'clean', 0) AS scanned,
+             EXISTS (SELECT 1 FROM marks WHERE repo = g.repo AND mark = 'awesome') AS awesome,
+             ?2 AS dl
+           FROM gizlets g LEFT JOIN releases r ON r.repo = g.repo AND r.tag = g.latest_tag AND r.status = 'ready'
+          WHERE g.repo = ?1) AS x
+     WHERE gizlets.repo = x.repo`,
+  )
+    .bind(repo, downloadPoints(g.downloads))
+    .run();
 }

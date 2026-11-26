@@ -4,7 +4,7 @@ import { createAuth, devOutbox } from "./auth";
 import { featured, getGizlet, gizletDetail, LIST_SORTS, listGizlets, listReleases, packageJson, pickInstall, releaseJson, summary, VISIBILITIES, type GizletRow, type ListSort, type PackageRow, type ReleaseRow } from "./db";
 import type { Env } from "./env";
 import { NotFound, reader, UpstreamError } from "./github";
-import { rejectRelease } from "./mirror";
+import { reportInfected } from "./mirror";
 import { AuthError, verifyActionsToken } from "./oidc";
 import { ensureGizlet, indexRelease, setVisibility } from "./registry";
 import { ADMIN_MARKS, MARKS, ratingAverage, rescore, type Mark } from "./score";
@@ -482,15 +482,18 @@ api.post(`${ADMIN_GIZLET}/releases/:tag/scan`, async (c) => {
   const reportUrl = str(b.report_url, 500);
   if (reportUrl && !/^https:\/\//.test(reportUrl)) return apiError(c, 400, "bad_request", "report_url must be https");
   const report = { engine: str(b.engine, 100), report_url: reportUrl, note: str(b.note, 500), scanned_at: new Date().toISOString() };
-  const res = await c.env.DB.prepare("UPDATE releases SET scan = ?, scan_report = ? WHERE repo = ? AND tag = ? AND revision = ?")
-    .bind(b.result, JSON.stringify(report), r.key, tag, rel.revision)
-    .run();
-  if (!res.meta.changes) return apiError(c, 409, "revision_changed", `${tag} was indexed again; scan it again`);
-  if (b.result === "infected" && rel.status !== "failed") {
-    await rejectRelease(c.env, { repo: r.key, tag, revision: rel.revision }, `malware scan${report.engine ? ` (${report.engine})` : ""}: ${report.note ?? "infected"}`);
+  const job = { repo: r.key, tag, revision: rel.revision };
+  let recorded: boolean;
+  if (b.result === "infected") {
+    recorded = await reportInfected(c.env, job, JSON.stringify(report), `malware scan${report.engine ? ` (${report.engine})` : ""}: ${report.note ?? "infected"}`);
   } else {
-    await rescore(c.env, r.key);
+    const res = await c.env.DB.prepare("UPDATE releases SET scan = 'clean', scan_report = ? WHERE repo = ? AND tag = ? AND revision = ? AND status = 'ready'")
+      .bind(JSON.stringify(report), r.key, tag, rel.revision)
+      .run();
+    recorded = res.meta.changes > 0;
+    if (recorded) await rescore(c.env, r.key);
   }
+  if (!recorded) return apiError(c, 409, "revision_changed", `${tag} was indexed again or changed state; scan it again`);
   const fresh = (await c.env.DB.prepare("SELECT * FROM releases WHERE repo = ? AND tag = ?").bind(r.key, tag).first<ReleaseRow>())!;
   const { results } = await c.env.DB.prepare("SELECT * FROM packages WHERE repo = ? AND tag = ?").bind(r.key, tag).all<PackageRow>();
   const g = await getGizlet(c.env, r.key);

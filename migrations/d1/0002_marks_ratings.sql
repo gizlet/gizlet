@@ -12,6 +12,16 @@ CREATE INDEX gizlets_score ON gizlets (visibility, score DESC, updated_at DESC);
 ALTER TABLE releases ADD COLUMN scan TEXT;        -- NULL (not scanned) | clean | infected
 ALTER TABLE releases ADD COLUMN scan_report TEXT; -- JSON: engine, report_url, note, scanned_at
 
+-- Package bytes a malware scan found infected. Kept by sha256, so no re-index of any release
+-- (a gizlet.json edited around the same packages, another tag, another repository) serves them.
+CREATE TABLE infected (
+  sha256 TEXT PRIMARY KEY,
+  repo TEXT NOT NULL,            -- where it was first reported
+  tag TEXT NOT NULL,
+  error TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
 -- Marks set by an admin, such as awesome. "scanned" is never stored here: it follows the scans.
 CREATE TABLE marks (
   repo TEXT NOT NULL,

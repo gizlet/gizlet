@@ -97,14 +97,32 @@ export async function deletePrefix(env: Env, prefix: string): Promise<void> {
   } while (cursor);
 }
 
-/** Set the status of one revision of a release; false when the release has moved on. */
+/** Packages of one revision whose bytes a malware scan found infected. */
+const INFECTED_PACKAGES = `SELECT 1 FROM packages p JOIN infected i ON i.sha256 = p.sha256
+  WHERE p.repo = releases.repo AND p.tag = releases.tag AND p.revision = releases.revision`;
+
+/**
+ * Set the status of one revision of a release; false when the release has moved on. Failed is
+ * final for a revision (a malware report can fail it while its job still runs), and a revision
+ * with infected packages never becomes ready.
+ */
 async function setStatus(env: Env, job: MirrorJob, status: ReleaseRow["status"], error: string | null, warnings: string[] = [], mirrored = false): Promise<boolean> {
   const res = await env.DB.prepare(
-    "UPDATE releases SET status = ?, error = ?, warnings = ?, mirrored = ?, updated_at = ? WHERE repo = ? AND tag = ? AND revision = ?",
+    `UPDATE releases SET status = ?1, error = ?2, warnings = ?3, mirrored = ?4, updated_at = ?5
+      WHERE repo = ?6 AND tag = ?7 AND revision = ?8 AND status != 'failed'
+        AND (?1 != 'ready' OR NOT EXISTS (${INFECTED_PACKAGES}))`,
   )
     .bind(status, error, JSON.stringify(warnings), mirrored ? 1 : 0, Date.now(), job.repo, job.tag, job.revision)
     .run();
   return res.meta.changes > 0;
+}
+
+/** Why a revision may not be served: the report on one of its packages' bytes, or null. */
+async function infectedError(env: Env, job: MirrorJob): Promise<string | null> {
+  const row = await env.DB.prepare("SELECT i.error FROM packages p JOIN infected i ON i.sha256 = p.sha256 WHERE p.repo = ? AND p.tag = ? AND p.revision = ? LIMIT 1")
+    .bind(job.repo, job.tag, job.revision)
+    .first<{ error: string }>();
+  return row?.error ?? null;
 }
 
 export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): Promise<void> {
@@ -118,6 +136,8 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
   const { results: pkgs } = await env.DB.prepare("SELECT * FROM packages WHERE repo = ? AND tag = ? AND revision = ?").bind(job.repo, job.tag, job.revision).all<PackageRow>();
   const warnings: string[] = [];
   try {
+    const infected = await infectedError(env, job);
+    if (infected) throw new Rejected(infected);
     if (!(await setStatus(env, job, "mirroring", null))) throw new Superseded();
     const src = await reader(env, { owner: g.owner, name: g.name_repo, key: job.repo });
     for (const p of pkgs) {
@@ -156,16 +176,36 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
   }
   if (!index.icon) warnings.push("gizlet.json names no icon");
   if (!index.description) warnings.push("gizlet.json has no description");
-  if (!(await setStatus(env, job, "ready", null, warnings, true))) return;
+  if (!(await setStatus(env, job, "ready", null, warnings, true))) {
+    // Superseded, failed by a malware report meanwhile, or its bytes were reported in another release.
+    const infected = await infectedError(env, job);
+    if (infected && (await setStatus(env, job, "failed", infected))) await settle(env, job, "failed");
+    return;
+  }
   await settle(env, job, "ready");
 }
 
 /**
- * Fail one revision of a release after it was decided (a malware scan found something): nothing
- * of it is served from then on. False when the release has moved on to another revision.
+ * A malware scan found one revision of a release infected. In one transaction: record the scan,
+ * fail the revision whatever state it is in (a running job cannot undo it) and remember its
+ * packages' sha256, so no later re-index serves those bytes. False when the release has moved on.
  */
-export async function rejectRelease(env: Env, job: MirrorJob, error: string): Promise<boolean> {
-  if (!(await setStatus(env, job, "failed", error))) return false;
+export async function reportInfected(env: Env, job: MirrorJob, report: string, error: string): Promise<boolean> {
+  const now = Date.now();
+  const [res] = await env.DB.batch([
+    env.DB.prepare("UPDATE releases SET scan = 'infected', scan_report = ?, status = 'failed', error = ?, updated_at = ? WHERE repo = ? AND tag = ? AND revision = ?").bind(
+      report,
+      error,
+      now,
+      job.repo,
+      job.tag,
+      job.revision,
+    ),
+    env.DB.prepare(
+      "INSERT OR IGNORE INTO infected (sha256, repo, tag, error, created_at) SELECT sha256, repo, tag, ?, ? FROM packages WHERE repo = ? AND tag = ? AND revision = ? AND EXISTS (SELECT 1 FROM releases WHERE repo = ?3 AND tag = ?4 AND revision = ?5)",
+    ).bind(error, now, job.repo, job.tag, job.revision),
+  ]);
+  if (!res!.meta.changes) return false;
   await settle(env, job, "failed");
   return true;
 }

@@ -46,6 +46,13 @@ export async function indexRelease(env: Env, ref: RepoRef, tag: string, opts: In
   const owner = display?.owner ?? ref.owner;
   const name = display?.name ?? ref.name;
   const isPrivate = opts.info ? (opts.info.private ? 1 : 0) : null;
+  // Bytes a malware scan found infected stay failed, whatever else the new index changes.
+  const shas = index.packages.map((p) => p.sha256);
+  const infected = unchanged || !shas.length
+    ? null
+    : await env.DB.prepare(`SELECT error FROM infected WHERE sha256 IN (${shas.map(() => "?").join(", ")}) LIMIT 1`)
+        .bind(...shas)
+        .first<{ error: string }>();
 
   const stmts: D1PreparedStatement[] = [
     env.DB.prepare(
@@ -62,12 +69,12 @@ export async function indexRelease(env: Env, ref: RepoRef, tag: string, opts: In
   if (!unchanged) {
     stmts.push(
       env.DB.prepare(
-        `INSERT INTO releases (repo, tag, version, status, error, warnings, index_json, mirrored, published_at, updated_at)
-         VALUES (?, ?, ?, 'pending', NULL, '[]', ?, 0, ?, ?)
-         ON CONFLICT (repo, tag) DO UPDATE SET version = excluded.version, status = 'pending', error = NULL, warnings = '[]',
+        `INSERT INTO releases (repo, tag, version, status, error, warnings, index_json, mirrored, published_at, updated_at, scan)
+         VALUES (?, ?, ?, ?, ?, '[]', ?, 0, ?, ?, ?)
+         ON CONFLICT (repo, tag) DO UPDATE SET version = excluded.version, status = excluded.status, error = excluded.error, warnings = '[]',
            index_json = excluded.index_json, mirrored = 0, updated_at = excluded.updated_at, revision = releases.revision + 1,
-           scan = NULL, scan_report = NULL`,
-      ).bind(ref.key, tag, index.version, indexJson, now, now),
+           scan = excluded.scan, scan_report = NULL`,
+      ).bind(ref.key, tag, index.version, infected ? "failed" : "pending", infected?.error ?? null, indexJson, now, now, infected ? "infected" : null),
       env.DB.prepare("DELETE FROM packages WHERE repo = ? AND tag = ?").bind(ref.key, tag),
       ...index.packages.map((p) =>
         env.DB.prepare(
@@ -81,7 +88,7 @@ export async function indexRelease(env: Env, ref: RepoRef, tag: string, opts: In
   const rel = (await env.DB.prepare("SELECT * FROM releases WHERE repo = ? AND tag = ?").bind(ref.key, tag).first<ReleaseRow>())!;
   // A new revision needs a job. So does a publish of a release still waiting for one: its job
   // may have been lost (the cron requeues those too). Jobs for one revision are idempotent.
-  if (!unchanged || (opts.retryFailed && rel.status === "pending")) await queueMirror(env, ref.key, tag, rel.revision);
+  if ((!unchanged && !infected) || (opts.retryFailed && rel.status === "pending")) await queueMirror(env, ref.key, tag, rel.revision);
   return rel;
 }
 

@@ -112,6 +112,48 @@ header "cache-control" == "no-store"
 GET {{signed_url}}
 HTTP 200
 
+# GitHub may answer an asset request with the bytes instead of a redirect. Indexing and
+# mirroring read them, and a pruned private download passes them on, never cached.
+POST {{fixture}}/_fixture/direct?repo=fixture-org/secret-gizlet
+HTTP 200
+
+POST {{fixture}}/_fixture/release?repo=fixture-org/secret-gizlet&version=1.3.0
+HTTP 201
+
+GET {{fixture}}/token?repo=fixture-org/secret-gizlet&ref=refs/tags/v1.3.0&visibility=private
+HTTP 200
+[Captures]
+secret_token_13: jsonpath "$.value"
+
+POST {{base}}/v1/publish
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{secret_token_13}}
+{}
+HTTP 202
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/secret-gizlet/releases/v1.3.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "ready"
+jsonpath "$.mirrored" == true
+
+GET {{base}}/github.com/fixture-org/secret-gizlet/v1.0.0/dev.fixture.secretgizlet-1.0.0-aarch64-unknown-linux-gnu-lite.gzl
+x-gizlet-host: dl.gizlet.io
+HTTP 200
+[Asserts]
+header "cache-control" == "no-store"
+header "content-type" == "application/vnd.gizlet.package+zip"
+bytes startsWith hex,504b0304;
+
+GET {{fixture}}/_fixture/hits?key=direct:fixture-org/secret-gizlet
+HTTP 200
+[Asserts]
+jsonpath "$.count" > 2
+
 # --- A private repository without the app ---------------------------------------------------
 
 GET {{base}}/v1/gizlets/github.com/fixture-org/hidden

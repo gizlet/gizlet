@@ -1,10 +1,20 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { pkcs1ToPkcs8 } from "../../src/pem.ts";
-import { computeScore, ratingAverage } from "../../src/score.ts";
+import { downloadPoints, ratingAverage, SCORE_SQL } from "../../src/score.ts";
 
-const base = { ratingCount: 0, ratingSum: 0, downloads: 0, marks: [] as string[], warnings: 0 };
+const db = new DatabaseSync(":memory:");
+const query = db.prepare(`SELECT ${SCORE_SQL} AS score FROM (SELECT ? AS n, ? AS s, ? AS ready_tag, ? AS warnings, ? AS scanned, ? AS awesome, ? AS dl) AS x`);
+
+/** The score SQL, run by SQLite as D1 runs it. warnings null: no release is ready. */
+function computeScore(i: { ratingCount: number; ratingSum: number; downloads: number; marks: string[]; warnings: number | null }): number {
+  const row = query.get(i.ratingCount, i.ratingSum, i.warnings === null ? null : "v1", i.warnings ?? 0, i.marks.includes("scanned") ? 1 : 0, i.marks.includes("awesome") ? 1 : 0, downloadPoints(i.downloads));
+  return Number(row!.score);
+}
+
+const base = { ratingCount: 0, ratingSum: 0, downloads: 0, marks: [] as string[], warnings: 0 as number | null };
 
 test("score: an unrated, undownloaded gizlet that passed its checks", () => {
   // 20 for ratings at the prior (3 stars), 15 for clean checks.

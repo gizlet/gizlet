@@ -112,13 +112,24 @@ dl.on(["GET", "HEAD"], "/github.com/:owner/:repo/:tag/:file", async (c) => {
   if (res) return res;
   // Not mirrored (an older ready release, pruned from R2): hand off to GitHub. The client
   // checks the package against the sha256 the API gave it. A private repository's assets have
-  // no public URL, so the GitHub App asks for a short-lived one, which is never cached.
+  // no public URL, so the GitHub App asks for a short-lived one, which is never cached; when
+  // GitHub hands over the bytes instead, they are passed on.
   if (g.private) {
-    const url = await (await reader(c.env, { owner: g.owner, name: g.name_repo, key: r.key })).downloadUrl(tag, file);
-    if (!url) return c.text("Not found", 404);
+    const got = await (await reader(c.env, { owner: g.owner, name: g.name_repo, key: r.key })).download(tag, file);
+    if (!got) return c.text("Not found", 404);
     countDownload();
-    c.header("cache-control", "no-store");
-    return c.redirect(url, 302);
+    if ("url" in got) {
+      c.header("cache-control", "no-store");
+      return c.redirect(got.url, 302);
+    }
+    const headers = new Headers({ "content-type": contentType(file), "cache-control": "no-store", "x-content-type-options": "nosniff", "access-control-allow-origin": "*" });
+    const len = got.response.headers.get("content-length");
+    if (len) headers.set("content-length", len);
+    if (c.req.method === "HEAD") {
+      await got.response.body?.cancel();
+      return new Response(null, { headers });
+    }
+    return new Response(got.response.body, { headers });
   }
   countDownload();
   return c.redirect(assetUrl(c.env, g.owner, g.name_repo, tag, file), 302);

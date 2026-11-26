@@ -45,6 +45,8 @@ export interface RepoInfo {
   private: boolean;
 }
 
+export type Download = { url: string } | { response: Response };
+
 /** One repository's releases, read through the app or the public web. */
 export interface Reader {
   readonly via: "app" | "web";
@@ -52,8 +54,11 @@ export interface Reader {
   latestTag(): Promise<string | null>;
   /** A release asset; 404 when the release or asset is missing. */
   asset(tag: string, file: string): Promise<Response>;
-  /** A URL anyone can download the asset from for the next few minutes, or null when it is missing. */
-  downloadUrl(tag: string, file: string): Promise<string | null>;
+  /**
+   * How a client can get the asset: a URL anyone can download it from for the next few minutes,
+   * or, when GitHub hands over the bytes instead of a URL, the response itself. Null when it is missing.
+   */
+  download(tag: string, file: string): Promise<Download | null>;
   /** The repository's id, casing and privacy; null through the web. */
   info(): Promise<RepoInfo | null>;
 }
@@ -113,8 +118,8 @@ class WebReader implements Reader {
     return ghFetch(assetUrl(this.env, this.ref.owner, this.ref.name, tag, file));
   }
 
-  async downloadUrl(tag: string, file: string): Promise<string | null> {
-    return assetUrl(this.env, this.ref.owner, this.ref.name, tag, file);
+  async download(tag: string, file: string): Promise<Download | null> {
+    return { url: assetUrl(this.env, this.ref.owner, this.ref.name, tag, file) };
   }
 
   async info(): Promise<RepoInfo | null> {
@@ -203,33 +208,38 @@ class AppReader implements Reader {
     return p;
   }
 
-  /** The asset's short-lived download URL, null when it is missing, undefined when the app cannot read it. */
-  private async location(tag: string, file: string): Promise<string | null | undefined> {
+  /**
+   * The asset from the API: a signed URL to follow, or the bytes themselves (GitHub answers
+   * either way). Null when it is missing, undefined when the app cannot read it.
+   */
+  private async fetchAsset(tag: string, file: string): Promise<Download | null | undefined> {
     const assets = await this.release(tag);
     if (!assets) return undefined;
     const id = assets.get(file);
     if (id === undefined) return null;
-    // The API redirects to a signed URL on another host, which refuses our Authorization header.
+    // A redirect goes to a signed URL on another host, which refuses our Authorization header,
+    // so it is followed separately, without it.
     const res = await this.api(`/releases/assets/${id}`, { headers: { accept: "application/octet-stream" }, redirect: "manual" });
+    if (res.status === 200) return { response: res };
     await res.body?.cancel();
     if (this.denied(res)) return undefined;
     const loc = res.headers.get("location");
     if (res.status < 300 || res.status >= 400 || !loc) throw new UpstreamError(`GitHub answered ${res.status} for ${file}`);
-    return loc;
+    return { url: loc };
   }
 
   async asset(tag: string, file: string): Promise<Response> {
     if (this.fallback) return this.fallback.asset(tag, file);
-    const loc = await this.location(tag, file);
-    if (loc === undefined) return this.web.asset(tag, file);
-    if (loc === null) return new Response("Not Found", { status: 404 });
-    return ghFetch(loc);
+    const got = await this.fetchAsset(tag, file);
+    if (got === undefined) return this.web.asset(tag, file);
+    if (got === null) return new Response("Not Found", { status: 404 });
+    return "response" in got ? got.response : ghFetch(got.url);
   }
 
-  async downloadUrl(tag: string, file: string): Promise<string | null> {
-    if (this.fallback) return this.fallback.downloadUrl(tag, file);
-    const loc = await this.location(tag, file);
-    return loc === undefined ? this.web.downloadUrl(tag, file) : loc;
+  async download(tag: string, file: string): Promise<Download | null> {
+    if (this.fallback) return this.fallback.download(tag, file);
+    const got = await this.fetchAsset(tag, file);
+    return got === undefined ? this.web.download(tag, file) : got;
   }
 
   async info(): Promise<RepoInfo | null> {
