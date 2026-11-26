@@ -1,11 +1,11 @@
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
-import { githubToken, myDevices, myGizlets, myWants, signInMethods, signOutDevice, type AccountUser } from "./account";
+import { githubAccount, myDevices, myGizlets, myWants, signInMethods, signOutDevice, type AccountUser } from "./account";
 import { createAuth, devGithubUrl, devOutbox, siteDomains } from "./auth";
 import { featured, getGizlet, gizletDetail, LIST_SORTS, listGizlets, listReleases, packageJson, pickInstall, releaseJson, summary, VISIBILITIES, type GizletRow, type ListSort, type PackageRow, type ReleaseRow } from "./db";
 import { findHandheld, HANDHELDS, handheldJson, wantCounts, type Handheld } from "./devices";
 import type { Env } from "./env";
-import { appCanManage, canManage, NotFound, reader, UpstreamError, UserTokenRejected } from "./github";
+import { appCanManage, canManage, githubUser, NotFound, reader, UpstreamError, UserTokenRejected } from "./github";
 import { adoptRepositoryId, claimLink, getLink, LINK_MAX, LINK_MIN, linkProblem, minLengthOf, normalizeLinkId, releaseLink, resolveLink, shortLinkIn, shortUrl, type LinkProblem } from "./links";
 import { reportInfected } from "./mirror";
 import { AuthError, verifyActionsToken } from "./oidc";
@@ -413,17 +413,22 @@ async function managedGizlet(c: C, u: MeUser, pool: AuthPool): Promise<{ gizlet:
   const g = await getGizlet(c.env, r.key);
   if (!g) return { error: apiError(c, 404, "not_found", `${r.key} is not a gizlet`) };
   if (g.visibility === "blocked") return { error: apiError(c, 403, "blocked", `${r.key} is blocked`) };
-  const token = u.githubLogin ? await githubToken(pool, u.id) : null;
-  if (!token) return { error: apiError(c, 403, "github_not_linked", "link GitHub first") };
+  const account = u.githubLogin ? await githubAccount(pool, u.id) : null;
+  if (!account) return { error: apiError(c, 403, "github_not_linked", "link GitHub first") };
   let id: number | null;
   const repo = { owner: g.owner, name: g.name_repo, key: g.repo };
   try {
-    id = await canManage(c.env, token, repo, g.repository_id ?? null);
+    id = await canManage(c.env, account.token, repo, g.repository_id ?? null);
+    if (id === null && g.private === 1) {
+      // The app is asked by login, which GitHub lets people change and others then take: use the
+      // login the token's owner has now, once GitHub's id for them is the linked account's.
+      const me = await githubUser(c.env, account.token);
+      if (String(me.id) === account.githubId) id = await appCanManage(c.env, repo, me.login, g.repository_id ?? null);
+    }
   } catch (e) {
     if (e instanceof UserTokenRejected) return { error: apiError(c, 403, "github_relink", "GitHub no longer accepts the linked account; link GitHub again") };
     throw e;
   }
-  if (id === null && g.private === 1 && u.githubLogin) id = await appCanManage(c.env, repo, u.githubLogin, g.repository_id ?? null);
   if (id === null) return { error: apiError(c, 403, "forbidden", `only admins and maintainers of ${g.owner}/${g.name_repo} can set its short link`) };
   return { gizlet: await adoptRepositoryId(c.env, g, id) };
 }

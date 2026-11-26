@@ -334,6 +334,17 @@ async function userFetch(env: Pick<Env, "GITHUB_API">, token: string, path: stri
 /** Whether repository permissions let a user manage a gizlet: admin or maintain. */
 const manages = (p: { admin?: boolean; maintain?: boolean } | undefined) => Boolean(p?.admin || p?.maintain);
 
+/** Who a token belongs to now: GitHub's id for the account, which never changes, and its current login, which can. */
+export async function githubUser(env: Pick<Env, "GITHUB_API">, token: string): Promise<{ id: number; login: string }> {
+  const res = await userFetch(env, token, "/user");
+  if (!res.ok) {
+    await res.body?.cancel();
+    throw new UpstreamError(`GitHub answered ${res.status} for the user`);
+  }
+  const u = (await res.json()) as { id: number; login: string };
+  return { id: u.id, login: u.login };
+}
+
 /**
  * The repositories a user can see as owner, collaborator or organization member, by canonical key
  * (github.com/<owner>/<name>, lowercase), with GitHub's id and whether they may manage each. Up to 500.

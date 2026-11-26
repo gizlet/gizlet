@@ -177,7 +177,8 @@ for (const button of document.querySelectorAll(".link-github")) {
 const unlink = document.querySelector("#unlink-github");
 unlink?.addEventListener("click", () =>
   busy(unlink, async () => {
-    await call("/unlink-account", { accountId: unlink.dataset.account });
+    // Better Auth 1.7 takes its own account id; providerId is what other versions take instead.
+    await call("/unlink-account", { accountId: unlink.dataset.account, providerId: "github" });
     location.reload();
   }),
 );

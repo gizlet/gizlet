@@ -573,7 +573,7 @@ POST {{base}}/v1/auth/unlink-account
 x-gizlet-host: api.gizlet.io
 Origin: {{site}}
 Authorization: Bearer {{dev}}
-{"accountId": "{{github_account}}"}
+{"accountId": "{{github_account}}", "providerId": "github"}
 HTTP 200
 
 GET {{base}}/v1/me

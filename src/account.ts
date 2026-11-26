@@ -29,11 +29,17 @@ export interface AccountUser {
 
 /** The user's GitHub OAuth token, from linking or signing in with GitHub. */
 export async function githubToken(pool: Pool, userId: string): Promise<string | null> {
-  const { rows } = await pool.query<{ accessToken: string | null }>(
-    `SELECT "accessToken" FROM account WHERE "userId" = $1 AND "providerId" = 'github' ORDER BY "updatedAt" DESC LIMIT 1`,
+  return (await githubAccount(pool, userId))?.token ?? null;
+}
+
+/** The user's linked GitHub account: its OAuth token, and GitHub's id for the account, which never changes. */
+export async function githubAccount(pool: Pool, userId: string): Promise<{ token: string; githubId: string } | null> {
+  const { rows } = await pool.query<{ accessToken: string | null; accountId: string }>(
+    `SELECT "accessToken", "accountId" FROM account WHERE "userId" = $1 AND "providerId" = 'github' ORDER BY "updatedAt" DESC LIMIT 1`,
     [userId],
   );
-  return rows[0]?.accessToken ?? null;
+  const a = rows[0];
+  return a?.accessToken ? { token: a.accessToken, githubId: a.accountId } : null;
 }
 
 /** Sign-in methods and the Better Auth account ids, which unlinking needs. */
