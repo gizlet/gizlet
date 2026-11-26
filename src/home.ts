@@ -7,6 +7,7 @@ import { html, raw } from "hono/html";
 import { featured, summary } from "./db";
 import { handheld } from "./devices";
 import type { Env } from "./env";
+import { themeClass, themeLink } from "./theme";
 import { heroTitle, localized, MESSAGES, rich, type Locale, type Messages } from "./i18n";
 
 /** Where share pages live. */
@@ -21,7 +22,9 @@ function hash(s: string, seed: number): number {
 }
 /** Label art for a gizlet without an icon, and the colour of its plastic shell; both stable per repository. Inline styles are blocked by the CSP, so these are classes. */
 const pattern = (repo: string) => `p${(hash(repo, 7) % 5) + 1}`;
-export const shell = (repo: string) => `s${(hash(repo, 3) % 5) + 1}`;
+const fallbackShell = (repo: string) => `s${(hash(repo, 3) % 5) + 1}`;
+/** A cartridge's shell: the gizlet's own colour (gizlet.toml `color`), else one of five, stable per repository. */
+export const shell = (g: { repo: string; color: string | null }) => themeClass(g.color) ?? fallbackShell(g.repo);
 
 const nameOf = (g: Summary, lang: Locale) => localized(g.names, g.name, lang);
 
@@ -31,7 +34,7 @@ export function art(g: Summary, big = false) {
 }
 
 export function cart(g: Summary, t: Messages, lang: Locale) {
-  return html`<a class="cart ${shell(g.repo)}" href="/${g.repo}">
+  return html`<a class="cart ${shell(g)}" href="/${g.repo}">
   <span class="grip" aria-hidden="true"></span>
   <span class="label">${art(g)}</span>
   <span class="name">${nameOf(g, lang)}</span>
@@ -59,7 +62,8 @@ export async function homePage(env: Env, lang: Locale, badUrl?: string) {
   const title = (s: (typeof all)[number]) => t.home.sections[s.id] ?? localized(s.titles, s.title, lang);
   const star = hero[0];
   const screen = star ? html`<span class="now">${art(star, true)}<b>${nameOf(star, lang)}</b></span>` : bootScreen;
-  return html`<section class="stage">
+  const colors = [star, ...sections.flatMap((x) => x.gizlets.slice(0, 8))].map((g) => g?.color);
+  return html`${themeLink(colors)}<section class="stage">
   <div class="wrap stage-grid">
     <div class="copy">
       <p class="kicker">${t.home.stamp}</p>
@@ -78,7 +82,7 @@ export async function homePage(env: Env, lang: Locale, badUrl?: string) {
     </div>
     <div class="rig">
       ${star
-        ? html`<a class="rig-cart cart ${shell(star.repo)}" href="/${star.repo}" tabindex="-1" aria-hidden="true"><span class="grip"></span><span class="label">${art(star)}</span></a>`
+        ? html`<a class="rig-cart cart ${shell(star)}" href="/${star.repo}" tabindex="-1" aria-hidden="true"><span class="grip"></span><span class="label">${art(star)}</span></a>`
         : html`<span class="rig-cart cart s1" aria-hidden="true"><span class="grip"></span><span class="label"><span class="pic p1"></span></span></span>`}
       ${handheld(screen, "body-sun", "big")}
       ${star ? html`<a class="caption" href="/${star.repo}">${t.home.featured(nameOf(star, lang))}</a>` : ""}

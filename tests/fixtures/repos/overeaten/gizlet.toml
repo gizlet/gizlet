@@ -1,0 +1,80 @@
+# Overeaten, as the fixture server publishes it (tests/fixtures/server.mjs). The field
+# reference is docs/gizlet-toml.md. Art and about pages are repository paths at the tag.
+id = "io.gizlet.overeaten"
+name = "Overeaten"
+version = "0.1.0"
+category = "game"
+description = "A reverse cooking game: you don't cook, you eat. Finish the restaurant's eating task before closing time without eating yourself into hospital."
+tags = ["food", "arcade", "sushi"]
+color = "#c8553d"
+license = "MIT"
+runtime = 1
+icon = "store/icon.png"
+cover = "store/cover.jpg"
+pattern = "store/pattern.png"
+screenshots = [
+  "store/screenshots/dining.jpg",
+  "store/screenshots/title.jpg",
+  "store/screenshots/result.jpg",
+  "store/screenshots/album.jpg",
+]
+
+[names]
+zh-CN = "吃吃吃"
+zh-TW = "吃吃吃"
+ja = "食べすぎ"
+
+[descriptions]
+zh-CN = "反向料理游戏：你不做饭，你只管吃。在打烊前完成餐厅的吃饭任务，别把自己吃进医院。"
+zh-TW = "反向料理遊戲：你不做飯，你只管吃。在打烊前完成餐廳的吃飯任務，別把自己吃進醫院。"
+ja = "料理しない料理ゲーム。閉店までに店のノルマを食べきって、でも食べすぎて病院送りにならないように。"
+
+[links]
+website = "https://overeaten.example"
+x = "https://x.com/gizletio"
+discord = "https://discord.gg/gizlet"
+bilibili = "https://space.bilibili.com/1"
+
+[about]
+en = "store/about.en.md"
+zh-CN = "store/about.zh-CN.md"
+
+[[controls]]
+button = "dpad"
+action = "Walk round the counter"
+actions = { zh-CN = "绕着吧台走", zh-TW = "繞著吧台走", ja = "カウンターを回る" }
+
+[[controls]]
+button = "a"
+action = "Eat the plate in reach"
+actions = { zh-CN = "吃够得着的那盘", zh-TW = "吃夠得著的那盤", ja = "手の届く皿を食べる" }
+
+[[controls]]
+button = "b"
+action = "Back"
+actions = { zh-CN = "返回", zh-TW = "返回", ja = "戻る" }
+
+[[controls]]
+button = "x"
+action = "Card album"
+actions = { zh-CN = "卡册", zh-TW = "卡冊", ja = "カードアルバム" }
+
+[[controls]]
+button = "start"
+action = "Pause"
+actions = { zh-CN = "暂停", zh-TW = "暫停", ja = "ポーズ" }
+
+[[controls]]
+button = "select"
+action = "Switch 中文/English"
+actions = { zh-CN = "切换中文/English", zh-TW = "切換中文/English", ja = "中文/English を切り替え" }
+
+[[packages]]
+target = "aarch64-unknown-linux-gnu"
+tier = "lite"
+entry = "bin/overeaten"
+
+[[packages]]
+target = "aarch64-apple-darwin"
+tier = "full"
+entry = "bin/overeaten"

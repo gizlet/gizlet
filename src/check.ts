@@ -1,9 +1,8 @@
 /**
- * Static checks of a mirrored `.gzl` package (a zip with `manifest.toml`), read from R2 with
+ * Static checks of a mirrored `.gzl` package (a zip with `manifest.json`), read from R2 with
  * range requests so a package is never loaded whole. Errors fail the release: it is not
  * served, not even by link. Warnings keep the gizlet out of search and featured lists.
  */
-import { parse as parseToml } from "smol-toml";
 import type { Env } from "./env";
 
 export interface Findings {
@@ -11,11 +10,17 @@ export interface Findings {
   warnings: string[];
 }
 
+/** What gizlet.toml says the package's manifest.json holds. */
 export interface Expected {
   id: string;
+  name: string;
   version: string;
+  runtime: number;
   target: string;
+  tier: string;
+  entry: string;
 }
+const EXPECTED_KEYS = ["id", "name", "version", "runtime", "target", "tier", "entry"] as const;
 
 const EOCD = 0x06054b50;
 const CENTRAL = 0x02014b50;
@@ -235,15 +240,23 @@ async function readHead(env: Env, key: string, e: Entry, max: number): Promise<U
   return inflateHead(await range(env, key, start, Math.min(e.compressed, Math.max(max * 2, 256 * 1024))), max);
 }
 
-/** The top-level string values of a TOML document; throws on invalid TOML. */
-export function manifestFields(text: string): Record<string, string> {
-  let doc: Record<string, unknown>;
+/** A package's manifest.json, which must be a JSON object; throws otherwise. */
+export function parseManifest(text: string): Record<string, unknown> {
+  let doc: unknown;
   try {
-    doc = parseToml(text);
+    doc = JSON.parse(text);
   } catch (e) {
-    throw new Bad(`has a manifest.toml that is not valid TOML: ${(e instanceof Error ? e.message : String(e)).split("\n")[0]}`);
+    throw new Bad(`has a manifest.json that is not valid JSON: ${(e instanceof Error ? e.message : String(e)).split("\n")[0]}`);
   }
-  return Object.fromEntries(Object.entries(doc).filter((kv): kv is [string, string] => typeof kv[1] === "string"));
+  if (typeof doc !== "object" || doc === null || Array.isArray(doc)) throw new Bad("has a manifest.json that is not a JSON object");
+  return doc as Record<string, unknown>;
+}
+
+/** How a manifest differs from what gizlet.toml says it holds (`runtime` defaults to 1, as on the device). */
+export function manifestMismatches(manifest: Record<string, unknown>, expected: Expected): string[] {
+  return EXPECTED_KEYS.filter((k) => (k === "runtime" ? (manifest.runtime ?? 1) : manifest[k]) !== expected[k]).map(
+    (k) => `manifest.json has ${k} ${JSON.stringify(manifest[k] ?? null)}, gizlet.toml says ${JSON.stringify(expected[k])}`,
+  );
 }
 
 /**
@@ -379,23 +392,21 @@ export async function checkPackage(env: Env, key: string, file: string, size: nu
     throw e;
   }
 
-  const manifestEntry = names.get("manifest.toml");
-  if (!manifestEntry) return { errors: [`${file} has no manifest.toml`], warnings };
-  if (manifestEntry.size > MAX_MANIFEST_BYTES) return { errors: [`${file} has a manifest.toml larger than 64 KiB`], warnings };
-  let manifest: Record<string, string>;
+  const manifestEntry = names.get("manifest.json");
+  if (!manifestEntry) return { errors: [`${file} has no manifest.json`], warnings };
+  if (manifestEntry.size > MAX_MANIFEST_BYTES) return { errors: [`${file} has a manifest.json larger than 64 KiB`], warnings };
+  let manifest: Record<string, unknown>;
   try {
-    manifest = manifestFields(new TextDecoder().decode(await readHead(env, key, manifestEntry, MAX_MANIFEST_BYTES)));
+    manifest = parseManifest(new TextDecoder().decode(await readHead(env, key, manifestEntry, MAX_MANIFEST_BYTES)));
   } catch (e) {
     if (e instanceof Bad) return { errors: [`${file} ${e.message}`], warnings };
     throw e;
   }
-  for (const k of ["id", "version", "target"] as const) {
-    if (manifest[k] !== expected[k]) fail(`manifest.toml has ${k} ${JSON.stringify(manifest[k] ?? null)}, gizlet.json says ${JSON.stringify(expected[k])}`);
-  }
-  const entry = manifest.entry;
-  const exe = entry ? names.get(entry) : undefined;
-  if (!entry) fail("manifest.toml names no entry");
-  else if (!exe) fail(`has no entry file ${JSON.stringify(entry.slice(0, 120))}`);
+  for (const m of manifestMismatches(manifest, expected)) fail(m);
+  if (errors.length) return { errors, warnings };
+  const entry = expected.entry;
+  const exe = names.get(entry);
+  if (!exe) fail(`has no entry file ${JSON.stringify(entry.slice(0, 120))}`);
   else {
     try {
       const problem = executableProblem(expected.target, await readHead(env, key, exe, EXECUTABLE_HEAD_BYTES));

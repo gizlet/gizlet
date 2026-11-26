@@ -1,14 +1,16 @@
 /**
- * gizlet.io: the home page (src/home.ts), share pages and the account pages the sign-in flows
+ * gizlet.io: the home page (src/home.ts), gizlet pages (src/gizlet-page.ts) and the account pages the sign-in flows
  * need (sign in, approve a device, account), in every language of src/i18n.ts.
  */
 import { Hono, type Context } from "hono";
 import { html, raw } from "hono/html";
 import type { HtmlEscapedString } from "hono/utils/html";
-import { gizletDetail } from "./db";
+import { dlUrl, getGizlet, gizletDetail } from "./db";
 import type { Env } from "./env";
 import { devicePage, devicesPage, flashScript } from "./devices";
 import { explorePage } from "./explore";
+import { gizletPage, patternCss, patternHref } from "./gizlet-page";
+import { THEME_FILE, THEME_VERSION, themeCss, themeHref } from "./theme";
 import { homePage } from "./home";
 import { DEFAULT_LOCALE, LOCALE_NAMES, LOCALES, localized, matchLocale, MESSAGES, requestLocale, rich, scriptMessages, type Locale, type Messages } from "./i18n";
 import { ensureGizlet } from "./registry";
@@ -45,11 +47,13 @@ const navLink = (c: C, path: string, text: string) =>
 
 interface PageOptions {
   script?: string;
+  /** Extra stylesheets from this site. */
+  styles?: string[];
   /** Pages that lay out their own `.wrap` containers (the home page); others get a narrow column. */
   wide?: boolean;
 }
 
-function page(c: C, title: string, body: HtmlEscapedString | Promise<HtmlEscapedString>, { script, wide = false }: PageOptions = {}) {
+function page(c: C, title: string, body: HtmlEscapedString | Promise<HtmlEscapedString>, { script, styles = [], wide = false }: PageOptions = {}) {
   const lang = langOf(c);
   const t = MESSAGES[lang];
   const here = `${c.env.SITE_ORIGIN}${c.req.path}`;
@@ -67,7 +71,7 @@ function page(c: C, title: string, body: HtmlEscapedString | Promise<HtmlEscaped
 ${lang === "en" ? raw('<link rel="preload" href="/static/fonts/schibsted-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin>') : ""}
 ${LOCALES.map((l) => html`<link rel="alternate" hreflang="${l}" href="${here}?lang=${l}">\n`)}<link rel="alternate" hreflang="x-default" href="${here}">
 <link rel="stylesheet" href="/static/site.css">
-${script ? html`${scriptMessages(t)}\n${raw(`<script type="module" src="/static/${script}"></script>`)}` : ""}
+${styles.map((s) => html`<link rel="stylesheet" href="${s}">\n`)}${script ? html`${scriptMessages(t)}\n${raw(`<script type="module" src="/static/${script}"></script>`)}` : ""}
 </head>
 <body${wide ? raw(' class="home"') : ""}>
 <header class="wrap"><a class="brand" href="/" aria-label="${t.nav.brand}"><span class="px" aria-hidden="true">${raw("<i></i>".repeat(9))}</span>Gizlet</a><nav>${navLink(c, "/", t.nav.home)}${navLink(c, "/explore", t.nav.explore)}${navLink(c, "/install", t.nav.devices)}</nav><a class="login" href="/account">${t.nav.account}</a></header>
@@ -208,21 +212,25 @@ site.get("/github.com/:owner/:repo", async (c) => {
   }
   const d = await gizletDetail(c.env, g);
   const name = localized(d.names, d.name, lang);
-  return c.html(
-    page(
-      c,
-      `${name} · Gizlet`,
-      html`<article class="gizlet">
-  ${d.icon_url ? html`<img class="icon" src="${d.icon_url}" alt="" width="96" height="96">` : ""}
-  <h1>${name}</h1>
-  <p>${localized(d.descriptions, d.description, lang) ?? ""}</p>
-  <p class="meta">${d.version ? t.version(d.version) : ""} · <a href="${d.github_url}">${r.key}</a>${d.visibility === "unlisted" ? ` · ${t.unlisted}` : ""}</p>
-  <h2>${t.install}</h2>
-  <p>${t.installText}</p>
-  <ul>${d.packages.map((p) => html`<li><a href="${p.url}">${p.target}</a> (${p.tier}, ${Math.max(1, Math.round(p.size / 1024))} KiB)</li>`)}</ul>
-</article>`,
-    ),
-  );
+  const href = themeHref([d.color]);
+  const styles = [href, d.pattern_url && d.tag ? patternHref(d.repo, d.tag) : null].filter((s): s is string => !!s);
+  return c.html(page(c, `${name} · Gizlet`, await gizletPage(c.env, g, d, lang), { wide: true, styles, script: "devices.js" }));
+});
+
+/** A gizlet's pattern tile, for the release its page shows; 404 once the page has moved on. */
+site.get("/_pattern/github.com/:owner/:repo/:file{.+\\.css}", async (c) => {
+  const r = repoRef(c.req.param("owner"), c.req.param("repo"));
+  const tag = c.req.param("file").slice(0, -4);
+  const g = r ? await getGizlet(c.env, r.key) : null;
+  if (!g || g.visibility === "blocked" || g.latest_tag !== tag || !g.pattern) return c.notFound();
+  return c.body(patternCss(dlUrl(c.env, g.repo, tag, g.pattern)), 200, { "content-type": "text/css; charset=utf-8", "cache-control": "public, max-age=3600" });
+});
+
+/** Gizlets' own colours (gizlet.toml `color`), as a stylesheet: the CSP allows no inline styles (src/theme.ts). */
+site.get("/_theme/:version/:file", (c) => {
+  const m = THEME_FILE.exec(c.req.param("file"));
+  if (!m || c.req.param("version") !== THEME_VERSION) return c.notFound();
+  return c.body(themeCss(m[1]!.split("-")), 200, { "content-type": "text/css; charset=utf-8", "cache-control": "public, max-age=31536000, immutable" });
 });
 
 site.notFound((c) => {

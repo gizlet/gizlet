@@ -78,7 +78,11 @@ GET {{base}}/github.com/fixture-org/hello-gizlet/v0.2.0/unsafe.gzl
 x-gizlet-host: dl.gizlet.io
 HTTP 404
 
-GET {{base}}/github.com/fixture-org/hello-gizlet/v0.2.0/gizlet.json
+GET {{base}}/github.com/fixture-org/hello-gizlet/v0.2.0/gizlet.toml
+x-gizlet-host: dl.gizlet.io
+HTTP 404
+
+GET {{base}}/github.com/fixture-org/hello-gizlet/v0.2.0/README.md
 x-gizlet-host: dl.gizlet.io
 HTTP 404
 
@@ -88,11 +92,23 @@ x-gizlet-host: dl.gizlet.io
 HTTP 410
 
 # Older mirrored releases are still served; art comes from R2 too.
-GET {{base}}/github.com/fixture-org/hello-gizlet/v0.2.0/icon.png
+GET {{base}}/github.com/fixture-org/hello-gizlet/v0.2.0/store/icon.png
 x-gizlet-host: dl.gizlet.io
 HTTP 200
 [Asserts]
 header "content-type" == "image/png"
+header "x-checksum-sha256" not exists
+
+GET {{base}}/github.com/fixture-org/hello-gizlet/v0.2.0/store/about.en.md
+x-gizlet-host: dl.gizlet.io
+HTTP 200
+[Asserts]
+body contains "Serve yourself **sushi**"
+
+# Paths that leave the repository are never art.
+GET {{base}}/github.com/fixture-org/hello-gizlet/v0.2.0/store/../gizlet.toml
+x-gizlet-host: dl.gizlet.io
+HTTP 404
 
 GET {{base}}/github.com/fixture-org/unknown/v1.0.0/x.gzl
 x-gizlet-host: dl.gizlet.io

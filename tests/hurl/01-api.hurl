@@ -53,7 +53,7 @@ GET {{base}}/v1/gizlets/github.com/fixture-org/no-index
 x-gizlet-host: api.gizlet.io
 HTTP 404
 [Asserts]
-jsonpath "$.error.message" contains "no release with a gizlet.json"
+jsonpath "$.error.message" contains "no release with a gizlet.toml"
 
 POST {{base}}/v1/publish
 x-gizlet-host: api.gizlet.io

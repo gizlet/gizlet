@@ -130,7 +130,7 @@ async function gizletOr404(c: C): Promise<{ gizlet: GizletRow } | { error: Respo
       .bind(r.key)
       .first<{ tag: string; error: string | null }>();
     if (failed) return { error: apiError(c, 404, "failed_checks", `${r.key} has no release that passed its checks; ${failed.tag}: ${failed.error ?? "failed"}`) };
-    return { error: apiError(c, 404, "not_found", `${r.key} has no release with a gizlet.json`) };
+    return { error: apiError(c, 404, "not_found", `${r.key} has no release with a gizlet.toml`) };
   }
   if (g.visibility === "blocked") return { error: apiError(c, 403, "blocked", `${r.key} is blocked: ${g.visibility_reason ?? "removed by Gizlet"}`) };
   return { gizlet: g };
@@ -213,7 +213,7 @@ api.post("/v1/publish", async (c) => {
   if (g?.visibility === "blocked") return apiError(c, 403, "blocked", `${r.key} is blocked: ${g.visibility_reason ?? "removed by Gizlet"}`);
   let rel;
   try {
-    rel = await indexRelease(c.env, r, tag, { repositoryId: Number(claims.repository_id), display: { owner, name }, retryFailed: true });
+    rel = await indexRelease(c.env, r, tag, { repositoryId: Number(claims.repository_id), display: { owner, name }, force: true });
   } catch (e) {
     if (e instanceof NotFound) return apiError(c, 404, "not_found", e.message);
     if (e instanceof IndexError) return apiError(c, 422, "invalid_index", e.message);

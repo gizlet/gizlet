@@ -30,6 +30,101 @@ HTTP 200
 xpath "string(//h1)" == "Hello Gizlet"
 body contains "aarch64-unknown-linux-gnu"
 
+# A gizlet's page, from its gizlet.toml (tests/fixtures/repos/overeaten): indexed on first sight,
+# then shown once its packages are mirrored and checked.
+GET {{base}}/v1/gizlets/github.com/fixture-org/overeaten
+x-gizlet-host: api.gizlet.io
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/overeaten/releases/v0.1.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "ready"
+jsonpath "$.visibility" == "listed"
+
+GET {{base}}/github.com/fixture-org/overeaten
+x-gizlet-host: gizlet.io
+Accept-Language: zh-CN
+HTTP 200
+[Asserts]
+xpath "string(//h1)" == "吃吃吃"
+xpath "string(//link[contains(@href, '/_theme/')]/@href)" == "/_theme/2/c8553d.css"
+# The cartridge and the band take the colour from gizlet.toml.
+xpath "string(//span[contains(@class, 'rig-cart')]/@class)" contains "theme-c8553d"
+xpath "string(//section[contains(@class, 'gz-band')]/@class)" contains "theme-c8553d"
+xpath "string(//section[contains(@class, 'gz-band')]/@class)" contains "has-pattern"
+xpath "string(//link[contains(@href, '/_pattern/')]/@href)" == "/_pattern/github.com/fixture-org/overeaten/v0.1.0.css"
+xpath "string(//span[contains(@class, 'rig-cart')]//img/@src)" == "https://dl.gizlet.io/github.com/fixture-org/overeaten/v0.1.0/store/icon.png"
+xpath "count(//div[@class='gz-shots']//img)" == 4
+# What to enter on a device is the repository address, not a site URL.
+xpath "string(//div[contains(@class, 'gz-get')]//pre)" == "github.com/fixture-org/overeaten"
+xpath "string(//div[contains(@class, 'gz-get')]//button/@data-copy)" == "github.com/fixture-org/overeaten"
+# The about page is the zh-CN Markdown, rendered on the server.
+xpath "string(//div[@class='prose']/h3[1])" == "先买门票，再开吃"
+xpath "string(//div[@class='prose']//strong[1])" == "转转寿司"
+xpath "count(//ul[@class='gz-controls']/li)" == 6
+# The developer's links, in the store's order, on their own domains.
+xpath "count(//ul[@class='gz-links']/li)" == 4
+xpath "string(//ul[@class='gz-links']/li[1]//b)" == "网站"
+xpath "string(//ul[@class='gz-links']/li[2]/a/@href)" == "https://x.com/gizletio"
+xpath "string(//ul[@class='gz-links']/li[3]/a/@href)" == "https://discord.gg/gizlet"
+xpath "string(//ul[@class='gz-controls']/li[2])" contains "吃够得着的那盘"
+body contains "io.gizlet.overeaten-0.1.0-aarch64-unknown-linux-gnu-lite.gzl?sha256="
+body not contains "raw.githubusercontent.com"
+
+# The pattern tile, from dl, at 2x.
+GET {{base}}/_pattern/github.com/fixture-org/overeaten/v0.1.0.css
+x-gizlet-host: gizlet.io
+HTTP 200
+[Asserts]
+header "content-type" contains "text/css"
+body == ".gz-band.has-pattern { --pattern: image-set(url(\"https://dl.gizlet.io/github.com/fixture-org/overeaten/v0.1.0/store/pattern.png\") 2x); }\n"
+
+GET {{base}}/github.com/fixture-org/overeaten/v0.1.0/store/pattern.png
+x-gizlet-host: dl.gizlet.io
+HTTP 200
+[Asserts]
+header "content-type" == "image/png"
+
+# Only for the release the page shows, and only for a gizlet with a pattern.
+GET {{base}}/_pattern/github.com/fixture-org/overeaten/v0.0.9.css
+x-gizlet-host: gizlet.io
+HTTP 404
+
+GET {{base}}/_pattern/github.com/fixture-org/hello-gizlet/v0.2.0.css
+x-gizlet-host: gizlet.io
+HTTP 404
+
+GET {{base}}/_theme/2/2fa37a-c8553d.css
+x-gizlet-host: gizlet.io
+HTTP 200
+[Asserts]
+header "content-type" contains "text/css"
+header "cache-control" contains "immutable"
+body contains ".theme-c8553d { --c: #c8553d; --g: #c8553d; --g-on: #ffffff; }"
+body contains ".theme-2fa37a {"
+
+GET {{base}}/_theme/2/c8553d.css%7Bx
+x-gizlet-host: gizlet.io
+HTTP 404
+
+# An older version of the stylesheets is gone, not served stale.
+GET {{base}}/_theme/1/c8553d.css
+x-gizlet-host: gizlet.io
+HTTP 404
+
+# Explore links one stylesheet for the colours of the cartridges on it.
+GET {{base}}/explore
+x-gizlet-host: gizlet.io
+HTTP 200
+[Asserts]
+xpath "string(//link[contains(@href, '/_theme/')]/@href)" matches /^\/_theme\/2\/[0-9a-f-]+\.css$/
+xpath "count(//a[contains(@class, 'cart') and contains(@class, 'theme-c8553d')])" == 1
+
 GET {{base}}/github.com/fixture-org/no-index
 x-gizlet-host: gizlet.io
 HTTP 404
