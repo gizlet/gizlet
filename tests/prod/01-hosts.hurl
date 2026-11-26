@@ -14,10 +14,10 @@ HTTP 200
 [Asserts]
 header "content-security-policy" exists
 
-GET https://www.gizlet.io/github.com/gizlet/app-template
+GET https://www.gizlet.io/github.com/gizlet/gizlet
 HTTP 301
 [Asserts]
-header "Location" == "https://gizlet.io/github.com/gizlet/app-template"
+header "Location" == "https://gizlet.io/github.com/gizlet/gizlet"
 
 POST https://api.gizlet.io/v1/auth/device/code
 {"client_id": "gizlet-os"}
