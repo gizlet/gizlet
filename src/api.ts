@@ -190,7 +190,7 @@ api.get(`${GIZLET}/install`, async (c) => {
     if (pending) return apiError(c, 409, "not_ready", `${r.gizlet.name} is still being checked; try again in a minute`);
     return apiError(c, 404, "no_compatible_package", `${r.gizlet.name} has no package for ${target} (${tier})`);
   }
-  return c.json({ repo: r.gizlet.repo, id: r.gizlet.app_id, name: r.gizlet.name, kind: r.gizlet.kind, version: pkg.version, tag: pkg.tag, package: packageJson(c.env, pkg) }, 200, { "cache-control": "no-store" });
+  return c.json({ repo: r.gizlet.repo, id: r.gizlet.app_id, name: r.gizlet.name, kind: pkg.kind, version: pkg.version, tag: pkg.tag, package: packageJson(c.env, pkg) }, 200, { "cache-control": "no-store" });
 });
 
 api.get("/v1/resolve", (c) => {

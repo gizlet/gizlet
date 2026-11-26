@@ -168,6 +168,61 @@ HTTP 404
 [Asserts]
 jsonpath "$.error.code" == "failed_checks"
 
+# An install falls back to an older release of another kind; it reports that release's kind.
+GET {{base}}/v1/gizlets/github.com/fixture-org/turncoat
+x-gizlet-host: api.gizlet.io
+HTTP 200
+
+GET {{fixture}}/token?repo=fixture-org/turncoat&ref=refs/tags/v1.0.0
+HTTP 200
+[Captures]
+turncoat_token: jsonpath "$.value"
+
+POST {{base}}/v1/publish
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{turncoat_token}}
+{}
+HTTP 202
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/turncoat/releases/v1.0.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "ready"
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/turncoat/releases/v2.0.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "ready"
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/turncoat
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.kind" == "app"
+jsonpath "$.version" == "2.0.0"
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/turncoat/install?target=aarch64-unknown-linux-gnu&tier=lite
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.version" == "1.0.0"
+jsonpath "$.kind" == "service"
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/turncoat/install?target=x86_64-unknown-linux-gnu&tier=lite
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.version" == "2.0.0"
+jsonpath "$.kind" == "app"
+
 # Filtering by kind, alone and with search and category; a category is an app's.
 GET {{base}}/v1/gizlets?kind=app&limit=100
 x-gizlet-host: api.gizlet.io

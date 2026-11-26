@@ -203,16 +203,17 @@ export async function listReleases(env: Env, repo: string, limit = 50) {
 
 /**
  * The package to install on a device: newest ready release with a package for `target`
- * whose tier runs on `tier`, preferring the device's own tier.
+ * whose tier runs on `tier`, preferring the device's own tier. Its `kind` is that release's
+ * (an older release can differ from the newest), `app` for releases stored before kinds.
  */
 export async function pickInstall(env: Env, repo: string, target: string, tier: Tier) {
   const { results } = await env.DB.prepare(
-    `SELECT p.*, r.version AS version, r.published_at AS published_at FROM packages p
+    `SELECT p.*, r.version AS version, r.published_at AS published_at, coalesce(json_extract(r.spec_json, '$.kind'), 'app') AS kind FROM packages p
        JOIN releases r ON r.repo = p.repo AND r.tag = p.tag AND r.revision = p.revision
       WHERE p.repo = ? AND p.target = ? AND r.status = 'ready' AND p.sha256 IS NOT NULL`,
   )
     .bind(repo, target)
-    .all<PackageRow & { size: number; sha256: string; version: string; published_at: number }>();
+    .all<PackageRow & { size: number; sha256: string; version: string; published_at: number; kind: Kind }>();
   const compatible = results.filter((p) => tierRunsOn(p.tier, tier)).sort((a, b) => compareVersions(b.version, a.version) || b.published_at - a.published_at);
   if (!compatible.length) return null;
   const newest = compatible[0]!.tag;

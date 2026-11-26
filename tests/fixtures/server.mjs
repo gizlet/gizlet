@@ -299,6 +299,9 @@ addRelease("fixture-org/service-as-v1", "1.0.0", { kind: "service", manifest: { 
 addRelease("fixture-org/v2-no-kind", "1.0.0", { manifest: { schema: 2 }, targets: handheld });
 addRelease("fixture-org/v1-service-kind", "1.0.0", { manifest: { kind: "service" }, targets: handheld });
 addRelease("fixture-org/schema-3", "1.0.0", { manifest: { schema: 3, kind: "app" }, targets: handheld });
+// A service for handhelds that became an x86-64-only app: a handheld still installs the service.
+addRelease("fixture-org/turncoat", "1.0.0", { kind: "service", targets: handheld });
+addRelease("fixture-org/turncoat", "2.0.0", { targets: [["x86_64-unknown-linux-gnu", "lite"]] });
 addTag("fixture-org/no-index", "v1.0.0", new Map([["other.zip", Buffer.from("x")]]), new Map());
 // Visited by tests/hurl/07-index.hurl, which adds releases while it runs.
 addRelease("fixture-org/refresh-me", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
