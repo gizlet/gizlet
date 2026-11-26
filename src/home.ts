@@ -7,7 +7,7 @@ import { html, raw } from "hono/html";
 import { featured, summary } from "./db";
 import { handheld } from "./devices";
 import type { Env } from "./env";
-import { themeClass, themeLink } from "./theme";
+import { patternClasses, patternLink, themeClass, themeLink } from "./theme";
 import { heroTitle, localized, MESSAGES, rich, type Locale, type Messages } from "./i18n";
 
 /** Where share pages live. */
@@ -34,7 +34,7 @@ export function art(g: Summary, big = false) {
 }
 
 export function cart(g: Summary, t: Messages, lang: Locale) {
-  return html`<a class="cart ${shell(g)}" href="/${g.repo}">
+  return html`<a class="cart ${shell(g)}${patternClasses(g)}" href="/${g.repo}">
   <span class="grip" aria-hidden="true"></span>
   <span class="label">${art(g)}</span>
   <span class="name">${nameOf(g, lang)}</span>
@@ -62,8 +62,8 @@ export async function homePage(env: Env, lang: Locale, badUrl?: string) {
   const title = (s: (typeof all)[number]) => t.home.sections[s.id] ?? localized(s.titles, s.title, lang);
   const star = hero[0];
   const screen = star ? html`<span class="now">${art(star, true)}<b>${nameOf(star, lang)}</b></span>` : bootScreen;
-  const colors = [star, ...sections.flatMap((x) => x.gizlets.slice(0, 8))].map((g) => g?.color);
-  return html`${themeLink(colors)}<section class="stage">
+  const shown8 = [star, ...sections.flatMap((x) => x.gizlets.slice(0, 8))];
+  return html`${themeLink(shown8.map((g) => g?.color))}${patternLink(shown8)}<section class="stage">
   <div class="wrap stage-grid">
     <div class="copy">
       <p class="kicker">${t.home.stamp}</p>
@@ -82,7 +82,7 @@ export async function homePage(env: Env, lang: Locale, badUrl?: string) {
     </div>
     <div class="rig">
       ${star
-        ? html`<a class="rig-cart cart ${shell(star)}" href="/${star.repo}" tabindex="-1" aria-hidden="true"><span class="grip"></span><span class="label">${art(star)}</span></a>`
+        ? html`<a class="rig-cart cart ${shell(star)}${patternClasses(star)}" href="/${star.repo}" tabindex="-1" aria-hidden="true"><span class="grip"></span><span class="label">${art(star)}</span></a>`
         : html`<span class="rig-cart cart s1" aria-hidden="true"><span class="grip"></span><span class="label"><span class="pic p1"></span></span></span>`}
       ${handheld(screen, "body-sun", "big")}
       ${star ? html`<a class="caption" href="/${star.repo}">${t.home.featured(nameOf(star, lang))}</a>` : ""}

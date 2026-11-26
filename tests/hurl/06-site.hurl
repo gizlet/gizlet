@@ -57,7 +57,8 @@ xpath "string(//link[contains(@href, '/_theme/')]/@href)" == "/_theme/2/c8553d.c
 xpath "string(//span[contains(@class, 'rig-cart')]/@class)" contains "theme-c8553d"
 xpath "string(//section[contains(@class, 'gz-band')]/@class)" contains "theme-c8553d"
 xpath "string(//section[contains(@class, 'gz-band')]/@class)" contains "has-pattern"
-xpath "string(//link[contains(@href, '/_pattern/')]/@href)" == "/_pattern/github.com/fixture-org/overeaten/v0.1.0.css"
+xpath "string(//link[contains(@href, '/_patterns.css')]/@href)" == "/_patterns.css?r=github.com%2Ffixture-org%2Fovereaten"
+xpath "string(//span[contains(@class, 'rig-cart')]/@class)" contains "has-pattern"
 xpath "string(//span[contains(@class, 'rig-cart')]//img/@src)" == "https://dl.gizlet.io/github.com/fixture-org/overeaten/v0.1.0/store/icon.png"
 xpath "count(//div[@class='gz-shots']//img)" == 4
 # What to enter on a device is the repository address, not a site URL.
@@ -76,13 +77,13 @@ xpath "string(//ul[@class='gz-controls']/li[2])" contains "吃够得着的那盘
 body contains "io.gizlet.overeaten-0.1.0-aarch64-unknown-linux-gnu-lite.gzl?sha256="
 body not contains "raw.githubusercontent.com"
 
-# The pattern tile, from dl, at 2x.
-GET {{base}}/_pattern/github.com/fixture-org/overeaten/v0.1.0.css
+# Pattern tiles come from the registry, never from the request; repositories without one are left out.
+GET {{base}}/_patterns.css?r=github.com%2Ffixture-org%2Fovereaten&r=github.com%2Ffixture-org%2Fhello-gizlet&r=https%3A%2F%2Fevil.test
 x-gizlet-host: gizlet.io
 HTTP 200
 [Asserts]
 header "content-type" contains "text/css"
-body == ".gz-band.has-pattern { --pattern: image-set(url(\"https://dl.gizlet.io/github.com/fixture-org/overeaten/v0.1.0/store/pattern.png\") 2x); }\n"
+body matches /^\.pat-[0-9a-f]{8} \{ --pattern: image-set\(url\("https:\/\/dl\.gizlet\.io\/github\.com\/fixture-org\/overeaten\/v0\.1\.0\/store\/pattern\.png"\) 2x\); \}\n$/
 
 GET {{base}}/github.com/fixture-org/overeaten/v0.1.0/store/pattern.png
 x-gizlet-host: dl.gizlet.io
@@ -90,12 +91,7 @@ HTTP 200
 [Asserts]
 header "content-type" == "image/png"
 
-# Only for the release the page shows, and only for a gizlet with a pattern.
-GET {{base}}/_pattern/github.com/fixture-org/overeaten/v0.0.9.css
-x-gizlet-host: gizlet.io
-HTTP 404
-
-GET {{base}}/_pattern/github.com/fixture-org/hello-gizlet/v0.2.0.css
+GET {{base}}/_patterns.css
 x-gizlet-host: gizlet.io
 HTTP 404
 
@@ -124,6 +120,8 @@ HTTP 200
 [Asserts]
 xpath "string(//link[contains(@href, '/_theme/')]/@href)" matches /^\/_theme\/2\/[0-9a-f-]+\.css$/
 xpath "count(//a[contains(@class, 'cart') and contains(@class, 'theme-c8553d')])" == 1
+xpath "count(//a[contains(@class, 'cart') and contains(@class, 'has-pattern')])" == 1
+xpath "string(//link[contains(@href, '/_patterns.css')]/@href)" == "/_patterns.css?r=github.com%2Ffixture-org%2Fovereaten"
 
 GET {{base}}/github.com/fixture-org/no-index
 x-gizlet-host: gizlet.io

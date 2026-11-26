@@ -5,12 +5,12 @@
 import { Hono, type Context } from "hono";
 import { html, raw } from "hono/html";
 import type { HtmlEscapedString } from "hono/utils/html";
-import { dlUrl, getGizlet, gizletDetail } from "./db";
+import { dlUrl, gizletDetail } from "./db";
 import type { Env } from "./env";
 import { devicePage, devicesPage, flashScript } from "./devices";
 import { explorePage } from "./explore";
-import { gizletPage, patternCss, patternHref } from "./gizlet-page";
-import { THEME_FILE, THEME_VERSION, themeCss, themeHref } from "./theme";
+import { gizletPage } from "./gizlet-page";
+import { MAX_THEMES, patternHref, patternRule, THEME_FILE, THEME_VERSION, themeCss, themeHref } from "./theme";
 import { homePage } from "./home";
 import { DEFAULT_LOCALE, LOCALE_NAMES, LOCALES, localized, matchLocale, MESSAGES, requestLocale, rich, scriptMessages, type Locale, type Messages } from "./i18n";
 import { ensureGizlet } from "./registry";
@@ -213,17 +213,21 @@ site.get("/github.com/:owner/:repo", async (c) => {
   const d = await gizletDetail(c.env, g);
   const name = localized(d.names, d.name, lang);
   const href = themeHref([d.color]);
-  const styles = [href, d.pattern_url && d.tag ? patternHref(d.repo, d.tag) : null].filter((s): s is string => !!s);
+  const styles = [href, patternHref([d])].filter((s): s is string => !!s);
   return c.html(page(c, `${name} · Gizlet`, await gizletPage(c.env, g, d, lang), { wide: true, styles, script: "devices.js" }));
 });
 
-/** A gizlet's pattern tile, for the release its page shows; 404 once the page has moved on. */
-site.get("/_pattern/github.com/:owner/:repo/:file{.+\\.css}", async (c) => {
-  const r = repoRef(c.req.param("owner"), c.req.param("repo"));
-  const tag = c.req.param("file").slice(0, -4);
-  const g = r ? await getGizlet(c.env, r.key) : null;
-  if (!g || g.visibility === "blocked" || g.latest_tag !== tag || !g.pattern) return c.notFound();
-  return c.body(patternCss(dlUrl(c.env, g.repo, tag, g.pattern)), 200, { "content-type": "text/css; charset=utf-8", "cache-control": "public, max-age=3600" });
+/** Pattern tiles (gizlet.toml `pattern`) of the gizlets a page shows: ?r=github.com/<owner>/<repo>, repeated (src/theme.ts). */
+site.get("/_patterns.css", async (c) => {
+  const repos = [...new Set(c.req.queries("r") ?? [])].filter((r) => /^github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+$/.test(r)).slice(0, MAX_THEMES);
+  if (!repos.length) return c.notFound();
+  const { results } = await c.env.DB.prepare(
+    `SELECT repo, latest_tag, pattern FROM gizlets WHERE repo IN (${repos.map(() => "?").join(", ")}) AND visibility != 'blocked' AND pattern IS NOT NULL AND latest_tag IS NOT NULL`,
+  )
+    .bind(...repos)
+    .all<{ repo: string; latest_tag: string; pattern: string }>();
+  const css = results.map((g) => patternRule(g.repo, dlUrl(c.env, g.repo, g.latest_tag, g.pattern))).join("");
+  return c.body(css, 200, { "content-type": "text/css; charset=utf-8", "cache-control": "public, max-age=300" });
 });
 
 /** Gizlets' own colours (gizlet.toml `color`), as a stylesheet: the CSP allows no inline styles (src/theme.ts). */

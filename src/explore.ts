@@ -4,7 +4,7 @@ import { listGizlets, summary } from "./db";
 import type { Env } from "./env";
 import { cart } from "./home";
 import { MESSAGES, type Locale } from "./i18n";
-import { themeLink } from "./theme";
+import { patternLink, themeLink } from "./theme";
 
 const PAGE = 24;
 
@@ -26,7 +26,7 @@ export async function explorePage(env: Env, lang: Locale, query: { q?: string; c
   };
   const tab = (value: string | undefined, text: string) =>
     html`<a href="${href({ category: value })}"${value === category ? raw(' aria-current="page"') : ""}>${text}</a>`;
-  return html`${themeLink(gizlets.map((g) => g.color))}<section class="band">
+  return html`${themeLink(gizlets.map((g) => g.color))}${patternLink(gizlets)}<section class="band">
   <div class="wrap">
     <h1 class="display">${e.title}</h1>
     <p class="lede">${e.lede}</p>

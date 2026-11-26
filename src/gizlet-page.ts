@@ -12,7 +12,7 @@ import type { Env } from "./env";
 import { art, shell } from "./home";
 import { localized, MESSAGES, rich, type Locale, type Messages } from "./i18n";
 import { renderMarkdown } from "./markdown";
-import { themeClass } from "./theme";
+import { patternClasses, themeClass } from "./theme";
 import { artKey } from "./mirror";
 import { BUTTONS, LINK_KINDS, type Control } from "./schema";
 
@@ -59,7 +59,7 @@ export async function gizletPage(env: Env, g: GizletRow, d: Detail, lang: Locale
   const theme = themeClass(d.color) ? ` ${themeClass(d.color)}` : "";
   const screen = d.screenshots[0] ? html`<img class="shot" src="${d.screenshots[0]}" alt="">` : html`<span class="now">${art(d, true)}</span>`;
 
-  return html`<section class="band gz-band${theme}${d.pattern_url ? " has-pattern" : ""}">
+  return html`<section class="band gz-band${theme}${patternClasses(d)}">
   <div class="wrap gz-hero">
     <div class="copy">
       <a class="back" href="/explore">← ${t.explore.title}</a>
@@ -74,7 +74,7 @@ export async function gizletPage(env: Env, g: GizletRow, d: Detail, lang: Locale
       <p class="gz-facts">${d.version ? html`<span>${s.version(d.version)}</span>` : ""}${d.license ? html`<span>${d.license}</span>` : ""}<span>${updated}</span></p>
     </div>
     <div class="rig gz-rig">
-      <span class="cart rig-cart ${shell(d)}" aria-hidden="true"><span class="grip"></span><span class="label">${art(d)}</span></span>
+      <span class="cart rig-cart ${shell(d)}${patternClasses(d)}" aria-hidden="true"><span class="grip"></span><span class="label">${art(d)}</span></span>
       ${handheld(screen, "body-smoke", "big")}
     </div>
   </div>
@@ -132,9 +132,3 @@ ${d.screenshots.length
 </div>
 </div>`;
 }
-
-/** The stylesheet for a gizlet page's pattern (gizlet.toml `pattern`); the CSP allows no inline styles. */
-export const patternHref = (repo: string, tag: string) => `/_pattern/${repo}/${encodeURIComponent(tag)}.css`;
-
-/** `--pattern` for the band: the tile at 2x, so a 256 px tile repeats every 128 CSS pixels and stays sharp. */
-export const patternCss = (url: string) => `.gz-band.has-pattern { --pattern: image-set(url(${JSON.stringify(url)}) 2x); }\n`;

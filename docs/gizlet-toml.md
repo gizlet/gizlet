@@ -67,7 +67,7 @@ entry = "bin/overeaten"
 | `runtime` | no | The Gizlet runtime a dynamically linked entry needs; `1`, the only one today, if left out |
 | `icon` | no | Repository path of a square PNG, JPEG or WebP, at least 256×256. Without one the gizlet stays unlisted |
 | `cover` | no | Repository path of a 16:9 image, at least 1280×720: the top of the store page |
-| `pattern` | no | Repository path of a PNG or WebP tile, repeated across the top of the gizlet's page over `color`. It is drawn at half its pixel size, so a 256×256 tile repeats every 128 CSS pixels. Keep it small (up to 512×512, a few tens of KB) and faint: text sits on the left, over a scrim |
+| `pattern` | no | Repository path of a square PNG or WebP tile with transparency, 512×512, repeated over `color` across the top of the gizlet's page (every 256 CSS pixels) and on its cartridge's shell (every 128). Keep it faint and light (a few tens of KB): the page's text sits on the left, over a scrim |
 | `screenshots` | no | Up to 8 repository paths of 4:3 images, 640×480 or 1280×960 (the handheld's screen, or twice it) |
 | `[names]`, `[descriptions]` | no | `name` and `description` per language tag (`zh-CN`, `ja`, ...) |
 | `[links]` | no | The developer's site and accounts, shown on the gizlet's page: `website`, `x`, `bluesky`, `mastodon`, `youtube`, `twitch`, `discord`, `bilibili`, `weibo`, `xiaohongshu`, `itch`, `steam`, `patreon`, `kofi`, `afdian`. Each is an `https://` URL of at most 300 characters; except for `website` and `mastodon`, it must be on that service's own domain (`x` on x.com or twitter.com, `discord` on discord.gg or discord.com, ...) |

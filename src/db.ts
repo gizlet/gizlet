@@ -96,6 +96,7 @@ export function summary(env: Env, g: GizletRow) {
     license: g.license,
     icon_url: g.icon && g.latest_tag ? dlUrl(env, g.repo, g.latest_tag, g.icon) : null,
     cover_url: g.cover && g.latest_tag ? dlUrl(env, g.repo, g.latest_tag, g.cover) : null,
+    pattern_url: g.pattern && g.latest_tag ? dlUrl(env, g.repo, g.latest_tag, g.pattern) : null,
     version: g.version,
     tag: g.latest_tag,
     updated_at: new Date(g.updated_at).toISOString(),
@@ -143,7 +144,6 @@ export async function gizletDetail(env: Env, g: GizletRow) {
     about_urls: tag ? Object.fromEntries(Object.entries(parse<Record<string, string>>(g.about, {})).map(([k, f]) => [k, dlUrl(env, g.repo, tag, f)])) : {},
     controls: parse<Control[]>(g.controls, []),
     links: parse<Record<string, string>>(g.links, {}),
-    pattern_url: tag && g.pattern ? dlUrl(env, g.repo, tag, g.pattern) : null,
     readme_url: tag ? `${env.GITHUB_RAW}/${g.owner}/${g.name_repo}/${tag}/README.md` : null,
     packages: packages.map((p) => packageJson(env, p)),
   };

@@ -44,3 +44,33 @@ export function themeCss(hexes: string[]): string {
     })
     .join("");
 }
+
+/**
+ * Pattern tiles (gizlet.toml `pattern`) for cartridge shells and a gizlet's page band. One
+ * stylesheet per page, /_patterns.css?r=<repo>&r=..., looks each repository's tile up, so the
+ * URLs come from the registry and never from the request.
+ */
+const fnv = (s: string) => {
+  let h = 0x811c9dc5;
+  for (const ch of s) h = Math.imul(h ^ ch.charCodeAt(0), 0x01000193) >>> 0;
+  return h.toString(16).padStart(8, "0");
+};
+
+/** The class that sets `--pattern` for a repository's tile. */
+export const patternClass = (repo: string) => `pat-${fnv(repo)}`;
+
+/** Classes for an element showing a gizlet's pattern, or "" without one. */
+export const patternClasses = (g: { repo: string; pattern_url?: string | null }) => (g.pattern_url ? ` has-pattern ${patternClass(g.repo)}` : "");
+
+export function patternHref(gizlets: ({ repo: string; pattern_url?: string | null } | null | undefined)[]): string | null {
+  const repos = [...new Set(gizlets.filter((g) => g?.pattern_url).map((g) => g!.repo))].sort().slice(0, MAX_THEMES);
+  return repos.length ? `/_patterns.css?${repos.map((r) => `r=${encodeURIComponent(r)}`).join("&")}` : null;
+}
+
+export function patternLink(gizlets: ({ repo: string; pattern_url?: string | null } | null | undefined)[]) {
+  const href = patternHref(gizlets);
+  return href ? html`<link rel="stylesheet" href="${href}">` : "";
+}
+
+/** `--pattern`: the tile at 2x, so a 512 px tile repeats every 256 CSS pixels and stays sharp. */
+export const patternRule = (repo: string, url: string) => `.${patternClass(repo)} { --pattern: image-set(url(${JSON.stringify(url)}) 2x); }\n`;

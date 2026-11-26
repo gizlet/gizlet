@@ -95,6 +95,8 @@ footer .langs a[aria-current] { color: var(--ink); font-weight: 700; }
   background: linear-gradient(180deg, color-mix(in srgb, var(--c), #fff 32%) 0, var(--c) 34%, color-mix(in srgb, var(--c), #000 7%) 100%);
   border: 2px solid var(--ink); border-radius: 16px 16px 10px 10px;
   box-shadow: inset 0 2px 0 #ffffff80, 0 16px 26px -18px #101114a0; transition: transform .18s, box-shadow .18s; }
+/* A cartridge with the gizlet's pattern (src/theme.ts): the tile over the shell, at half the page band's scale. */
+.cart.has-pattern { background-image: var(--pattern), linear-gradient(180deg, color-mix(in srgb, var(--c), #fff 32%) 0, var(--c) 34%, color-mix(in srgb, var(--c), #000 7%) 100%); background-size: 128px 128px, auto; background-repeat: repeat, no-repeat; }
 a.cart:hover { transform: translateY(-6px) rotate(-1.2deg); box-shadow: inset 0 2px 0 #ffffff80, 0 26px 34px -20px #101114b0; }
 .cart .grip { position: absolute; top: 9px; left: 24%; right: 24%; height: 10px; border-radius: 3px; background: repeating-linear-gradient(90deg, color-mix(in srgb, var(--c), #000 30%) 0 2px, transparent 2px 6px); }
 .cart .label { display: block; overflow: hidden; aspect-ratio: 1; background: #fff; border: 2px solid var(--ink); border-radius: 8px; }
@@ -327,7 +329,7 @@ a.hh-name:hover b { text-decoration: underline; }
 /* A gizlet's page. --g is its colour from gizlet.toml (src/theme.ts), cobalt without one. The band
    is a deep shade of it, so the cartridge in the full colour stands out and white text always reads. */
 .gz-band { --g: var(--cobalt); color: #fff; background: color-mix(in srgb, var(--g) 42%, #101114); }
-.gz-band.has-pattern { background-image: linear-gradient(90deg, var(--scrim) 0 38%, transparent 78%), var(--pattern); background-repeat: no-repeat, repeat; }
+.gz-band.has-pattern { background-image: linear-gradient(90deg, var(--scrim) 0 38%, transparent 78%), var(--pattern); background-size: auto, 256px 256px; background-repeat: no-repeat, repeat; }
 .gz-band { --scrim: color-mix(in srgb, var(--g) 42%, #101114); }
 .gz-band .back, .gz-band .lede { color: #ffffffd1; }
 .gz-band .back:hover { color: #fff; }
@@ -426,7 +428,7 @@ form.signing-up .signup { display: grid; }
 .lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 12px; box-shadow: 0 30px 60px -20px #000; cursor: default; }
 html:has(.lightbox[open]) { overflow: hidden; }
 .gz-body { grid-template-columns: minmax(0, 1fr); }
-  .gz-band.has-pattern { background-image: linear-gradient(color-mix(in srgb, var(--scrim) 82%, transparent), color-mix(in srgb, var(--scrim) 82%, transparent)), var(--pattern); }
+  .gz-band.has-pattern { background-image: linear-gradient(color-mix(in srgb, var(--scrim) 82%, transparent), color-mix(in srgb, var(--scrim) 82%, transparent)), var(--pattern); background-size: auto, 256px 256px; }
   .gz-side { margin-top: 8px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
   .rig { margin-top: 8px; }
   .scenes { grid-template-columns: minmax(0, 1fr); max-width: 560px; }
