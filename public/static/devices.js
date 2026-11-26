@@ -18,8 +18,33 @@ if (input && table) {
   });
 }
 
+// The want a sign-in from the dialog is for. localStorage, since the email link of a sign-up opens in
+// another tab; kept as long as that link works.
+const PENDING_WANT = "gizlet.want";
+const PENDING_FOR = 24 * 60 * 60 * 1000;
+
+function rememberWant(id) {
+  try {
+    localStorage.setItem(PENDING_WANT, JSON.stringify({ id, at: Date.now() }));
+  } catch {
+    // No storage: after signing in, the user presses the button again.
+  }
+}
+
+/** The want this browser was signing in for, if it is `id`; forgotten either way. */
+function takePendingWant(id) {
+  try {
+    const p = JSON.parse(localStorage.getItem(PENDING_WANT) ?? "null");
+    localStorage.removeItem(PENDING_WANT);
+    return p?.id === id && Date.now() - p.at < PENDING_FOR;
+  } catch {
+    return false;
+  }
+}
+
 // "I want it" on a handheld we do not support yet: a want on the signed-in account (/v1/me/wants).
-// Signed out, a dialog offers to sign in; that comes back here with ?want=<id>, which records the want.
+// Signed out, a dialog offers to sign in; that comes back here with ?want=<id>, which records the want
+// only if this browser started that sign-in from the dialog, so a link alone never records one.
 const wantButtons = [...document.querySelectorAll("button.want[data-device]")];
 if (wantButtons.length) setUpWants(wantButtons);
 
@@ -27,8 +52,9 @@ function setUpWants(buttons) {
   const say = (text) => (document.querySelector("#want-message").textContent = text);
   const dialog = document.querySelector("#want-signin");
   const params = new URLSearchParams(location.search);
-  const pending = params.get("want");
-  if (pending !== null) {
+  const asked = params.get("want");
+  const pending = asked !== null && takePendingWant(asked) ? asked : null;
+  if (asked !== null) {
     params.delete("want");
     history.replaceState(history.state, "", `${location.pathname}${params.size ? `?${params}` : ""}${location.hash}`);
   }
@@ -44,10 +70,12 @@ function setUpWants(buttons) {
   const askToSignIn = (b) => {
     const back = new URLSearchParams(location.search);
     back.set("want", b.dataset.device);
+    dialog.dataset.device = b.dataset.device;
     dialog.querySelector("a").href = `/login?next=${encodeURIComponent(`${location.pathname}?${back}#handhelds`)}`;
     dialog.querySelector("h2").textContent = fmt(t.wantSignIn, { name: b.dataset.name });
     dialog.showModal();
   };
+  dialog.querySelector("a").addEventListener("click", () => rememberWant(dialog.dataset.device));
   dialog.addEventListener("click", (e) => {
     if (e.target === dialog) dialog.close();
   });
