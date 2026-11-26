@@ -61,6 +61,9 @@ function page(c: C, title: string, body: HtmlEscapedString | Promise<HtmlEscaped
 <title>${title}</title>
 <meta name="description" content="${t.meta.description}">
 <meta name="theme-color" content="#eceef1">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 ${lang === "en" ? raw('<link rel="preload" href="/static/fonts/schibsted-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin>') : ""}
 ${LOCALES.map((l) => html`<link rel="alternate" hreflang="${l}" href="${here}?lang=${l}">\n`)}<link rel="alternate" hreflang="x-default" href="${here}">
 <link rel="stylesheet" href="/static/site.css">

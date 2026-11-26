@@ -52,6 +52,26 @@ HTTP 200
 [Asserts]
 body contains "/device/"
 
+# The icon: linked from every page, and /favicon.ico for clients that ask for it unlinked.
+GET {{base}}/
+x-gizlet-host: gizlet.io
+HTTP 200
+[Asserts]
+body contains "href=\"/static/icon.svg\""
+body contains "href=\"/static/apple-touch-icon.png\""
+
+GET {{base}}/favicon.ico
+x-gizlet-host: gizlet.io
+HTTP 200
+[Asserts]
+header "content-type" contains "icon"
+bytes count == 2272
+
+GET {{base}}/static/icon.svg
+HTTP 200
+[Asserts]
+header "content-type" contains "image/svg+xml"
+
 # www redirects to gizlet.io, keeping the path and query.
 GET {{base}}/github.com/fixture-org/hello-gizlet?x=1
 x-gizlet-host: www.gizlet.io
