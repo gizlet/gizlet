@@ -27,6 +27,8 @@ export interface AuthEnv {
   /** Cloudflare Email Sending, from MAIL_FROM. */
   MAIL?: SendEmail;
   MAIL_FROM: string;
+  /** Mirror domains (mirror/), comma-separated: "gizlet.xyz,gizlet.example". Mail links follow them. */
+  MIRROR_ORIGINS?: string;
   /** "1" for local runs (pnpm dev, tests): account emails are logged and kept in devOutbox instead of sent. */
   DEV_HOST_OVERRIDE?: string;
 }
@@ -71,6 +73,29 @@ async function sendMail(env: AuthEnv, mail: Mail): Promise<void> {
 /** Account emails in the language of the request that caused them. */
 const mailText = (request: Request | undefined) => MESSAGES[requestLocale(request?.headers)].mail;
 
+/** MIRROR_ORIGINS as bare lowercase domains; "https://" and trailing slashes are allowed there. */
+export function mirrorDomains(env: Pick<AuthEnv, "MIRROR_ORIGINS">): string[] {
+  return (env.MIRROR_ORIGINS ?? "")
+    .split(/[,\s]+/)
+    .map((d) => d.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, ""))
+    .filter(Boolean);
+}
+
+/**
+ * The origin mailed links should use: the mirror a request came through, else the site. The
+ * mirror's nginx sends its host as X-Forwarded-Host. Anyone can send that header to gizlet.io,
+ * so only listed mirrors count: links (with sign-in and reset tokens) never go to other hosts.
+ */
+export function linkOrigin(env: Pick<AuthEnv, "SITE_ORIGIN" | "MIRROR_ORIGINS">, request: Request | undefined): string {
+  const host = request?.headers.get("x-forwarded-host")?.split(",")[0]?.trim().toLowerCase();
+  if (host) for (const d of mirrorDomains(env)) if (host === d || host === `api.${d}` || host === `www.${d}`) return `https://${d}`;
+  return env.SITE_ORIGIN;
+}
+
+/** A link Better Auth built on SITE_ORIGIN, moved to the request's mirror (see linkOrigin). */
+const mailLink = (env: AuthEnv, url: string, request: Request | undefined) =>
+  url.startsWith(`${env.SITE_ORIGIN}/`) ? linkOrigin(env, request) + url.slice(env.SITE_ORIGIN.length) : url;
+
 /** Keep the user's GitHub login current; it ties the account to the gizlets in their repositories. */
 async function syncGithubLogin(env: AuthEnv, pool: Pool, account: { providerId: string; userId: string; accessToken?: string | null }): Promise<void> {
   if (account.providerId !== "github" || !account.accessToken) return;
@@ -101,13 +126,13 @@ export function authOptions(env: AuthEnv, pool: Pool): BetterAuthOptions {
       revokeSessionsOnPasswordReset: true,
       onExistingUserSignUp: async ({ user }, request) => {
         const t = mailText(request);
-        await sendMail(env, { to: user.email, subject: t.existingSubject, text: t.existingText(`${env.SITE_ORIGIN}/login`) });
+        await sendMail(env, { to: user.email, subject: t.existingSubject, text: t.existingText(`${linkOrigin(env, request)}/login`) });
       },
       // Without it, Better Auth answers password-reset requests with an error instead.
       sendResetPassword: canSendMail(env)
         ? async ({ user, url }, request) => {
             const t = mailText(request);
-            await sendMail(env, { to: user.email, subject: t.resetSubject, text: t.resetText(url) });
+            await sendMail(env, { to: user.email, subject: t.resetSubject, text: t.resetText(mailLink(env, url, request)) });
           }
         : undefined,
       // The reset link went to the address, so it is confirmed too.
@@ -123,7 +148,7 @@ export function authOptions(env: AuthEnv, pool: Pool): BetterAuthOptions {
       sendVerificationEmail: canSendMail(env)
         ? async ({ user, url }, request) => {
             const t = mailText(request);
-            await sendMail(env, { to: user.email, subject: t.verifySubject, text: t.verifyText(url) });
+            await sendMail(env, { to: user.email, subject: t.verifySubject, text: t.verifyText(mailLink(env, url, request)) });
           }
         : undefined,
     },
