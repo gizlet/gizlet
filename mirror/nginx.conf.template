@@ -131,6 +131,10 @@ server {
     sub_filter_types application/json text/javascript application/javascript text/css text/plain;
     sub_filter_once off;
     sub_filter_last_modified on;
+    # The OIDC audience in the publishing example stays: the Worker only accepts tokens for
+    # https://api.@ORIGIN@ (OIDC_AUDIENCE), whichever host they are posted to. The earlier
+    # match wins, so this keeps the URL after "audience=" from being rewritten.
+    sub_filter "audience=https://api.@ORIGIN@" "audience=https://api.@ORIGIN@";
     sub_filter "https://api.@ORIGIN@" "https://api.@MIRROR@";
     sub_filter "https://dl.@ORIGIN@"  "https://dl.@MIRROR@";
     sub_filter "https://@ORIGIN@"     "https://@MIRROR@";

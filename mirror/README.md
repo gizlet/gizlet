@@ -11,7 +11,7 @@ An nginx reverse proxy that serves all of Gizlet under another domain, such as `
 
 The proxy rewrites what names `gizlet.io` so that clients stay on the mirror:
 
-- Absolute URLs (`https://gizlet.io`, `https://api.gizlet.io`, `https://dl.gizlet.io`) in HTML, JSON, scripts and stylesheets: `share_url`, `api_url`, package URLs, `status_url`, `verification_uri` and page links. Bare hostnames in text (`gizlet.io/github.com/...`) are left as is.
+- Absolute URLs (`https://gizlet.io`, `https://api.gizlet.io`, `https://dl.gizlet.io`) in HTML, JSON, scripts and stylesheets: `share_url`, `api_url`, package URLs, `status_url`, `verification_uri` and page links. Bare hostnames in text (`gizlet.io/github.com/...`) are left as is. So is the OIDC audience in the publishing example (`audience=https://api.gizlet.io`), because the Worker only accepts tokens for that audience, even when they are posted to `api.gizlet.xyz`.
 - `Location` headers, the `Domain` of cookies, `Access-Control-Allow-Origin` on account routes, and the download host in `Content-Security-Policy`.
 - Requests: `Origin` and `Referer` from the mirror are sent upstream as the `gizlet.io` origins they stand for, so Better Auth and the account CORS policy accept them.
 

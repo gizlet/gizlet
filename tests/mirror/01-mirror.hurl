@@ -24,7 +24,10 @@ header "Content-Security-Policy" not contains "{{origin}}"
 body contains "https://api.{{mirror}}/v1"
 body contains "https://{{mirror}}/?lang=ja"
 body not contains "https://{{origin}}"
-body not contains "https://api.{{origin}}"
+# The publishing example posts to the mirror with a token for the Worker's OIDC audience.
+body contains "https://api.{{mirror}}/v1/publish"
+body contains "audience=https://api.{{origin}}\""
+body replace "audience=https://api.{{origin}}" "" not contains "https://api.{{origin}}"
 
 GET https://{{mirror}}/static/site.css
 HTTP 200
