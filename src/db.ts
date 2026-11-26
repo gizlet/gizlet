@@ -1,5 +1,5 @@
 import type { Env } from "./env";
-import { compareVersions, tierRunsOn, type Control, type Tier } from "./schema";
+import { compareVersions, tierRunsOn, type Control, type Kind, type Tier } from "./schema";
 import { ratingAverage } from "./score";
 
 export type Visibility = "unlisted" | "listed" | "blocked";
@@ -15,6 +15,8 @@ export interface GizletRow {
   names: string;
   description: string | null;
   descriptions: string;
+  kind: Kind;
+  /** game or app; meaningless for a service. */
   category: string;
   tags: string;
   color: string | null;
@@ -111,7 +113,9 @@ export function summary(env: Env, g: GizletRow) {
     names: parse<Record<string, string>>(g.names, {}),
     description: g.description,
     descriptions: parse<Record<string, string>>(g.descriptions, {}),
-    category: g.category,
+    kind: g.kind,
+    /** How an app is presented: game or app. Services have none. */
+    category: g.kind === "service" ? null : g.category,
     tags: parse<string[]>(g.tags, []),
     color: g.color,
     license: g.license,
@@ -199,16 +203,17 @@ export async function listReleases(env: Env, repo: string, limit = 50) {
 
 /**
  * The package to install on a device: newest ready release with a package for `target`
- * whose tier runs on `tier`, preferring the device's own tier.
+ * whose tier runs on `tier`, preferring the device's own tier. Its `kind` is that release's
+ * (an older release can differ from the newest), `app` for releases stored before kinds.
  */
 export async function pickInstall(env: Env, repo: string, target: string, tier: Tier) {
   const { results } = await env.DB.prepare(
-    `SELECT p.*, r.version AS version, r.published_at AS published_at FROM packages p
+    `SELECT p.*, r.version AS version, r.published_at AS published_at, coalesce(json_extract(r.spec_json, '$.kind'), 'app') AS kind FROM packages p
        JOIN releases r ON r.repo = p.repo AND r.tag = p.tag AND r.revision = p.revision
       WHERE p.repo = ? AND p.target = ? AND r.status = 'ready' AND p.sha256 IS NOT NULL`,
   )
     .bind(repo, target)
-    .all<PackageRow & { size: number; sha256: string; version: string; published_at: number }>();
+    .all<PackageRow & { size: number; sha256: string; version: string; published_at: number; kind: Kind }>();
   const compatible = results.filter((p) => tierRunsOn(p.tier, tier)).sort((a, b) => compareVersions(b.version, a.version) || b.published_at - a.published_at);
   if (!compatible.length) return null;
   const newest = compatible[0]!.tag;
@@ -218,6 +223,8 @@ export async function pickInstall(env: Env, repo: string, target: string, tier: 
 
 export interface ListQuery {
   q?: string;
+  kind?: Kind;
+  /** game or app; only apps have one. */
   category?: string;
   target?: string;
   tier?: string;
@@ -240,9 +247,17 @@ const ORDER: Record<ListSort, string> = {
   downloads: "downloads DESC, updated_at DESC, repo",
 };
 
+/**
+ * What public lists (search, Explore, featured) show of the gizlets table `g`: approved gizlets
+ * whose shown release passed its checks. An approval outlives releases, so a gizlet whose only
+ * ready release is being indexed again drops out of the lists until it is ready again.
+ */
+export const publicListed = (g: string) =>
+  `${g}.visibility = 'listed' AND ${g}.latest_tag IS NOT NULL AND EXISTS (SELECT 1 FROM releases lr WHERE lr.repo = ${g}.repo AND lr.tag = ${g}.latest_tag AND lr.status = 'ready')`;
+
 /** Search: listed gizlets only, unless `all` (never blocked ones). */
 export async function listGizlets(env: Env, query: ListQuery): Promise<GizletRow[]> {
-  const where = [query.all ? "visibility != 'blocked'" : "visibility = 'listed'", "latest_tag IS NOT NULL"];
+  const where = [query.all ? "visibility != 'blocked' AND latest_tag IS NOT NULL" : publicListed("gizlets")];
   const binds: unknown[] = [];
   const bind = (v: unknown) => {
     binds.push(v);
@@ -253,7 +268,8 @@ export async function listGizlets(env: Env, query: ListQuery): Promise<GizletRow
     const cols = ["lower(name)", "lower(names)", "lower(coalesce(description,''))", "lower(descriptions)", "tags", "repo"];
     where.push(`(${cols.map((c) => `${c} LIKE ${p} ESCAPE '\\'`).join(" OR ")})`);
   }
-  if (query.category) where.push(`category = ${bind(query.category)}`);
+  if (query.kind) where.push(`kind = ${bind(query.kind)}`);
+  if (query.category) where.push(`kind = 'app' AND category = ${bind(query.category)}`);
   if (query.owner) where.push(`owner = ${bind(query.owner)} COLLATE NOCASE`);
   if (query.mark) where.push(`EXISTS (SELECT 1 FROM json_each(gizlets.marks) WHERE value = ${bind(query.mark)})`);
   if (query.target) where.push(`EXISTS (SELECT 1 FROM json_each(gizlets.targets) WHERE value = ${bind(query.target)})`);
@@ -274,7 +290,7 @@ interface CollectionRow {
 
 /** Home lists: hand-picked collections plus automatic sections, all of listed gizlets. */
 export async function featured(env: Env) {
-  const listed = "g.visibility = 'listed' AND g.latest_tag IS NOT NULL";
+  const listed = publicListed("g");
   const [{ results: cols }, { results: items }, { results: recent }, { results: popular }] = (await env.DB.batch([
     env.DB.prepare("SELECT * FROM collections ORDER BY position, id"),
     env.DB.prepare(`SELECT ci.collection_id AS collection_id, g.* FROM collection_items ci JOIN gizlets g ON g.repo = ci.repo WHERE ${listed} ORDER BY ci.collection_id, ci.position`),
@@ -293,8 +309,9 @@ export async function featured(env: Env) {
   const sections = [
     ...curated.filter((c) => c.layout !== "hero"),
     section("new", "New & updated", { "zh-CN": "最新上架与更新" }, "row", recent.slice(0, 12)),
-    section("games", "Games", { "zh-CN": "游戏" }, "grid", recent.filter((g) => g.category === "game")),
-    section("apps", "Apps & tools", { "zh-CN": "应用与工具" }, "grid", recent.filter((g) => g.category === "app")),
+    section("games", "Games", { "zh-CN": "游戏" }, "grid", recent.filter((g) => g.kind === "app" && g.category === "game")),
+    section("apps", "Apps & tools", { "zh-CN": "应用与工具" }, "grid", recent.filter((g) => g.kind === "app" && g.category === "app")),
+    section("services", "Services", { "zh-CN": "服务" }, "grid", recent.filter((g) => g.kind === "service")),
     section("popular", "Most downloaded", { "zh-CN": "下载最多" }, "row", popular),
   ].filter((s) => s.gizlets.length > 0);
   return { hero: hero.length ? hero : recent.slice(0, 3).map((g) => summary(env, g)), sections };

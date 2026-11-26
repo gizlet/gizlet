@@ -4,6 +4,7 @@
  * served, not even by link. Warnings keep the gizlet out of search and featured lists.
  */
 import type { Env } from "./env";
+import type { Kind } from "./schema";
 
 export interface Findings {
   errors: string[];
@@ -15,6 +16,7 @@ export interface Expected {
   id: string;
   name: string;
   version: string;
+  kind: Kind;
   runtime: number;
   target: string;
   tier: string;
@@ -252,11 +254,36 @@ export function parseManifest(text: string): Record<string, unknown> {
   return doc as Record<string, unknown>;
 }
 
-/** How a manifest differs from what gizlet.toml says it holds (`runtime` defaults to 1, as on the device). */
+/**
+ * The kind a package's manifest.json declares: schema 1 (or no `schema`) is always an app, and
+ * schema 2 names `app` or `service` in `kind`. A string says why the manifest is not supported.
+ */
+export function manifestKind(manifest: Record<string, unknown>): Kind | { problem: string } {
+  const schema = manifest.schema ?? 1;
+  if (schema === 1) {
+    if (manifest.kind !== undefined && manifest.kind !== "app") return { problem: `manifest.json schema 1 is always an app, but it has kind ${JSON.stringify(manifest.kind)}; use schema 2` };
+    return "app";
+  }
+  if (schema === 2) {
+    if (manifest.kind === undefined) return { problem: "manifest.json schema 2 must name its kind (app or service)" };
+    if (manifest.kind !== "app" && manifest.kind !== "service") return { problem: `manifest.json has kind ${JSON.stringify(manifest.kind)}, not app or service` };
+    return manifest.kind as Kind;
+  }
+  return { problem: `manifest.json has schema ${JSON.stringify(schema)}; only 1 and 2 are supported` };
+}
+
+/**
+ * How a manifest differs from what gizlet.toml says it holds (`runtime` defaults to 1, as on the
+ * device). Its kind follows its schema: 1 (or none) is an app, 2 names it.
+ */
 export function manifestMismatches(manifest: Record<string, unknown>, expected: Expected): string[] {
-  return EXPECTED_KEYS.filter((k) => (k === "runtime" ? (manifest.runtime ?? 1) : manifest[k]) !== expected[k]).map(
+  const kind = manifestKind(manifest);
+  if (typeof kind !== "string") return [kind.problem];
+  const out = EXPECTED_KEYS.filter((k) => (k === "runtime" ? (manifest.runtime ?? 1) : manifest[k]) !== expected[k]).map(
     (k) => `manifest.json has ${k} ${JSON.stringify(manifest[k] ?? null)}, gizlet.toml says ${JSON.stringify(expected[k])}`,
   );
+  if (kind !== expected.kind) out.push(`manifest.json is ${kind === "app" ? "an app" : "a service"}, gizlet.toml says kind ${JSON.stringify(expected.kind)}`);
+  return out;
 }
 
 /**

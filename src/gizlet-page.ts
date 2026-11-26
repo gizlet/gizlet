@@ -51,7 +51,7 @@ export async function gizletPage(env: Env, g: GizletRow, d: Detail, lang: Locale
   // What to type on a device: the repository address. The launcher's GitHub source fills in github.com/.
   const [source, path] = [d.repo.slice(0, d.repo.indexOf("/")), d.repo.slice(d.repo.indexOf("/") + 1)];
   const updated = new Intl.DateTimeFormat(lang, { dateStyle: "medium" }).format(new Date(d.updated_at));
-  const category = t.home.category[d.category ?? ""] ?? t.home.category.app;
+  const category = t.home.category[d.category ?? d.kind] ?? t.home.category.app;
   const links = LINK_KINDS.filter((k) => d.links[k.key]).map((k) => {
     const url = new URL(d.links[k.key]!);
     return { key: k.key, name: k.name, url: url.href, shown: `${url.hostname.replace(/^www\./, "")}${url.pathname === "/" ? "" : url.pathname}`.replace(/\/$/, "") };

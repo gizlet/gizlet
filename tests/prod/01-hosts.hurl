@@ -33,5 +33,24 @@ HTTP 200
 [Asserts]
 jsonpath "$.gizlets" exists
 
+# Kinds: every gizlet has one, and the list filters by it.
+GET https://api.gizlet.io/v1/gizlets?kind=app&limit=100
+HTTP 200
+[Asserts]
+jsonpath "$.gizlets[?(@.kind != 'app')]" not exists
+
+GET https://api.gizlet.io/v1/gizlets?kind=service
+HTTP 200
+[Asserts]
+jsonpath "$.gizlets" exists
+
+GET https://api.gizlet.io/v1/gizlets?kind=rom
+HTTP 400
+
+GET https://gizlet.io/explore?kind=service&lang=en
+HTTP 200
+[Asserts]
+xpath "string(//nav[@aria-label='Kind']/a[@aria-current='page'])" == "Services"
+
 GET https://api.gizlet.io/v1/me/ratings
 HTTP 401

@@ -39,7 +39,7 @@ export function cart(g: Summary, t: Messages, lang: Locale) {
   <span class="label">${art(g)}</span>
   <span class="name">${nameOf(g, lang)}</span>
   <span class="repo">${g.repo.replace(/^github\.com\//, "")}</span>
-  <span class="meta"><span>${t.home.category[g.category ?? ""] ?? t.home.category.app}</span>${g.version ? html`<span>v${g.version}</span>` : ""}</span>
+  <span class="meta"><span>${t.home.category[g.category ?? g.kind] ?? t.home.category.app}</span>${g.version ? html`<span>v${g.version}</span>` : ""}</span>
 </a>`;
 }
 

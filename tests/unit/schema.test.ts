@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { compareVersions, parseGizletToml } from "../../src/schema.ts";
+import { compareVersions, parseGizletToml, sameSpec, storedSpec } from "../../src/schema.ts";
 
 test("SemVer precedence", () => {
   // Each version ranks above the one before it (the SemVer 2.0.0 example, plus core cases).
@@ -55,6 +55,7 @@ test("gizlet.toml: the Rocket Snail fixture", () => {
 
 test("gizlet.toml: defaults", () => {
   const g = parseGizletToml(minimal);
+  assert.equal(g.kind, "app");
   assert.equal(g.category, "app");
   assert.equal(g.runtime, 1);
   assert.equal(g.icon, null);
@@ -64,7 +65,8 @@ test("gizlet.toml: defaults", () => {
 
 test("gizlet.toml: mistakes are refused", () => {
   const bad = (extra: string, pattern: RegExp) => assert.throws(() => parseGizletToml(`${extra}\n${minimal}`), pattern, extra);
-  bad('kind = "game"', /kind is not a gizlet.toml field/);
+  bad('kind = "game"', /kind must be app or service/);
+  bad('kind = "service"\ncategory = "game"', /category is for apps; a service has none/);
   bad('icon = "/etc/icon.png"', /not a canonical repository path/);
   bad('icon = "store/../icon.png"', /not a canonical repository path/);
   bad('cover = "store/cover.gif"', /cover must be a .png, .jpg or .webp file/);
@@ -78,6 +80,27 @@ test("gizlet.toml: mistakes are refused", () => {
   assert.throws(() => parseGizletToml(`${minimal}\n\n[[packages]]\ntarget = "aarch64-unknown-linux-gnu"\ntier = "lite"\nentry = "x"`), /listed twice/);
   assert.throws(() => parseGizletToml(minimal.split("\n").slice(0, 3).join("\n")), /at least one package/);
   assert.throws(() => parseGizletToml("id = "), /not valid TOML/);
+});
+
+test("gizlet.toml: kinds", () => {
+  const service = parseGizletToml(`kind = "service"\n${minimal}`);
+  assert.equal(service.kind, "service");
+  assert.equal(service.category, "app");
+  const game = parseGizletToml(`kind = "app"\ncategory = "game"\n${minimal}`);
+  assert.equal(game.kind, "app");
+  assert.equal(game.category, "game");
+});
+
+test("gizlet.toml: releases stored before kinds were apps", () => {
+  const spec = parseGizletToml(minimal);
+  const { kind: _, ...before } = spec;
+  const old = JSON.stringify(before);
+  assert.equal(storedSpec(old).kind, "app");
+  assert.ok(sameSpec(old, spec), "an unchanged app is not indexed again");
+  assert.ok(sameSpec(JSON.stringify(spec), spec));
+  assert.ok(!sameSpec(old, parseGizletToml(`kind = "service"\n${minimal}`)), "becoming a service is a change");
+  assert.ok(!sameSpec(old, parseGizletToml(minimal.replace('name = "Game"', 'name = "Other"'))));
+  assert.ok(!sameSpec("not json", spec));
 });
 
 test("gizlet.toml: links", () => {
