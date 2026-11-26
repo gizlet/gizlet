@@ -115,21 +115,25 @@ dl.on(["GET", "HEAD"], "/github.com/:owner/:repo/:tag/:file", async (c) => {
   // no public URL, so the GitHub App asks for a short-lived one, which is never cached; when
   // GitHub hands over the bytes instead, they are passed on.
   if (g.private) {
-    const got = await (await reader(c.env, { owner: g.owner, name: g.name_repo, key: r.key })).download(tag, file);
+    const got = await (await reader(c.env, { owner: g.owner, name: g.name_repo, key: r.key })).download(tag, file, c.req.header("range"));
     if (!got) return c.text("Not found", 404);
     countDownload();
     if ("url" in got) {
       c.header("cache-control", "no-store");
       return c.redirect(got.url, 302);
     }
+    // Passed on as GitHub answered, partial content and range headers included, so resumes work.
     const headers = new Headers({ "content-type": contentType(file), "cache-control": "no-store", "x-content-type-options": "nosniff", "access-control-allow-origin": "*" });
-    const len = got.response.headers.get("content-length");
-    if (len) headers.set("content-length", len);
+    for (const h of ["content-length", "content-range", "accept-ranges", "etag", "last-modified"]) {
+      const v = got.response.headers.get(h);
+      if (v) headers.set(h, v);
+    }
+    const status = got.response.status;
     if (c.req.method === "HEAD") {
       await got.response.body?.cancel();
-      return new Response(null, { headers });
+      return new Response(null, { status, headers });
     }
-    return new Response(got.response.body, { headers });
+    return new Response(got.response.body, { status, headers });
   }
   countDownload();
   return c.redirect(assetUrl(c.env, g.owner, g.name_repo, tag, file), 302);

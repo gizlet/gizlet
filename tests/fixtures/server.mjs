@@ -351,7 +351,19 @@ createServer(async (req, res) => {
       if (DIRECT.has(key)) {
         hit(`direct:${key}`);
         const file = repo.tags[a.tag].files.get(a.name);
-        return send(200, file, { "content-length": String(file.length), "content-type": "application/octet-stream" });
+        const range = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range ?? "");
+        if (range) {
+          const start = Number(range[1]);
+          const end = Math.min(range[2] ? Number(range[2]) : file.length - 1, file.length - 1);
+          if (start > end) return send(416, "", { "content-range": `bytes */${file.length}` });
+          return send(206, file.subarray(start, end + 1), {
+            "content-length": String(end - start + 1),
+            "content-range": `bytes ${start}-${end}/${file.length}`,
+            "accept-ranges": "bytes",
+            "content-type": "application/octet-stream",
+          });
+        }
+        return send(200, file, { "content-length": String(file.length), "accept-ranges": "bytes", "content-type": "application/octet-stream" });
       }
       const sig = randomBytes(16).toString("hex");
       signed.set(sig, a);

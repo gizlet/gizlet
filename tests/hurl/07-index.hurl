@@ -149,6 +149,17 @@ header "cache-control" == "no-store"
 header "content-type" == "application/vnd.gizlet.package+zip"
 bytes startsWith hex,504b0304;
 
+# A resume of that download: the Range goes through to GitHub and its 206 comes back.
+GET {{base}}/github.com/fixture-org/secret-gizlet/v1.0.0/dev.fixture.secretgizlet-1.0.0-aarch64-unknown-linux-gnu-lite.gzl
+x-gizlet-host: dl.gizlet.io
+Range: bytes=0-3
+HTTP 206
+[Asserts]
+header "content-range" startsWith "bytes 0-3/"
+header "content-length" == "4"
+header "cache-control" == "no-store"
+bytes == hex,504b0304;
+
 GET {{fixture}}/_fixture/hits?key=direct:fixture-org/secret-gizlet
 HTTP 200
 [Asserts]

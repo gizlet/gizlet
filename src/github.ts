@@ -56,9 +56,10 @@ export interface Reader {
   asset(tag: string, file: string): Promise<Response>;
   /**
    * How a client can get the asset: a URL anyone can download it from for the next few minutes,
-   * or, when GitHub hands over the bytes instead of a URL, the response itself. Null when it is missing.
+   * or, when GitHub hands over the bytes instead of a URL, the response itself (for `range`, a
+   * 206 when GitHub honours it). Null when it is missing.
    */
-  download(tag: string, file: string): Promise<Download | null>;
+  download(tag: string, file: string, range?: string): Promise<Download | null>;
   /** The repository's id, casing and privacy; null through the web. */
   info(): Promise<RepoInfo | null>;
 }
@@ -118,7 +119,7 @@ class WebReader implements Reader {
     return ghFetch(assetUrl(this.env, this.ref.owner, this.ref.name, tag, file));
   }
 
-  async download(tag: string, file: string): Promise<Download | null> {
+  async download(tag: string, file: string, _range?: string): Promise<Download | null> {
     return { url: assetUrl(this.env, this.ref.owner, this.ref.name, tag, file) };
   }
 
@@ -212,15 +213,17 @@ class AppReader implements Reader {
    * The asset from the API: a signed URL to follow, or the bytes themselves (GitHub answers
    * either way). Null when it is missing, undefined when the app cannot read it.
    */
-  private async fetchAsset(tag: string, file: string): Promise<Download | null | undefined> {
+  private async fetchAsset(tag: string, file: string, range?: string): Promise<Download | null | undefined> {
     const assets = await this.release(tag);
     if (!assets) return undefined;
     const id = assets.get(file);
     if (id === undefined) return null;
     // A redirect goes to a signed URL on another host, which refuses our Authorization header,
     // so it is followed separately, without it.
-    const res = await this.api(`/releases/assets/${id}`, { headers: { accept: "application/octet-stream" }, redirect: "manual" });
-    if (res.status === 200) return { response: res };
+    const headers: Record<string, string> = { accept: "application/octet-stream" };
+    if (range) headers.range = range;
+    const res = await this.api(`/releases/assets/${id}`, { headers, redirect: "manual" });
+    if (res.status === 200 || res.status === 206 || res.status === 416) return { response: res };
     await res.body?.cancel();
     if (this.denied(res)) return undefined;
     const loc = res.headers.get("location");
@@ -236,10 +239,10 @@ class AppReader implements Reader {
     return "response" in got ? got.response : ghFetch(got.url);
   }
 
-  async download(tag: string, file: string): Promise<Download | null> {
-    if (this.fallback) return this.fallback.download(tag, file);
-    const got = await this.fetchAsset(tag, file);
-    return got === undefined ? this.web.download(tag, file) : got;
+  async download(tag: string, file: string, range?: string): Promise<Download | null> {
+    if (this.fallback) return this.fallback.download(tag, file, range);
+    const got = await this.fetchAsset(tag, file, range);
+    return got === undefined ? this.web.download(tag, file, range) : got;
   }
 
   async info(): Promise<RepoInfo | null> {
