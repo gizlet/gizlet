@@ -1,8 +1,16 @@
-// A stand-in for github.com, raw.githubusercontent.com and the Actions OIDC issuer, used by
-// tests/run-local.sh. It serves releases of fixture repositories with real `.gzl` packages
-// (zips with manifest.json and an entry executable), and the repositories' gizlet.toml and art
-// at each tag, and signs OIDC tokens with a throwaway key. tests/fixtures/repos/<name> are
-// fixture-org/<name> as written by hand; the others are generated below.
+// A stand-in for github.com, raw.githubusercontent.com, api.github.com (as the GitHub App
+// gizlet-bot sees it) and the Actions OIDC issuer, used by tests/run-local.sh. It serves the
+// fixture repositories' files at each tag (gizlet.toml and art) and their releases with real
+// `.gzl` packages (zips with manifest.json and an entry executable), and signs OIDC tokens with a
+// throwaway key. tests/fixtures/repos/<name> are fixture-org/<name> as written by hand; the
+// others are generated below.
+//
+// The app is installed on the repositories in INSTALLED; PRIVATE ones are not on the web at all.
+// Its private key is GET /_fixture/app-key, its client id APP_CLIENT_ID. Tests can add a release
+// (POST /_fixture/release?repo=&version=), rewrite a release's description in its gizlet.toml
+// around the same packages (POST /_fixture/describe?repo=&tag=&description=), make the API hand
+// over asset bytes directly instead of redirecting (POST /_fixture/direct?repo=) and count
+// requests (GET /_fixture/hits?key=&since=).
 //
 //   node tests/fixtures/server.mjs 18788
 import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
@@ -11,13 +19,35 @@ import { createServer } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { crc32, deflateRawSync } from "node:zlib";
-import { exportJWK, SignJWT } from "jose";
+import { exportJWK, jwtVerify, SignJWT } from "jose";
 import { parse as parseToml } from "smol-toml";
 
 const port = Number(process.argv[2] ?? 18788);
 const issuer = `http://127.0.0.1:${port}`;
 const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const jwk = { ...(await exportJWK(publicKey)), kid: "fixture", alg: "RS256", use: "sig" };
+
+// The GitHub App. GitHub issues PKCS#1 keys.
+const APP_CLIENT_ID = "Iv-fixture";
+const INSTALLATION = 77;
+/** Installed on fixture-org/suspended (public), but suspended: no tokens. */
+const SUSPENDED = 78;
+const app = generateKeyPairSync("rsa", { modulusLength: 2048 });
+const APP_KEY = app.privateKey.export({ type: "pkcs1", format: "pem" });
+const INSTALLED = new Set(["fixture-org/hello-gizlet", "fixture-org/secret-gizlet"]);
+const PRIVATE = new Set(["fixture-org/secret-gizlet", "fixture-org/hidden"]);
+const tokens = new Set();
+/** Asset id -> { repo, tag, name }, and signed download URLs: sig -> the same. */
+const assets_ = new Map();
+const signed = new Map();
+/** Repositories whose asset API answers 200 with the bytes, which GitHub may do instead of a 302. */
+const DIRECT = new Set();
+/** Repositories renamed or moved: their asset API redirects to /repositories/<id>/releases/assets/<id>. */
+const RELOCATED = new Set();
+let nextAssetId = 1000;
+/** Request counts by key, e.g. latest:<repo>, api:<repo>, signed:<repo>. */
+const hits = new Map();
+const hit = (key) => hits.set(key, (hits.get(key) ?? 0) + 1);
 
 // 1×1 PNG.
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
@@ -155,13 +185,22 @@ function gzl(spec, pkg, { problem, files = {} } = {}) {
 
 const packageFile = (spec, p) => `${spec.id}-${spec.version}-${p.target}-${p.tier}.gzl`;
 
-/** repo -> { latest, tags: { tag -> { assets: Map<name, Buffer>, files: Map<path, Buffer> } } } */
+/**
+ * repo -> { latest, tags: { tag -> { assets: Map<name, Buffer>, ids: Map<name, asset id>,
+ * files: Map<path, Buffer>, spec } } }: release assets, and the repository's files at the tag.
+ */
 const repos = new Map();
 
-function addTag(repo, tag, assets, files) {
+function addTag(repo, tag, assets, files, spec = null) {
   const r = repos.get(repo) ?? { tags: {}, latest: null };
   files.set("README.md", Buffer.from(`# ${repo}\n`));
-  r.tags[tag] = { assets, files };
+  const ids = new Map();
+  for (const name of assets.keys()) {
+    const assetId = nextAssetId++;
+    ids.set(name, assetId);
+    assets_.set(assetId, { repo, tag, name });
+  }
+  r.tags[tag] = { assets, ids, files, spec };
   r.latest = tag;
   repos.set(repo, r);
 }
@@ -201,7 +240,7 @@ function addRelease(repo, version, { category = "game", targets, page = true, pr
   for (const p of spec.packages.slice(missing ? 1 : 0)) assets.set(packageFile(spec, p), gzl(spec, p, { problem }));
   // Release assets gizlet.toml does not name; never served.
   for (const name of extra) assets.set(name, gzl(spec, { target: "x86_64-unknown-linux-gnu", tier: "lite", entry: "game" }));
-  addTag(repo, `v${version}`, assets, files);
+  addTag(repo, `v${version}`, assets, files, spec);
 }
 
 /** A fixture repository written out under tests/fixtures/repos/<name>, with its own gizlet.toml and art. */
@@ -219,7 +258,7 @@ function addRepoDir(name) {
   const spec = parseToml(files.get("gizlet.toml").toString());
   const icon = spec.icon ? files.get(spec.icon) : undefined;
   const assets = new Map(spec.packages.map((p) => [packageFile(spec, p), gzl(spec, p, { files: { icon } })]));
-  addTag(`fixture-org/${name}`, `v${spec.version}`, assets, files);
+  addTag(`fixture-org/${name}`, `v${spec.version}`, assets, files, spec);
 }
 
 const REPOS = join(dirname(fileURLToPath(import.meta.url)), "repos");
@@ -244,9 +283,27 @@ addRelease("fixture-org/gzl-icon", "0.1.0", { iconPath: "store/unchecked.gzl", t
 addRelease("fixture-org/case", "0.1.0", { problem: "case", targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 addRelease("fixture-org/literal-toml", "0.1.0", { literal: true, targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 addTag("fixture-org/no-index", "v1.0.0", new Map([["other.zip", Buffer.from("x")]]), new Map());
+// Visited by tests/hurl/07-index.hurl, which adds releases while it runs.
+addRelease("fixture-org/refresh-me", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+// Private, with the app installed: read only through the API. Three releases, so the oldest is pruned from R2.
+addRelease("fixture-org/secret-gizlet", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+addRelease("fixture-org/secret-gizlet", "1.1.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+addRelease("fixture-org/secret-gizlet", "1.2.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+// Private, without the app: Gizlet cannot see it.
+addRelease("fixture-org/hidden", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+// Scanned infected by tests/hurl/08-marks.hurl.
+addRelease("fixture-org/infected", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+// Public, with a suspended installation of the app: read through the web.
+addRelease("fixture-org/suspended", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+// The same files released in two repositories; 08-marks.hurl reports twin-a infected.
+addRelease("fixture-org/twin-a", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+{
+  const src = repos.get("fixture-org/twin-a").tags["v1.0.0"];
+  addTag("fixture-org/twin-b", "v1.0.0", new Map(src.assets), new Map(src.files), src.spec);
+}
 
-async function token(repo, ref) {
-  return new SignJWT({ repository: repo, repository_id: "424242", repository_owner: repo.split("/")[0], repository_visibility: "public", ref, event_name: "push" })
+async function token(repo, ref, visibility = "public") {
+  return new SignJWT({ repository: repo, repository_id: "424242", repository_owner: repo.split("/")[0], repository_visibility: visibility, ref, event_name: "push" })
     .setProtectedHeader({ alg: "RS256", kid: "fixture" })
     .setIssuer(issuer)
     .setAudience("https://api.gizlet.io")
@@ -267,13 +324,146 @@ createServer(async (req, res) => {
   if (url.pathname === "/token") {
     const repo = url.searchParams.get("repo") ?? "fixture-org/hello-gizlet";
     const ref = url.searchParams.get("ref") ?? "refs/tags/v0.1.0";
-    return send(200, JSON.stringify({ value: await token(repo, ref) }), { "content-type": "application/json" });
+    const visibility = url.searchParams.get("visibility") ?? "public";
+    return send(200, JSON.stringify({ value: await token(repo, ref, visibility) }), { "content-type": "application/json" });
   }
   if (url.pathname === "/healthz") return send(200, "ok");
+  const json = (status, body) => send(status, JSON.stringify(body), { "content-type": "application/json" });
+
+  // Test controls.
+  if (url.pathname === "/_fixture/app-key") return send(200, APP_KEY, { "content-type": "text/plain" });
+  if (url.pathname === "/_fixture/hits") {
+    const count = hits.get(url.searchParams.get("key")) ?? 0;
+    return json(200, { count, since: count - Number(url.searchParams.get("since") ?? 0) });
+  }
+  if (url.pathname === "/_fixture/relocate" && req.method === "POST") {
+    RELOCATED.add(url.searchParams.get("repo"));
+    return json(200, { relocated: [...RELOCATED] });
+  }
+  if (url.pathname === "/_fixture/direct" && req.method === "POST") {
+    DIRECT.add(url.searchParams.get("repo"));
+    return json(200, { direct: [...DIRECT] });
+  }
+  if (url.pathname === "/_fixture/describe" && req.method === "POST") {
+    const rel = repos.get(url.searchParams.get("repo"))?.tags[url.searchParams.get("tag")];
+    if (!rel?.spec) return json(404, { message: "no such fixture release" });
+    rel.spec.description = url.searchParams.get("description");
+    rel.files.set("gizlet.toml", Buffer.from(gizletToml(rel.spec)));
+    return json(200, rel.spec);
+  }
+  if (url.pathname === "/_fixture/release" && req.method === "POST") {
+    const key = url.searchParams.get("repo");
+    if (!repos.has(key)) return json(404, { message: "no such fixture repository" });
+    addRelease(key, url.searchParams.get("version"), { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+    return json(201, { latest: repos.get(key).latest });
+  }
+
+  // api.github.com as the app sees it.
+  const bearer = /^Bearer (.+)$/.exec(req.headers.authorization ?? "")?.[1];
+  const asApp = async () => {
+    try {
+      await jwtVerify(bearer ?? "", app.publicKey, { issuer: APP_CLIENT_ID, algorithms: ["RS256"] });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (parts[0] === "app" && parts[1] === "installations" && parts[3] === "access_tokens" && req.method === "POST") {
+    if (!(await asApp())) return json(401, { message: "A JSON web token could not be decoded" });
+    if (Number(parts[2]) === SUSPENDED) return json(403, { message: "This installation has been suspended" });
+    if (Number(parts[2]) !== INSTALLATION) return json(404, { message: "Not Found" });
+    const t = `ghs_fixture${randomBytes(12).toString("hex")}`;
+    tokens.add(t);
+    return json(201, { token: t, expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString() });
+  }
+  if (parts[0] === "repos") {
+    const [, owner, name, ...rest] = parts;
+    const key = `${owner}/${name}`.toLowerCase();
+    if (rest.join("/") === "installation") {
+      if (!(await asApp())) return json(401, { message: "A JSON web token could not be decoded" });
+      if (key === "fixture-org/suspended") return json(200, { id: SUSPENDED });
+      return INSTALLED.has(key) ? json(200, { id: INSTALLATION }) : json(404, { message: "Not Found" });
+    }
+    if (!bearer || !tokens.has(bearer)) return json(401, { message: "Bad credentials" });
+    const repo = repos.get(key);
+    if (!repo || !INSTALLED.has(key)) return json(404, { message: "Not Found" });
+    hit(`api:${key}`);
+    const release = (tag) => ({ tag_name: tag, assets: [...repo.tags[tag].ids].map(([n, assetId]) => ({ id: assetId, name: n })) });
+    if (rest.length === 0) return json(200, { id: 900 + [...INSTALLED].indexOf(key), name, owner: { login: owner }, private: PRIVATE.has(key) });
+    if (rest.join("/") === "releases/latest") {
+      hit(`latest:${key}`);
+      return repo.latest ? json(200, release(repo.latest)) : json(404, { message: "Not Found" });
+    }
+    if (rest[0] === "releases" && rest[1] === "tags" && rest.length === 3) return repo.tags[rest[2]] ? json(200, release(rest[2])) : json(404, { message: "Not Found" });
+    if (rest[0] === "contents" && rest.length > 1) {
+      hit(`contents:${key}`);
+      const file = repo.tags[url.searchParams.get("ref")]?.files.get(rest.slice(1).join("/"));
+      if (!file) return json(404, { message: "Not Found" });
+      if (req.headers.accept !== "application/vnd.github.raw") return json(200, { type: "file", path: rest.slice(1).join("/"), size: file.length });
+      return send(200, file, { "content-length": String(file.length), "content-type": "application/vnd.github.raw" });
+    }
+    if (rest[0] === "releases" && rest[1] === "assets" && rest.length === 3) {
+      const a = assets_.get(Number(rest[2]));
+      if (!a || a.repo !== key) return json(404, { message: "Not Found" });
+      if (RELOCATED.has(key)) return send(301, "", { location: `${issuer}/repositories/${900 + [...INSTALLED].indexOf(key)}/releases/assets/${rest[2]}` });
+      return serveAsset(a, Number(rest[2]));
+    }
+    return json(404, { message: "Not Found" });
+  }
+  // A relocated repository's asset, by repository id; needs the token and the Accept header again.
+  if (parts[0] === "repositories" && parts[2] === "releases" && parts[3] === "assets" && parts.length === 5) {
+    if (!bearer || !tokens.has(bearer)) return json(401, { message: "Bad credentials" });
+    const a = assets_.get(Number(parts[4]));
+    if (!a || 900 + [...INSTALLED].indexOf(a.repo) !== Number(parts[1])) return json(404, { message: "Not Found" });
+    hit(`relocated:${a.repo}`);
+    return serveAsset(a, Number(parts[4]));
+  }
+  function serveAsset(a, assetId) {
+    const key = a.repo;
+    const repo = repos.get(key);
+    {
+      if (req.headers.accept !== "application/octet-stream") return json(200, { id: assetId, name: a.name });
+      if (DIRECT.has(key)) {
+        hit(`direct:${key}`);
+        const file = repo.tags[a.tag].assets.get(a.name);
+        const range = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range ?? "");
+        if (range) {
+          const start = Number(range[1]);
+          const end = Math.min(range[2] ? Number(range[2]) : file.length - 1, file.length - 1);
+          if (start > end) return send(416, "", { "content-range": `bytes */${file.length}` });
+          return send(206, file.subarray(start, end + 1), {
+            "content-length": String(end - start + 1),
+            "content-range": `bytes ${start}-${end}/${file.length}`,
+            "accept-ranges": "bytes",
+            "content-type": "application/octet-stream",
+          });
+        }
+        return send(200, file, { "content-length": String(file.length), "accept-ranges": "bytes", "content-type": "application/octet-stream" });
+      }
+      const sig = randomBytes(16).toString("hex");
+      signed.set(sig, a);
+      return send(302, "", { location: `${issuer}/_signed/${sig}` });
+    }
+  }
+  // A short-lived asset URL from the API. Like GitHub's, it refuses a second credential.
+  if (parts[0] === "_signed") {
+    const a = signed.get(parts[1]);
+    if (!a) return send(404, "Not Found");
+    if (req.headers.authorization) return send(400, "Only one auth mechanism allowed");
+    hit(`signed:${a.repo}`);
+    const file = repos.get(a.repo).tags[a.tag].assets.get(a.name);
+    return send(200, file, { "content-length": String(file.length), "content-type": "application/octet-stream" });
+  }
+
+  // github.com and raw.githubusercontent.com: public repositories only.
   const [owner, name, ...rest] = parts;
-  const repo = repos.get(`${owner}/${name}`.toLowerCase());
+  const key = `${owner}/${name}`.toLowerCase();
+  const repo = PRIVATE.has(key) ? undefined : repos.get(key);
   if (!repo) return send(404, "Not Found");
-  if (rest.join("/") === "releases/latest") return send(302, "", { location: `https://github.com/${owner}/${name}/releases/tag/${repo.latest}` });
+  if (rest.join("/") === "releases/latest") {
+    hit(`latest:${key}`);
+    return send(302, "", { location: `https://github.com/${owner}/${name}/releases/tag/${repo.latest}` });
+  }
   // github.com: release assets.
   if (rest[0] === "releases" && rest[1] === "download" && rest.length === 4) {
     const file = repo.tags[rest[2]]?.assets.get(rest[3]);

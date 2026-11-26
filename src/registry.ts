@@ -1,13 +1,21 @@
 /** Indexing releases into the registry, and deciding what is listed. */
 import { parse, type GizletRow, type ReleaseRow } from "./db";
 import type { Env, Waiter } from "./env";
-import { fetchGizletToml, latestTag, NotFound } from "./github";
+import { fetchGizletToml, NotFound, reader, type Reader, type RepoInfo } from "./github";
 import { queueMirror } from "./mirror";
 import type { RepoRef } from "./repo";
 import { compareVersions, IndexError, type GizletToml } from "./schema";
+import { rescore } from "./score";
 
 const MISS_TTL_MS = 10 * 60 * 1000;
-export const REFRESH_AFTER_MS = 30 * 60 * 1000;
+/** The cron looks at gizlets nobody viewed for this long. */
+const STALE_AFTER_MS = 6 * 60 * 60 * 1000;
+
+/** A viewed gizlet is checked for a new release at most this often (REFRESH_AFTER_SECONDS, 2 minutes). */
+export function refreshAfterMs(env: Env): number {
+  const s = Number.parseInt(env.REFRESH_AFTER_SECONDS, 10);
+  return (Number.isFinite(s) && s >= 0 ? s : 120) * 1000;
+}
 
 export interface IndexOptions {
   repositoryId?: number;
@@ -18,31 +26,41 @@ export interface IndexOptions {
    * packages may have been rebuilt, or a release that failed before.
    */
   force?: boolean;
+  /** How to read the repository; made on demand when not given. */
+  reader?: Reader;
+  /** What the GitHub API says about the repository (through the app only). */
+  info?: RepoInfo | null;
 }
 
 /** Record a release from its gizlet.toml, point the gizlet at its newest release and queue mirroring. */
 export async function indexRelease(env: Env, ref: RepoRef, tag: string, opts: IndexOptions = {}): Promise<ReleaseRow> {
-  const spec = await fetchGizletToml(env, ref, tag);
+  const src = opts.reader ?? (await reader(env, ref));
+  const spec = await fetchGizletToml(src, ref, tag);
   if (!/^v?\d/.test(tag)) throw new IndexError(`tag ${tag} must be v<version>`);
   if (tag.replace(/^v/, "") !== spec.version) throw new IndexError(`tag ${tag} does not match gizlet.toml version ${spec.version}`);
   const now = Date.now();
   const specJson = JSON.stringify(spec);
   const existing = await env.DB.prepare("SELECT * FROM releases WHERE repo = ? AND tag = ?").bind(ref.key, tag).first<ReleaseRow>();
-  // Browsing re-indexes a release only when its gizlet.toml changed, and never re-checks a failed one.
+  // Browsing re-indexes a release only when its gizlet.toml changed, and never re-checks a failed
+  // one. A publish always does, since the packages may have been rebuilt; bytes a malware scan
+  // found infected fail again when they are mirrored (src/mirror.ts), whatever the release.
   if (existing?.status === "failed" && existing.spec_json === specJson && !opts.force) return existing;
   const unchanged = existing && existing.spec_json === specJson && !opts.force;
-  const owner = opts.display?.owner ?? ref.owner;
-  const name = opts.display?.name ?? ref.name;
+  const display = opts.display ?? (opts.info ? { owner: opts.info.owner, name: opts.info.name } : undefined);
+  const owner = display?.owner ?? ref.owner;
+  const name = display?.name ?? ref.name;
+  const isPrivate = opts.info ? (opts.info.private ? 1 : 0) : null;
 
   const stmts: D1PreparedStatement[] = [
     env.DB.prepare(
-      `INSERT INTO gizlets (repo, owner, name_repo, repository_id, app_id, name, created_at, updated_at, checked_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO gizlets (repo, owner, name_repo, repository_id, app_id, name, created_at, updated_at, checked_at, private)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, coalesce(?11, 0))
        ON CONFLICT (repo) DO UPDATE SET checked_at = excluded.checked_at,
          repository_id = coalesce(excluded.repository_id, gizlets.repository_id),
          owner = CASE WHEN ?10 THEN excluded.owner ELSE gizlets.owner END,
-         name_repo = CASE WHEN ?10 THEN excluded.name_repo ELSE gizlets.name_repo END`,
-    ).bind(ref.key, owner, name, opts.repositoryId ?? null, spec.id, spec.name, now, now, now, opts.display ? 1 : 0),
+         name_repo = CASE WHEN ?10 THEN excluded.name_repo ELSE gizlets.name_repo END,
+         private = coalesce(?11, gizlets.private)`,
+    ).bind(ref.key, owner, name, opts.repositoryId ?? opts.info?.id ?? null, spec.id, spec.name, now, now, now, display ? 1 : 0, isPrivate),
     env.DB.prepare("DELETE FROM misses WHERE repo = ?").bind(ref.key),
   ];
   if (!unchanged) {
@@ -51,10 +69,11 @@ export async function indexRelease(env: Env, ref: RepoRef, tag: string, opts: In
         `INSERT INTO releases (repo, tag, version, status, error, warnings, spec_json, mirrored, published_at, updated_at)
          VALUES (?, ?, ?, 'pending', NULL, '[]', ?, 0, ?, ?)
          ON CONFLICT (repo, tag) DO UPDATE SET version = excluded.version, status = 'pending', error = NULL, warnings = '[]',
-           spec_json = excluded.spec_json, mirrored = 0, updated_at = excluded.updated_at, revision = releases.revision + 1`,
+           spec_json = excluded.spec_json, mirrored = 0, updated_at = excluded.updated_at, revision = releases.revision + 1,
+           scan = NULL, scan_report = NULL`,
       ).bind(ref.key, tag, spec.version, specJson, now, now),
       env.DB.prepare("DELETE FROM packages WHERE repo = ? AND tag = ?").bind(ref.key, tag),
-      // Size and sha256 are filled in by the mirror job.
+      // Size, sha256 and the R2 object are filled in by the mirror job.
       ...spec.packages.map((p) =>
         env.DB.prepare(
           "INSERT INTO packages (repo, tag, file, target, tier, entry, revision) VALUES (?1, ?2, ?3, ?4, ?5, ?6, (SELECT revision FROM releases WHERE repo = ?1 AND tag = ?2))",
@@ -119,6 +138,7 @@ export async function refreshLatest(env: Env, repo: string): Promise<void> {
       .run();
   }
   await updateVisibility(env, repo, ready[0] ?? null);
+  await rescore(env, repo);
 }
 
 /**
@@ -148,13 +168,19 @@ export async function setVisibility(env: Env, repo: string, visibility: "listed"
 
 /**
  * The gizlet for a repository, indexing its latest release on first sight (installing by link
- * works for any public repository with a release). Null when its latest release has no gizlet.toml.
+ * works for any repository with a release that Gizlet can read: public ones, and private ones
+ * the GitHub App is installed on). Null when its latest release has no gizlet.toml.
  * Blocked gizlets are returned too; callers refuse them.
+ *
+ * A known gizlet is answered from the registry at once; with `ctx`, a view also refreshes it in
+ * the background, at most once per REFRESH_AFTER_SECONDS however many views come in.
  */
 export async function ensureGizlet(env: Env, ref: RepoRef, ctx?: Waiter): Promise<GizletRow | null> {
   const g = await env.DB.prepare("SELECT * FROM gizlets WHERE repo = ?").bind(ref.key).first<GizletRow>();
   if (g?.latest_tag) {
-    if (ctx && g.visibility !== "blocked" && Date.now() - g.checked_at > REFRESH_AFTER_MS) ctx.waitUntil(checkForUpdate(env, ref).catch(() => {}));
+    if (ctx && g.visibility !== "blocked" && Date.now() - g.checked_at >= refreshAfterMs(env)) {
+      ctx.waitUntil(refreshGizlet(env, ref, refreshAfterMs(env)).catch((e: unknown) => console.error("refresh failed", ref.key, e)));
+    }
     return g;
   }
   if (g?.visibility === "blocked") return g;
@@ -163,9 +189,10 @@ export async function ensureGizlet(env: Env, ref: RepoRef, ctx?: Waiter): Promis
   const miss = await env.DB.prepare("SELECT checked_at FROM misses WHERE repo = ?").bind(ref.key).first<{ checked_at: number }>();
   if (miss && Date.now() - miss.checked_at < MISS_TTL_MS) return null;
   try {
-    const tag = await latestTag(env, ref);
+    const src = await reader(env, ref);
+    const tag = await src.latestTag();
     if (!tag) throw new NotFound(`${ref.key} has no releases`);
-    await indexRelease(env, ref, tag);
+    await indexRelease(env, ref, tag, { reader: src, info: await src.info() });
   } catch (e) {
     if (e instanceof NotFound || e instanceof IndexError) {
       await env.DB.prepare("INSERT OR REPLACE INTO misses (repo, checked_at) VALUES (?, ?)").bind(ref.key, Date.now()).run();
@@ -177,19 +204,44 @@ export async function ensureGizlet(env: Env, ref: RepoRef, ctx?: Waiter): Promis
   return fresh?.latest_tag ? fresh : null;
 }
 
-/** Index the latest release if it is new. */
-export async function checkForUpdate(env: Env, ref: RepoRef): Promise<void> {
-  await env.DB.prepare("UPDATE gizlets SET checked_at = ? WHERE repo = ?").bind(Date.now(), ref.key).run();
-  const tag = await latestTag(env, ref);
-  if (!tag) return;
-  const known = await env.DB.prepare("SELECT 1 FROM releases WHERE repo = ? AND tag = ?").bind(ref.key, tag).first();
-  if (!known) await indexRelease(env, ref, tag).catch(() => {});
+/**
+ * Bring a gizlet up to date with GitHub: the repository's casing and privacy, its latest release
+ * (a new tag, or a changed gizlet.toml at the tag), and its score. Does nothing unless it was last
+ * checked at least `olderThanMs` ago; the check time is claimed first, in one statement, so
+ * concurrent views refresh it once. False when another refresh had it.
+ */
+export async function refreshGizlet(env: Env, ref: RepoRef, olderThanMs: number): Promise<boolean> {
+  const now = Date.now();
+  const claim = await env.DB.prepare("UPDATE gizlets SET checked_at = ? WHERE repo = ? AND checked_at <= ? AND visibility != 'blocked'")
+    .bind(now, ref.key, now - olderThanMs)
+    .run();
+  if (!claim.meta.changes) return false;
+  try {
+    const src = await reader(env, ref);
+    const [tag, info] = await Promise.all([src.latestTag(), src.info()]);
+    if (info) {
+      await env.DB.prepare("UPDATE gizlets SET private = ?, repository_id = coalesce(repository_id, ?), owner = ?, name_repo = ? WHERE repo = ?")
+        .bind(info.private ? 1 : 0, info.id, info.owner, info.name, ref.key)
+        .run();
+    }
+    if (tag) {
+      await indexRelease(env, ref, tag, { reader: src, info }).catch((e: unknown) => {
+        if (!(e instanceof NotFound || e instanceof IndexError)) throw e;
+      });
+    }
+  } finally {
+    // Downloads move the score between releases.
+    await rescore(env, ref.key);
+  }
+  return true;
 }
 
-/** Cron: look for new releases of gizlets not checked recently. */
+/** Cron: refresh gizlets nobody viewed recently. */
 export async function refreshStale(env: Env): Promise<void> {
   const { results } = await env.DB.prepare("SELECT owner, name_repo, repo FROM gizlets WHERE visibility != 'blocked' AND checked_at < ? ORDER BY checked_at LIMIT 40")
-    .bind(Date.now() - 6 * 60 * 60 * 1000)
+    .bind(Date.now() - STALE_AFTER_MS)
     .all<{ owner: string; name_repo: string; repo: string }>();
-  for (const g of results) await checkForUpdate(env, { owner: g.owner, name: g.name_repo, key: g.repo }).catch(() => {});
+  for (const g of results) {
+    await refreshGizlet(env, { owner: g.owner, name: g.name_repo, key: g.repo }, STALE_AFTER_MS).catch((e: unknown) => console.error("refresh failed", g.repo, e));
+  }
 }

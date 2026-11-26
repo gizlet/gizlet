@@ -15,6 +15,14 @@ export interface Env {
   GITHUB_RAW: string;
   /** api.github.com, or a fixture server in local tests. */
   GITHUB_API: string;
+  /** The GitHub App (gizlet-bot) that reads repositories it is installed on, private ones included. Off without both. */
+  GITHUB_APP_CLIENT_ID?: string;
+  /** Its private key, PEM (PKCS#1 as GitHub issues it, or PKCS#8); a literal `\n` stands for a newline. */
+  GITHUB_APP_PRIVATE_KEY?: string;
+  /** The app's slug, for its install link. */
+  GITHUB_APP_SLUG: string;
+  /** A viewed gizlet is checked for a new release at most this often. */
+  REFRESH_AFTER_SECONDS: string;
   OIDC_ISSUER: string;
   OIDC_AUDIENCE: string;
   /** Override for the issuer's JWKS URL (local tests only). */

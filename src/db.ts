@@ -1,5 +1,6 @@
 import type { Env } from "./env";
 import { compareVersions, tierRunsOn, type Control, type Tier } from "./schema";
+import { ratingAverage } from "./score";
 
 export type Visibility = "unlisted" | "listed" | "blocked";
 export const VISIBILITIES: readonly Visibility[] = ["unlisted", "listed", "blocked"];
@@ -33,6 +34,14 @@ export interface GizletRow {
   visibility: Visibility;
   visibility_reason: string | null;
   visibility_locked: number;
+  /** 1 for a private repository, read through the GitHub App. */
+  private: number;
+  /** JSON array of marks: awesome, scanned (src/score.ts). */
+  marks: string;
+  rating_count: number;
+  rating_sum: number;
+  /** 0-100, see src/score.ts. */
+  score: number;
   created_at: number;
   updated_at: number;
   checked_at: number;
@@ -52,6 +61,16 @@ export interface ReleaseRow {
   mirrored: number;
   published_at: number;
   updated_at: number;
+  /** Malware scan of this revision's packages: null until scanned, clean or infected. */
+  scan: "clean" | "infected" | null;
+  scan_report: string | null;
+}
+
+export interface ScanReport {
+  engine: string | null;
+  report_url: string | null;
+  note: string | null;
+  scanned_at: string;
 }
 
 export interface PackageRow {
@@ -105,6 +124,10 @@ export function summary(env: Env, g: GizletRow) {
     targets: parse<string[]>(g.targets, []),
     tiers: parse<string[]>(g.tiers, []),
     downloads: g.downloads,
+    marks: parse<string[]>(g.marks, []),
+    rating: { average: ratingAverage(g.rating_count, g.rating_sum), count: g.rating_count },
+    score: g.score,
+    private: g.private === 1,
     visibility: g.visibility,
     share_url: `${env.SITE_ORIGIN}/${g.repo}`,
     api_url: `${env.API_ORIGIN}/v1/gizlets/${g.repo}`,
@@ -146,7 +169,8 @@ export async function gizletDetail(env: Env, g: GizletRow) {
     about_urls: tag ? Object.fromEntries(Object.entries(parse<Record<string, string>>(g.about, {})).map(([k, f]) => [k, dlUrl(env, g.repo, tag, f)])) : {},
     controls: parse<Control[]>(g.controls, []),
     links: parse<Record<string, string>>(g.links, {}),
-    readme_url: tag ? `${env.GITHUB_RAW}/${g.owner}/${g.name_repo}/${tag}/README.md` : null,
+    // A private repository's files are not public on GitHub.
+    readme_url: tag && !g.private ? `${env.GITHUB_RAW}/${g.owner}/${g.name_repo}/${tag}/README.md` : null,
     packages: packages.map((p) => packageJson(env, p)),
   };
 }
@@ -157,9 +181,11 @@ export function releaseJson(env: Env, r: ReleaseRow, pkgs: PackageRow[]) {
     tag: r.tag,
     version: r.version,
     status: r.status,
+    revision: r.revision,
     error: r.error,
     warnings: parse<string[]>(r.warnings, []),
     mirrored: r.mirrored === 1,
+    scan: r.scan ? { result: r.scan, ...parse<Partial<ScanReport>>(r.scan_report, {}) } : null,
     published_at: new Date(r.published_at).toISOString(),
     packages: pkgs.map((p) => packageJson(env, p)),
   };
@@ -196,11 +222,23 @@ export interface ListQuery {
   target?: string;
   tier?: string;
   owner?: string;
+  mark?: string;
+  sort?: ListSort;
   /** Include unlisted gizlets (an owner's own list). */
   all?: boolean;
   limit: number;
   offset: number;
 }
+
+export type ListSort = "updated" | "score" | "rating" | "downloads";
+export const LIST_SORTS: readonly ListSort[] = ["updated", "score", "rating", "downloads"];
+const ORDER: Record<ListSort, string> = {
+  updated: "updated_at DESC, repo",
+  score: "score DESC, updated_at DESC, repo",
+  // Rated before unrated, then by mean, then by how many rated.
+  rating: "rating_count > 0 DESC, CAST(rating_sum AS REAL) / max(rating_count, 1) DESC, rating_count DESC, updated_at DESC, repo",
+  downloads: "downloads DESC, updated_at DESC, repo",
+};
 
 /** Search: listed gizlets only, unless `all` (never blocked ones). */
 export async function listGizlets(env: Env, query: ListQuery): Promise<GizletRow[]> {
@@ -217,10 +255,11 @@ export async function listGizlets(env: Env, query: ListQuery): Promise<GizletRow
   }
   if (query.category) where.push(`category = ${bind(query.category)}`);
   if (query.owner) where.push(`owner = ${bind(query.owner)} COLLATE NOCASE`);
+  if (query.mark) where.push(`EXISTS (SELECT 1 FROM json_each(gizlets.marks) WHERE value = ${bind(query.mark)})`);
   if (query.target) where.push(`EXISTS (SELECT 1 FROM json_each(gizlets.targets) WHERE value = ${bind(query.target)})`);
   // A lite device runs only lite packages.
   if (query.tier === "lite") where.push("EXISTS (SELECT 1 FROM json_each(gizlets.tiers) WHERE value = 'lite')");
-  const sql = `SELECT * FROM gizlets WHERE ${where.join(" AND ")} ORDER BY updated_at DESC, repo LIMIT ${bind(query.limit)} OFFSET ${bind(query.offset)}`;
+  const sql = `SELECT * FROM gizlets WHERE ${where.join(" AND ")} ORDER BY ${ORDER[query.sort ?? "updated"]} LIMIT ${bind(query.limit)} OFFSET ${bind(query.offset)}`;
   const { results } = await env.DB.prepare(sql).bind(...binds).all<GizletRow>();
   return results;
 }

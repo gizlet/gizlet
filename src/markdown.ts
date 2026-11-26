@@ -10,7 +10,9 @@ function inline(text: string): string {
   const codes: string[] = [];
   let s = escape(text).replace(/`([^`]+)`/g, (_, c: string) => `\u0000${codes.push(c) - 1}\u0000`);
   s = s
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" rel="nofollow noopener">$1</a>')
+    // Bounded, and link text cannot hold "[": every attempt stops within a few hundred characters,
+    // so text full of unmatched brackets renders in linear time.
+    .replace(/\[([^[\]\n]{1,200})\]\((https?:\/\/[^)\s]{1,500})\)/g, '<a href="$2" rel="nofollow noopener">$1</a>')
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[^*\w])\*([^*\s][^*]*?)\*(?!\w)/g, "$1<em>$2</em>")
     .replace(/(^|[^\w])_([^_\s][^_]*?)_(?!\w)/g, "$1<em>$2</em>");

@@ -158,7 +158,7 @@ x-gizlet-host: gizlet.io
 HTTP 200
 [Asserts]
 header "content-type" contains "icon"
-bytes count == 2272
+bytes count == 4632
 
 GET {{base}}/static/icon.svg
 HTTP 200

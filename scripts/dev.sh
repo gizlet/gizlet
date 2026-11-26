@@ -31,6 +31,8 @@ pids+=($!)
 for _ in $(seq 1 60); do grep -q postgresql "$STATE/pg.log" 2>/dev/null && break; sleep 0.25; done
 DATABASE_URL=$(grep -m1 postgresql "$STATE/pg.log") node scripts/pg.ts migrate
 pnpm exec wrangler d1 migrations apply gizlet --local --persist-to "$STATE/wrangler" >/dev/null
+for _ in $(seq 1 60); do curl -fsS "$FIXTURE/healthz" >/dev/null 2>&1 && break; sleep 0.25; done
+APP_KEY=$(curl -fsS "$FIXTURE/_fixture/app-key" | awk '{printf "%s\\n", $0}')
 
 # Publish sample gizlets once the Worker answers.
 (
@@ -57,6 +59,8 @@ pnpm exec wrangler dev --port "$PORT" --ip 127.0.0.1 --local-upstream "localhost
   --var "GITHUB_WEB:$FIXTURE" \
   --var "GITHUB_RAW:$FIXTURE" \
   --var "GITHUB_API:$FIXTURE" \
+  --var "GITHUB_APP_CLIENT_ID:Iv-fixture" \
+  --var "GITHUB_APP_PRIVATE_KEY:$APP_KEY" \
   --var "OIDC_ISSUER:$FIXTURE" \
   --var "OIDC_JWKS_URL:$FIXTURE/.well-known/jwks" \
   --var "ADMIN_TOKEN:dev-admin" \

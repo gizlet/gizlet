@@ -4,7 +4,8 @@
 -- Releases and packages indexed from gizlet.json are dropped. Gizlets are kept, with what the
 -- registry decided about them (blocks, admin-set visibility and its reason, downloads); what
 -- came from gizlet.json is cleared, so each one is indexed again from its gizlet.toml on its next
--- visit or by the refresh cron. Collections are kept.
+-- visit or by the refresh cron. Collections, marks, ratings and the sha256 of infected packages
+-- (migration 0002) are kept.
 DROP TABLE packages;
 DROP TABLE releases;
 DELETE FROM misses;
@@ -31,6 +32,8 @@ CREATE TABLE releases (
   mirrored INTEGER NOT NULL DEFAULT 0,
   published_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
+  scan TEXT,                     -- NULL (not scanned) | clean | infected; a re-index clears it (0002)
+  scan_report TEXT,              -- JSON: engine, report_url, note, scanned_at
   PRIMARY KEY (repo, tag)
 );
 CREATE INDEX releases_recent ON releases (repo, published_at DESC);

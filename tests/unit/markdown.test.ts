@@ -24,3 +24,16 @@ test("about pages: no HTML and only http(s) links", () => {
   assert.equal(renderMarkdown('[a](https://x.test/"onmouseover="y)'), '<p><a href="https://x.test/&#34;onmouseover=&#34;y" rel="nofollow noopener">a</a></p>');
   assert.equal(renderMarkdown("snake_case_name"), "<p>snake_case_name</p>");
 });
+
+test("about pages: adversarial input renders in linear time", () => {
+  const n = 64 * 1024;
+  for (const src of ["[".repeat(n), "[a](https://".repeat(n / 12), "*".repeat(n), "**a".repeat(n / 3), "_a".repeat(n / 2), "`".repeat(n - 1)]) {
+    const start = performance.now();
+    renderMarkdown(src);
+    const ms = performance.now() - start;
+    assert.ok(ms < 250, `${JSON.stringify(src.slice(0, 12))}… took ${ms.toFixed(0)} ms`);
+  }
+  // Links still work, and one with text over the bound is left as text.
+  assert.equal(renderMarkdown("[a](https://x.test)"), '<p><a href="https://x.test" rel="nofollow noopener">a</a></p>');
+  assert.equal(renderMarkdown(`[${"a".repeat(201)}](https://x.test)`), `<p>[${"a".repeat(201)}](https://x.test)</p>`);
+});

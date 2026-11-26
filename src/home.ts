@@ -3,9 +3,9 @@
  * gizlets as cartridges, how a gizlet gets made, and the template for developers.
  * design/README.md describes the look.
  */
-import { html, raw } from "hono/html";
+import { html } from "hono/html";
 import { featured, summary } from "./db";
-import { handheld } from "./devices";
+import { bootScreen, handheld } from "./devices";
 import type { Env } from "./env";
 import { patternClasses, patternLink, themeClass, themeLink } from "./theme";
 import { heroTitle, localized, MESSAGES, rich, type Locale, type Messages } from "./i18n";
@@ -45,8 +45,6 @@ export function cart(g: Summary, t: Messages, lang: Locale) {
 
 const ticker = (t: Messages) =>
   html`<div class="ticker" aria-hidden="true"><div class="run">${[0, 1].map(() => t.home.facts.map((f) => html`<span>${f}</span><i></i>`))}</div></div>`;
-
-const bootScreen = html`<span class="boot"><span class="px">${raw("<i></i>".repeat(9))}</span>GIZLET OS</span>`;
 
 export async function homePage(env: Env, lang: Locale, badUrl?: string) {
   const t = MESSAGES[lang];
@@ -135,8 +133,8 @@ ${ticker(t)}
       <figcaption>${t.home.treeCaption}</figcaption>
       <pre class="code"><code><b>snake/</b>
 ├── .github/workflows/release.yml  <span class="c"># ${t.home.tree.workflow}</span>
-├── gizlet.json                    <span class="c"># ${t.home.tree.index}</span>
-├── assets/icon.png                <span class="c"># ${t.home.tree.icon}</span>
+├── gizlet.toml                    <span class="c"># ${t.home.tree.index}</span>
+├── store/icon.png                 <span class="c"># ${t.home.tree.icon}</span>
 └── src/                           <span class="c"># ${t.home.tree.source}</span></code></pre>
     </figure>
   </div>
