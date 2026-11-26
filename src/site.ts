@@ -7,7 +7,7 @@ import { html, raw } from "hono/html";
 import type { HtmlEscapedString } from "hono/utils/html";
 import { dlUrl, gizletDetail } from "./db";
 import type { Env } from "./env";
-import { devicePage, devicesPage, flashScript } from "./devices";
+import { devicePage, devicesPage, flashScript, wantCounts } from "./devices";
 import { explorePage } from "./explore";
 import { gizletPage } from "./gizlet-page";
 import { MAX_THEMES, patternHref, patternRule, THEME_FILE, THEME_VERSION, themeCss, themeHref } from "./theme";
@@ -130,9 +130,10 @@ site.get("/explore", async (c) =>
 site.get("/devices", (c) => c.redirect(`/install${new URL(c.req.url).search}`, 301));
 site.get("/devices/:id", (c) => c.redirect(`/install/${encodeURIComponent(c.req.param("id"))}`, 301));
 
-site.get("/install", (c) =>
-  c.html(page(c, `${tr(c).devices.title} · Gizlet`, devicesPage(langOf(c), { q: c.req.query("q"), status: c.req.query("status") }), { wide: true, script: "devices.js" })),
-);
+site.get("/install", async (c) => {
+  const body = devicesPage(langOf(c), { q: c.req.query("q"), status: c.req.query("status") }, await wantCounts(c.env));
+  return c.html(page(c, `${tr(c).devices.title} · Gizlet`, body, { wide: true, script: "devices.js" }));
+});
 
 site.get("/install/:id", (c) => {
   const d = devicePage(langOf(c), c.req.param("id"), c.env.SITE_ORIGIN);
@@ -201,6 +202,8 @@ site.get("/account", (c) => {
   ${c.env.GITHUB_CLIENT_ID ? html`<button id="link-github" class="secondary">${t.link}</button>` : ""}
   <button id="signout" class="secondary">${t.signOut}</button>
 </div>
+<h2>${t.wants}</h2>
+<ul id="wants" class="my-wants"></ul>
 <h2>${t.gizlets}</h2>
 <ul id="gizlets"></ul>
 <p id="message" role="status"></p>`,
