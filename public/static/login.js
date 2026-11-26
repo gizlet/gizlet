@@ -1,9 +1,14 @@
-import { call, message, nextPath, t } from "./auth.js";
+import { call, fmt, message, nextPath, t } from "./auth.js";
 
 const form = document.querySelector("#signin");
 const submit = form.querySelector("button[type=submit]");
 const toggle = document.querySelector("#toggle");
 const next = nextPath("/account");
+// Email links come back here: signed in once confirmed, else with ?error= (an expired link, say).
+const params = new URLSearchParams(location.search);
+const callbackURL = `/login?${new URLSearchParams({ verified: "1", next })}`;
+if (params.get("error")) message(Object.hasOwn(t.errors ?? {}, params.get("error")) ? t.errors[params.get("error")] : t.errors?.INVALID_TOKEN);
+else if (params.get("verified") === "1") location.replace(next);
 let signingUp = false;
 
 toggle.addEventListener("click", () => {
@@ -20,8 +25,14 @@ form.addEventListener("submit", async (e) => {
   const password = form.password.value;
   submit.disabled = true;
   try {
-    if (signingUp) await call("/sign-up/email", { email, password, name: form.name.value.trim() || email.split("@")[0] });
-    else await call("/sign-in/email", { email, password });
+    if (signingUp) {
+      // No session yet: the account works once the emailed link is opened.
+      await call("/sign-up/email", { email, password, name: form.name.value.trim() || email.split("@")[0], callbackURL });
+      form.password.value = "";
+      message(fmt(t.checkInbox, { email }));
+      return;
+    }
+    await call("/sign-in/email", { email, password, callbackURL });
     location.assign(next);
   } catch (err) {
     message(err.message);

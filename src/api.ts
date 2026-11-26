@@ -1,6 +1,6 @@
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
-import { createAuth } from "./auth";
+import { createAuth, devOutbox } from "./auth";
 import { featured, getGizlet, gizletDetail, listGizlets, listReleases, packageJson, pickInstall, releaseJson, summary, VISIBILITIES, type GizletRow, type PackageRow, type ReleaseRow } from "./db";
 import type { Env } from "./env";
 import { NotFound, UpstreamError } from "./github";
@@ -93,6 +93,15 @@ api.get("/v1", (c) =>
 api.get("/v1/healthz", async (c) => {
   await c.env.DB.prepare("SELECT 1").first();
   return c.json({ ok: true }, 200, { "cache-control": "no-store" });
+});
+
+/** Local runs only: the newest account email to an address, so tests can follow its link. */
+api.get("/v1/dev/mail", (c) => {
+  if (c.env.DEV_HOST_OVERRIDE !== "1") return apiError(c, 404, "not_found", "no route for GET /v1/dev/mail");
+  const to = (c.req.query("to") ?? "").toLowerCase();
+  const mail = devOutbox.findLast((m) => m.to === to);
+  if (!mail) return apiError(c, 404, "not_found", `no mail to ${to}`);
+  return c.json({ ...mail, link: /https?:\/\/\S+/.exec(mail.text)?.[0] ?? null }, 200, { "cache-control": "no-store" });
 });
 
 api.get("/v1/featured", async (c) => c.json(await featured(c.env)));

@@ -8,7 +8,7 @@ import type { HtmlEscapedString } from "hono/utils/html";
 import { gizletDetail } from "./db";
 import type { Env } from "./env";
 import { homePage } from "./home";
-import { DEFAULT_LOCALE, LOCALE_NAMES, LOCALES, localized, matchLocale, MESSAGES, negotiate, rich, scriptMessages, type Locale, type Messages } from "./i18n";
+import { DEFAULT_LOCALE, LOCALE_NAMES, LOCALES, localized, matchLocale, MESSAGES, requestLocale, rich, scriptMessages, type Locale, type Messages } from "./i18n";
 import { ensureGizlet } from "./registry";
 import { parseRepoAddress, repoRef } from "./repo";
 
@@ -25,8 +25,7 @@ const LANG_COOKIE = "lang";
 function pickLocale(c: C): { lang: Locale; chosen: boolean } {
   const fromQuery = matchLocale(c.req.query("lang"));
   if (fromQuery) return { lang: fromQuery, chosen: true };
-  const cookie = /(?:^|[;,]\s*)lang=([^;,\s]+)/.exec(c.req.header("cookie") ?? "")?.[1];
-  return { lang: matchLocale(cookie) ?? negotiate(c.req.header("accept-language")), chosen: false };
+  return { lang: requestLocale(c.req.raw.headers), chosen: false };
 }
 
 const langOf = (c: C): Locale => c.get("lang") ?? DEFAULT_LOCALE;
