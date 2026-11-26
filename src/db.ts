@@ -64,6 +64,8 @@ export interface PackageRow {
   /** Known once the package is mirrored. */
   size: number | null;
   sha256: string | null;
+  /** R2 key of the mirrored bytes `sha256` describes. */
+  object: string | null;
   /** The release revision this row belongs to. */
   revision: number;
 }

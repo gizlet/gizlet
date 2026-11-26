@@ -25,9 +25,16 @@ export function artKey(repo: string, tag: string, path: string): string {
   return `${repo}/${tag}/repo/${path}`;
 }
 
-/** R2 key of a package: under the release revision, so each indexed revision has its own object. */
-export function packageKey(repo: string, tag: string, revision: number, file: string): string {
-  return `${repo}/${tag}/packages/r${revision}/${file}`;
+/** Where a release revision's packages live in R2. */
+const packagesPrefix = (repo: string, tag: string, revision: number) => `${repo}/${tag}/packages/r${revision}/`;
+
+/**
+ * A fresh R2 key for one mirror attempt of a package. Nothing ever overwrites it, so the sha256
+ * recorded with it (`packages.object`) always describes its bytes, even when two deliveries of a
+ * job mirror the same package at once.
+ */
+function newPackageKey(repo: string, tag: string, revision: number, file: string): string {
+  return `${packagesPrefix(repo, tag, revision)}${crypto.randomUUID()}/${file}`;
 }
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -134,14 +141,26 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
   try {
     if (!(await setStatus(env, job, "mirroring", null))) throw new Superseded();
     for (const p of pkgs) {
-      const key = packageKey(job.repo, job.tag, job.revision, p.file);
-      // Mirrored by an earlier attempt of this job.
-      if (p.sha256 && p.size && (await env.BUCKET.head(key))?.size === p.size) continue;
+      // Mirrored already, by an earlier attempt or another delivery of this job.
+      if (p.object && p.sha256 && p.size && (await env.BUCKET.head(p.object))?.size === p.size) continue;
+      const key = newPackageKey(job.repo, job.tag, job.revision, p.file);
       const got = await copyToR2(env, assetUrl(env, g.owner, g.name_repo, job.tag, p.file), key, p.file);
-      Object.assign(p, got);
-      await env.DB.prepare("UPDATE packages SET size = ?, sha256 = ? WHERE repo = ? AND tag = ? AND file = ? AND revision = ?")
-        .bind(got.size, got.sha256, job.repo, job.tag, p.file, job.revision)
+      // The first attempt to finish is the package; a later one drops its copy and uses that one.
+      const won = await env.DB.prepare(
+        "UPDATE packages SET size = ?, sha256 = ?, object = ? WHERE repo = ? AND tag = ? AND file = ? AND revision = ? AND object IS NULL",
+      )
+        .bind(got.size, got.sha256, key, job.repo, job.tag, p.file, job.revision)
         .run();
+      if (won.meta.changes > 0) {
+        Object.assign(p, got, { object: key });
+        continue;
+      }
+      await env.BUCKET.delete(key);
+      const mine = await env.DB.prepare("SELECT size, sha256, object FROM packages WHERE repo = ? AND tag = ? AND file = ? AND revision = ?")
+        .bind(job.repo, job.tag, p.file, job.revision)
+        .first<Pick<PackageRow, "size" | "sha256" | "object">>();
+      if (!mine?.object) throw new Superseded();
+      Object.assign(p, mine);
     }
     for (const file of indexedFiles(spec).art) {
       const res = await ghFetch(rawUrl(env, g.owner, g.name_repo, job.tag, file));
@@ -158,7 +177,7 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
     if (!(await setStatus(env, job, "checking", null))) throw new Superseded();
     const errors: string[] = [];
     for (const p of pkgs) {
-      const found = await checkPackage(env, packageKey(job.repo, job.tag, job.revision, p.file), p.file, p.size!, {
+      const found = await checkPackage(env, p.object!, p.file, p.size!, {
         id: spec.id,
         name: spec.name,
         version: spec.version,
@@ -194,10 +213,7 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
 async function settle(env: Env, job: MirrorJob, status: "ready" | "failed"): Promise<void> {
   if (status === "failed") {
     // Nothing of a failed release is served, so its packages need not stay in R2.
-    const { results } = await env.DB.prepare("SELECT file FROM packages WHERE repo = ? AND tag = ? AND revision = ?")
-      .bind(job.repo, job.tag, job.revision)
-      .all<Pick<PackageRow, "file">>();
-    await Promise.all(results.map((p) => env.BUCKET.delete(packageKey(job.repo, job.tag, job.revision, p.file))));
+    await deletePrefix(env, packagesPrefix(job.repo, job.tag, job.revision));
   }
   await refreshLatest(env, job.repo);
   if (status === "ready") await pruneMirrors(env, job.repo);

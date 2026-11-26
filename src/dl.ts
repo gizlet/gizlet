@@ -3,7 +3,7 @@ import { Hono, type Context } from "hono";
 import { packageUrl, pickInstall, type ReleaseRow } from "./db";
 import type { Env } from "./env";
 import { assetUrl, rawUrl } from "./github";
-import { artKey, contentType, indexedFiles, packageKey } from "./mirror";
+import { artKey, contentType, indexedFiles } from "./mirror";
 import { ensureGizlet } from "./registry";
 import { repoRef } from "./repo";
 import { isAssetName, isRepoPath, TARGET, type GizletToml, type Tier } from "./schema";
@@ -75,12 +75,12 @@ dl.on(["GET", "HEAD"], "/github.com/:owner/:repo/:tag/:file{.+}", async (c) => {
   const [g, rel] = await Promise.all([
     c.env.DB.prepare("SELECT owner, name_repo, visibility FROM gizlets WHERE repo = ?").bind(r.key).first<{ owner: string; name_repo: string; visibility: string }>(),
     c.env.DB.prepare(
-      `SELECT r.status, r.spec_json, r.revision, p.sha256 FROM releases r
+      `SELECT r.status, r.spec_json, p.sha256, p.object FROM releases r
          LEFT JOIN packages p ON p.repo = r.repo AND p.tag = r.tag AND p.revision = r.revision AND p.file = ?
         WHERE r.repo = ? AND r.tag = ?`,
     )
       .bind(file, r.key, tag)
-      .first<Pick<ReleaseRow, "status" | "spec_json" | "revision"> & { sha256: string | null }>(),
+      .first<Pick<ReleaseRow, "status" | "spec_json"> & { sha256: string | null; object: string | null }>(),
   ]);
   if (!g || !rel) return c.text("Not found", 404);
   if (g.visibility === "blocked") return c.text(`${r.key} is blocked`, 403);
@@ -93,11 +93,11 @@ dl.on(["GET", "HEAD"], "/github.com/:owner/:repo/:tag/:file{.+}", async (c) => {
   if (files.packages.has(file) && isAssetName(file)) {
     // Packages are served only once their release has passed its checks.
     if (rel.status !== "ready") return c.text(`${r.key} ${tag} is still being checked`, 409);
-    if (!rel.sha256) return c.text("Not found", 404);
+    if (!rel.sha256 || !rel.object) return c.text("Not found", 404);
     const pinned = c.req.query("sha256");
     // A URL for bytes this tag no longer has: the client should ask the API again.
     if (pinned !== undefined && pinned !== rel.sha256) return c.text(`${file} has changed; its sha256 is now ${rel.sha256}`, 404);
-    key = packageKey(r.key, tag, rel.revision, file);
+    key = rel.object;
     cacheControl = pinned ? "public, max-age=31536000, immutable" : "public, max-age=300";
   } else if (files.art.has(file)) {
     key = artKey(r.key, tag, file);

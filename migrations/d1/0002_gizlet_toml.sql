@@ -1,51 +1,23 @@
 -- Gizlets are described by the repository's gizlet.toml at the release tag, not by a gizlet.json
--- release asset, and a package's size and sha256 are learnt while mirroring it. Releases indexed
--- from gizlet.json are dropped: every gizlet is indexed again from its gizlet.toml on first sight.
--- Collections are kept; they only show gizlets that are listed.
+-- release asset, and a package's size and sha256 are learnt while mirroring it.
+--
+-- Releases and packages indexed from gizlet.json are dropped. Gizlets are kept, with what the
+-- registry decided about them (blocks, admin-set visibility and its reason, downloads); what
+-- came from gizlet.json is cleared, so each one is indexed again from its gizlet.toml on its next
+-- visit or by the refresh cron. Collections are kept.
 DROP TABLE packages;
 DROP TABLE releases;
-DROP TABLE gizlets;
 DELETE FROM misses;
 
-CREATE TABLE gizlets (
-  repo TEXT PRIMARY KEY,
-  owner TEXT NOT NULL,           -- display casing from GitHub
-  name_repo TEXT NOT NULL,       -- display casing from GitHub
-  repository_id INTEGER,         -- from the OIDC token, survives renames
-  app_id TEXT NOT NULL,
-  name TEXT NOT NULL,
-  names TEXT NOT NULL DEFAULT '{}',
-  description TEXT,
-  descriptions TEXT NOT NULL DEFAULT '{}',
-  category TEXT NOT NULL DEFAULT 'app',
-  tags TEXT NOT NULL DEFAULT '[]',
-  color TEXT,
-  license TEXT,
-  links TEXT NOT NULL DEFAULT '{}', -- the developer's site and social accounts
-  icon TEXT,                     -- repository paths at latest_tag
-  cover TEXT,
-  pattern TEXT,                  -- a tile repeated across the top of the gizlet's page
-  screenshots TEXT NOT NULL DEFAULT '[]',
-  about TEXT NOT NULL DEFAULT '{}',
-  controls TEXT NOT NULL DEFAULT '[]',
-  latest_tag TEXT,               -- newest release that passed its checks
-  version TEXT,
-  targets TEXT NOT NULL DEFAULT '[]',
-  tiers TEXT NOT NULL DEFAULT '[]',
-  downloads INTEGER NOT NULL DEFAULT 0,
-  -- unlisted: installable by link only; listed: also in search and featured lists;
-  -- blocked: not served at all.
-  visibility TEXT NOT NULL DEFAULT 'unlisted',
-  visibility_reason TEXT,
-  -- 1 when an admin set the visibility; the checks then leave it alone.
-  visibility_locked INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  checked_at INTEGER NOT NULL
-);
-CREATE INDEX gizlets_listed ON gizlets (visibility, updated_at DESC);
-CREATE INDEX gizlets_category ON gizlets (visibility, category, updated_at DESC);
-CREATE INDEX gizlets_owner ON gizlets (owner COLLATE NOCASE);
+ALTER TABLE gizlets ADD COLUMN license TEXT;
+ALTER TABLE gizlets ADD COLUMN links TEXT NOT NULL DEFAULT '{}'; -- the developer's site and social accounts
+ALTER TABLE gizlets ADD COLUMN pattern TEXT;                     -- a tile repeated on its cartridge and page
+
+-- Art was named by release asset; it is now a repository path, read again from gizlet.toml.
+UPDATE gizlets SET latest_tag = NULL, version = NULL, icon = NULL, cover = NULL, screenshots = '[]', about = '{}',
+  controls = '[]', targets = '[]', tiers = '[]', checked_at = 0;
+-- Visibility the checks set is decided again; one an admin set (blocked included) stays.
+UPDATE gizlets SET visibility = 'unlisted', visibility_reason = 'no release has passed its checks yet' WHERE visibility_locked = 0;
 
 CREATE TABLE releases (
   repo TEXT NOT NULL,
@@ -73,6 +45,7 @@ CREATE TABLE packages (
   entry TEXT NOT NULL,
   size INTEGER,                  -- known once mirrored
   sha256 TEXT,                   -- known once mirrored
+  object TEXT,                   -- R2 key of the mirrored bytes sha256 describes; one per mirror attempt
   revision INTEGER NOT NULL,     -- the release revision this row belongs to
   PRIMARY KEY (repo, tag, file)
 );

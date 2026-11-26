@@ -422,12 +422,7 @@ form.signing-up .signup { display: grid; }
   .make-grid { grid-template-columns: minmax(0, 1fr); gap: 36px; }
 }
 @media (max-width: 1000px) {
-  .stage-grid, .device-hero, .gz-hero, /* Screenshots full size: a click or Esc closes it (devices.js) */
-.lightbox[open] { display: grid; place-items: center; width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; padding: 4vh 4vw; background: transparent; border: 0; cursor: zoom-out; }
-.lightbox::backdrop { background: #101114eb; }
-.lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 12px; box-shadow: 0 30px 60px -20px #000; cursor: default; }
-html:has(.lightbox[open]) { overflow: hidden; }
-.gz-body { grid-template-columns: minmax(0, 1fr); }
+  .stage-grid, .device-hero, .gz-hero, .gz-body { grid-template-columns: minmax(0, 1fr); }
   .gz-band.has-pattern { background-image: linear-gradient(color-mix(in srgb, var(--scrim) 82%, transparent), color-mix(in srgb, var(--scrim) 82%, transparent)), var(--pattern); background-size: auto, 256px 256px; }
   .gz-side { margin-top: 8px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
   .rig { margin-top: 8px; }
