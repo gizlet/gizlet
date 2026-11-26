@@ -77,6 +77,7 @@ pnpm test:hurl sim        # the device simulation only
 | `public/static/` | The site's stylesheet (system fonts and no inline styles, as the CSP requires) and the account pages' scripts |
 | `tests/hurl/`, `tests/sim/`, `tests/prod/` | Local suite, device simulation, production smoke checks |
 | `scripts/dev.sh` | `pnpm dev` |
+| `mirror/`, `tests/mirror/` | An nginx reverse proxy that serves every host under another domain (`gizlet.xyz`, `api.gizlet.xyz`, ...), and its checks; see [mirror/README.md](mirror/README.md) |
 
 ## Credentials and deployment
 
