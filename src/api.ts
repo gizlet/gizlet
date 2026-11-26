@@ -2,6 +2,7 @@ import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { createAuth, devOutbox } from "./auth";
 import { featured, getGizlet, gizletDetail, LIST_SORTS, listGizlets, listReleases, packageJson, pickInstall, releaseJson, summary, VISIBILITIES, type GizletRow, type ListSort, type PackageRow, type ReleaseRow } from "./db";
+import { findHandheld, HANDHELDS, handheldJson, wantCounts, type Handheld } from "./devices";
 import type { Env } from "./env";
 import { NotFound, reader, UpstreamError } from "./github";
 import { reportInfected } from "./mirror";
@@ -85,12 +86,15 @@ api.get("/v1", (c) =>
       "GET /v1/gizlets/github.com/{owner}/{repo}/releases/{tag}",
       "GET /v1/gizlets/github.com/{owner}/{repo}/install?target=&tier=",
       "GET /v1/resolve?url=",
+      "GET /v1/handhelds?status=",
       "POST /v1/publish",
       "/v1/auth/* (Better Auth: sign-up/email, sign-in/email, sign-in/social, device/code, device/token, ...)",
       "GET /v1/me",
       "GET /v1/me/gizlets",
       "GET /v1/me/ratings",
       "PUT|DELETE /v1/me/ratings/github.com/{owner}/{repo}",
+      "GET /v1/me/wants",
+      "PUT|DELETE /v1/me/wants/{handheld}",
     ],
   }),
 );
@@ -198,6 +202,14 @@ api.get("/v1/resolve", (c) => {
     share_url: `${c.env.SITE_ORIGIN}/${r.key}`,
     github_url: `https://github.com/${r.owner}/${r.name}`,
   });
+});
+
+/** Every handheld we know of, supported or not, with how many accounts want it. */
+api.get("/v1/handhelds", async (c) => {
+  const status = c.req.query("status");
+  if (status !== undefined && status !== "supported" && status !== "wanted") return apiError(c, 400, "bad_request", "status must be supported or wanted");
+  const counts = await wantCounts(c.env);
+  return c.json({ handhelds: HANDHELDS.filter((h) => !status || h.status === status).map((h) => handheldJson(h, counts.get(h.id) ?? 0)) });
 });
 
 api.post("/v1/publish", async (c) => {
@@ -375,6 +387,52 @@ api.delete(RATING, (c) =>
     await c.env.DB.prepare("DELETE FROM ratings WHERE repo = ? AND user_id = ?").bind(r.key, u.id).run();
     await rescore(c.env, r.key);
     return c.body(null, 204);
+  }),
+);
+
+// --- Wants: handhelds people ask Gizlet OS to support -------------------------------------------
+
+/** The handhelds the user wants, newest first. */
+api.get("/v1/me/wants", (c) =>
+  signedIn(c, async (u) => {
+    const { results } = await c.env.DB.prepare(
+      "SELECT w.handheld, w.created_at, (SELECT COUNT(*) FROM wants x WHERE x.handheld = w.handheld) AS n FROM wants w WHERE w.user_id = ? ORDER BY w.created_at DESC",
+    )
+      .bind(u.id)
+      .all<{ handheld: string; created_at: number; n: number }>();
+    const wants = results.flatMap((w) => {
+      const h = findHandheld(w.handheld);
+      return h ? [{ ...handheldJson(h, w.n), wanted_at: new Date(w.created_at).toISOString() }] : [];
+    });
+    return c.json({ wants }, 200, { "cache-control": "no-store" });
+  }),
+);
+
+const WANT = "/v1/me/wants/:handheld";
+
+async function wantState(c: C, h: Handheld, wanted: boolean) {
+  const row = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM wants WHERE handheld = ?").bind(h.id).first<{ n: number }>();
+  return c.json({ handheld: h.id, wanted, wants: row?.n ?? 0 }, 200, { "cache-control": "no-store" });
+}
+
+/** Want a handheld that is not supported yet. Wanting it again changes nothing. */
+api.put(WANT, (c) =>
+  signedIn(c, async (u) => {
+    const h = findHandheld(c.req.param("handheld"));
+    if (!h) return apiError(c, 404, "not_found", `no handheld ${c.req.param("handheld")}; see GET /v1/handhelds`);
+    if (h.status === "supported") return apiError(c, 409, "supported", `${h.name} is supported already: ${c.env.SITE_ORIGIN}/install/${h.id}`);
+    await c.env.DB.prepare("INSERT INTO wants (handheld, user_id, created_at) VALUES (?, ?, ?) ON CONFLICT (handheld, user_id) DO NOTHING").bind(h.id, u.id, Date.now()).run();
+    return wantState(c, h, true);
+  }),
+);
+
+/** Take a want back, also once the handheld is supported. */
+api.delete(WANT, (c) =>
+  signedIn(c, async (u) => {
+    const h = findHandheld(c.req.param("handheld"));
+    if (!h) return apiError(c, 404, "not_found", `no handheld ${c.req.param("handheld")}; see GET /v1/handhelds`);
+    await c.env.DB.prepare("DELETE FROM wants WHERE handheld = ? AND user_id = ?").bind(h.id, u.id).run();
+    return wantState(c, h, false);
   }),
 );
 

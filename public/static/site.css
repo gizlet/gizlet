@@ -292,6 +292,16 @@ a.hh-name:hover b { text-decoration: underline; }
 .want .heart { width: 13px; height: 12px; background: var(--coral); clip-path: path("M6.5 12 L1.3 6.8 A3.1 3.1 0 0 1 6.5 2.6 A3.1 3.1 0 0 1 11.7 6.8 Z"); }
 .want[aria-pressed="true"] { color: #fff; background: var(--coral); border-color: var(--coral); }
 .want[aria-pressed="true"] .heart { background: #fff; }
+.want:disabled { opacity: .6; cursor: progress; }
+.want-n { margin-right: 12px; font-weight: 650; font-size: 13px; color: var(--dim); }
+.want-n:empty { display: none; }
+/* Signed out, "I want it" asks to sign in first. */
+.modal { width: min(460px, calc(100vw - 36px)); padding: 0; color: var(--ink); background: var(--surface); border: 0; border-radius: 12px; box-shadow: 0 30px 60px -20px #10111480; }
+.modal::backdrop { background: #10111499; }
+.modal-body { padding: 28px; }
+.modal h2 { margin: 0 0 10px; font-weight: 820; font-size: 24px; line-height: 1.25; }
+.modal p { margin: 0 0 22px; color: var(--dim); }
+html:has(.modal[open]) { overflow: hidden; }
 
 /* One device: hero, specs, flashing */
 .device-hero { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); gap: 40px; align-items: center; }
@@ -431,6 +441,8 @@ button.link { padding: 0; font-weight: 500; color: var(--ink); text-decoration: 
 .signup, [hidden] { display: none; }
 form.signing-up .signup { display: grid; }
 .meta { color: var(--dim); }
+.my-wants li { margin: 6px 0; }
+.my-wants button.link { margin-left: 4px; }
 
 /* Small screens */
 @media (max-width: 1100px) {
@@ -458,8 +470,10 @@ form.signing-up .signup { display: grid; }
   .handheld.big { font-size: 11px; }
   .addr .prefix { display: none; }
   .pillars, .platforms, .flash-aside { grid-template-columns: minmax(0, 1fr); }
-  .hh-table .c-soc, .hh-table .c-screen { display: none; }
+  /* The action says the status too (how to flash, or I want it), so it is the column that stays. */
+  .hh-table .c-soc, .hh-table .c-screen, .hh-table .c-status { display: none; }
   .hh-table th, .hh-table td { padding-left: 14px; padding-right: 14px; }
+  .hh-table .want-n:not(:empty) { display: block; margin: 0 0 6px; }
   .flash-steps > li { padding: 20px; }
   .gz-shots { margin: 0 -18px; padding: 4px 18px 18px; }
   .spec-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

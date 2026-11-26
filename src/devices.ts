@@ -1,19 +1,21 @@
 /**
  * Devices: the desktop builds, every handheld we know of in one searchable table, and for each
  * supported handheld a page on writing Gizlet OS to its card with one command. The commands use
- * `/flash/<id>` on this site, which redirects to the writer scripts in gizlet/os.
+ * `/flash/<id>` on this site, which redirects to the writer scripts in gizlet/os. Signed-in users
+ * press "I want it" on handhelds that are not supported yet (the `wants` table).
  */
 import { html, raw } from "hono/html";
 import type { HtmlEscapedString } from "hono/utils/html";
+import type { Env } from "./env";
 import { MESSAGES, rich, type Locale } from "./i18n";
 import { prompt } from "./mark";
 
 const OS_RELEASE = "https://github.com/gizlet/os/releases/latest/download";
 const OS_RAW = "https://raw.githubusercontent.com/gizlet/os/main/boards";
 
-type Status = "supported" | "wanted";
+export type Status = "supported" | "wanted";
 
-interface Handheld {
+export interface Handheld {
   id: string;
   name: string;
   maker: string;
@@ -76,7 +78,18 @@ const WANTED: Handheld[] = [
   { id: "rg40xxh", name: "RG40XX H", maker: "Anbernic", soc: "Allwinner H700", screen: '4", 640×480', status: "wanted" },
 ];
 
-const HANDHELDS: Handheld[] = [...SUPPORTED, ...WANTED];
+export const HANDHELDS: Handheld[] = [...SUPPORTED, ...WANTED];
+
+export const findHandheld = (id: string) => HANDHELDS.find((h) => h.id === id);
+
+/** How many accounts want each handheld. */
+export async function wantCounts(env: Env): Promise<Map<string, number>> {
+  const { results } = await env.DB.prepare("SELECT handheld, COUNT(*) AS n FROM wants GROUP BY handheld").all<{ handheld: string; n: number }>();
+  return new Map(results.map((r) => [r.handheld, r.n]));
+}
+
+/** A handheld in the API. */
+export const handheldJson = (h: Handheld, wants: number) => ({ id: h.id, name: h.name, maker: h.maker, soc: h.soc, screen: h.screen, status: h.status, wants });
 
 const DESKTOP = {
   mac: [{ label: "", file: "Gizlet-macOS.dmg" }],
@@ -107,8 +120,9 @@ export const bootScreen = html`<span class="boot">${prompt}GIZLET OS</span>`;
 
 const haystack = (h: Handheld) => `${h.name} ${h.maker} ${h.soc} ${h.id}`.toLowerCase();
 
-export function devicesPage(lang: Locale, query: { q?: string; status?: string }) {
-  const t = MESSAGES[lang].devices;
+export function devicesPage(lang: Locale, query: { q?: string; status?: string }, wants: Map<string, number>) {
+  const { devices: t, js } = MESSAGES[lang];
+  const wantsText = (n: number) => (n ? (n === 1 ? js.wants.one : js.wants.other).replace("{n}", String(n)) : "");
   const q = (query.q ?? "").trim().slice(0, 60);
   const needle = q.toLowerCase();
   const status = query.status === "supported" || query.status === "wanted" ? query.status : undefined;
@@ -161,7 +175,7 @@ export function devicesPage(lang: Locale, query: { q?: string; status?: string }
   </div>
   <div class="table-card">
     <table class="hh-table">
-      <thead><tr><th scope="col">${t.cols.device}</th><th scope="col" class="c-soc">${t.cols.soc}</th><th scope="col" class="c-screen">${t.cols.screen}</th><th scope="col">${t.cols.status}</th><th scope="col"><span class="visually-hidden">${t.cols.action}</span></th></tr></thead>
+      <thead><tr><th scope="col">${t.cols.device}</th><th scope="col" class="c-soc">${t.cols.soc}</th><th scope="col" class="c-screen">${t.cols.screen}</th><th scope="col" class="c-status">${t.cols.status}</th><th scope="col"><span class="visually-hidden">${t.cols.action}</span></th></tr></thead>
       <tbody>
         ${rows.map((h) => {
           const ok = h.status === "supported";
@@ -170,10 +184,10 @@ export function devicesPage(lang: Locale, query: { q?: string; status?: string }
           <td>${ok ? html`<a class="hh-name" href="/install/${h.id}">${name}</a>` : html`<span class="hh-name">${name}</span>`}</td>
           <td class="c-soc">${h.soc}</td>
           <td class="c-screen">${h.screen}</td>
-          <td><span class="pill ${ok ? "ok" : "wait"}">${t.status[h.status]}</span></td>
+          <td class="c-status"><span class="pill ${ok ? "ok" : "wait"}">${t.status[h.status]}</span></td>
           <td class="act">${ok
             ? html`<a class="btn small cobalt" href="/install/${h.id}">${t.flash} →</a>`
-            : html`<button type="button" class="want" data-device="${h.id}" aria-pressed="false"><span class="heart" aria-hidden="true"></span>${t.want}</button>`}</td>
+            : html`<span class="want-n">${wantsText(wants.get(h.id) ?? 0)}</span><button type="button" class="want" data-device="${h.id}" data-name="${h.name}" aria-pressed="false"><span class="heart" aria-hidden="true"></span>${t.want}</button>`}</td>
         </tr>`;
         })}
         <tr class="none"${shown ? raw(" hidden") : ""}><td colspan="5">${t.none}</td></tr>
@@ -181,6 +195,17 @@ export function devicesPage(lang: Locale, query: { q?: string; status?: string }
     </table>
   </div>
   <p class="table-note">${t.wantText}</p>
+  <p id="want-message" class="table-note" role="status"></p>
+  <dialog id="want-signin" class="modal" aria-labelledby="want-signin-title">
+    <div class="modal-body">
+      <h2 id="want-signin-title">${t.signInTitle}</h2>
+      <p>${t.signInText}</p>
+      <form method="dialog" class="btns">
+        <a class="btn sun" href="/login?next=${encodeURIComponent("/install#handhelds")}">${t.signIn}</a>
+        <button class="btn" value="cancel">${t.notNow}</button>
+      </form>
+    </div>
+  </dialog>
 </section>
 </div>`;
 }
