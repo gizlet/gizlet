@@ -4,6 +4,7 @@
 //
 //   node tests/fixtures/server.mjs 18788
 import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { crc32, deflateRawSync } from "node:zlib";
 import { exportJWK, SignJWT } from "jose";
@@ -13,9 +14,13 @@ const issuer = `http://127.0.0.1:${port}`;
 const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const jwk = { ...(await exportJWK(publicKey)), kid: "fixture", alg: "RS256", use: "sig" };
 
-// 1×1 PNG.
+// 1×1 PNG, for the icons inside packages.
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
 const sha = (b) => createHash("sha256").update(b).digest("hex");
+
+// Release art, so the site shows a real picture: a low-poly rocket snail.
+const ICON = readFileSync(new URL("art/icon.jpg", import.meta.url));
+const COVER = readFileSync(new URL("art/cover.jpg", import.meta.url));
 
 /** An Info-ZIP Unicode Path extra field (0x7075) that renames an entry from `from` to `to`. */
 function unicodePath(from, to) {
@@ -137,7 +142,7 @@ function gzl({ id, version, target, tier, problem, literal }) {
 /** repo -> { latest, tags: { tag -> { files: Map<name, Buffer> } } } */
 const repos = new Map();
 
-function addRelease(repo, version, { category = "game", lie = false, targets, page = true, problem, literal, extra = [], icon = true, iconName = "icon.png", description = true } = {}) {
+function addRelease(repo, version, { category = "game", lie = false, targets, page = true, problem, literal, extra = [], icon = true, iconName = "icon.jpg", description = true } = {}) {
   const tag = `v${version}`;
   const id = `dev.fixture.${repo.split("/")[1].replace(/[^a-z0-9]/g, "")}`;
   const files = new Map();
@@ -152,9 +157,9 @@ function addRelease(repo, version, { category = "game", lie = false, targets, pa
     files.set(file, body);
     packages.push({ file, target, tier, size: body.length, sha256: lie ? sha(Buffer.from("not this")) : sha(body) });
   }
-  if (icon) files.set("icon.png", PNG);
-  files.set("screenshot-1.png", PNG);
-  if (page) files.set("cover.png", PNG);
+  if (icon) files.set("icon.jpg", ICON);
+  files.set("screenshot-1.jpg", COVER);
+  if (page) files.set("cover.jpg", COVER);
   if (page) files.set("about.en.md", Buffer.from("# About Hello\n\nServe yourself **sushi** from the belt.\n"));
   const index = {
     schema: 1,
@@ -168,8 +173,8 @@ function addRelease(repo, version, { category = "game", lie = false, targets, pa
     tags: ["fixture", "arcade"],
     color: "#2fa37a",
     icon: icon ? iconName : null,
-    screenshots: ["screenshot-1.png"],
-    cover: page ? "cover.png" : null,
+    screenshots: ["screenshot-1.jpg"],
+    cover: page ? "cover.jpg" : null,
     about: page ? { en: "about.en.md" } : {},
     controls: [{ button: "a", action: "Eat", actions: { "zh-CN": "吃" } }],
     packages,

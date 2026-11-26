@@ -88,11 +88,11 @@ x-gizlet-host: dl.gizlet.io
 HTTP 410
 
 # Older mirrored releases are still served; art comes from R2 too.
-GET {{base}}/github.com/fixture-org/hello-gizlet/v0.2.0/icon.png
+GET {{base}}/github.com/fixture-org/hello-gizlet/v0.2.0/icon.jpg
 x-gizlet-host: dl.gizlet.io
 HTTP 200
 [Asserts]
-header "content-type" == "image/png"
+header "content-type" == "image/jpeg"
 
 GET {{base}}/github.com/fixture-org/unknown/v1.0.0/x.gzl
 x-gizlet-host: dl.gizlet.io

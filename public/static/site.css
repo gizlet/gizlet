@@ -127,7 +127,7 @@ img.pic { object-fit: cover; background: #f4f5f7; }
 .handheld.small { font-size: 7.8px; }
 .body-sun { --body: var(--sun); } .body-coral { --body: #ff7a63; } .body-mint { --body: var(--mint); } .body-sky { --body: var(--sky); }
 .body-smoke { --body: #3a3d45; --ctl: #121317; }
-.handheld .screen { display: grid; place-items: center; aspect-ratio: 4 / 3; overflow: hidden; padding: .8em; color: #fff; text-align: center; background: #0f1117; border: 3px solid var(--ink); border-radius: .8em; box-shadow: inset 0 0 0 .55em #23262e; font: 700 1.1em/1.35 var(--sans); }
+.handheld .screen { position: relative; display: grid; place-items: center; aspect-ratio: 4 / 3; overflow: hidden; padding: .8em; color: #fff; text-align: center; background: #0f1117; border: 3px solid var(--ink); border-radius: .8em; box-shadow: inset 0 0 0 .55em #23262e; font: 700 1.1em/1.35 var(--sans); }
 .handheld .controls { display: flex; justify-content: space-between; align-items: center; margin: 1.7em .6em 0; }
 .handheld .dpad { width: 4.8em; height: 4.8em; background: linear-gradient(var(--ctl), var(--ctl)) center / 1.55em 100% no-repeat, linear-gradient(var(--ctl), var(--ctl)) center / 100% 1.55em no-repeat; }
 .handheld .abxy { display: grid; grid-template: repeat(3, 1.55em) / repeat(3, 1.55em); }
@@ -141,8 +141,10 @@ img.pic { object-fit: cover; background: #f4f5f7; }
 .handheld .boot .px { display: grid; grid-template-columns: repeat(3, .75em); gap: .2em; }
 .handheld .boot .px i { width: .75em; height: .75em; background: #fff; }
 .handheld .boot .px i:nth-child(even) { background: var(--sun); }
-.handheld .now { display: grid; justify-items: center; gap: .6em; width: 100%; }
-.handheld .now .pic { display: block; width: 46%; aspect-ratio: 1; border-radius: .6em; }
+/* Now playing: the gizlet's cover fills the screen, its name on a tag in the corner. */
+.handheld .now { position: absolute; inset: .8em; overflow: hidden; border-radius: .4em; }
+.handheld .now .pic { display: block; width: 100%; height: 100%; }
+.handheld .now b { position: absolute; left: .55em; bottom: .55em; padding: .15em .7em; font-size: .9em; background: #101114d0; border-radius: 999px; }
 .installing { display: grid; gap: .6em; width: 100%; }
 .installing .url { overflow-wrap: anywhere; font: 400 .85em var(--mono); color: #aab0bd; }
 .installing .bar { height: .7em; background: #2a2e38; border-radius: .35em; overflow: hidden; }

@@ -61,7 +61,7 @@ jsonpath "$.name" == "Hello Gizlet"
 jsonpath "$.version" == "0.2.0"
 jsonpath "$.visibility" == "listed"
 jsonpath "$.packages" count == 3
-jsonpath "$.icon_url" == "https://dl.gizlet.io/github.com/fixture-org/hello-gizlet/v0.2.0/icon.png"
+jsonpath "$.icon_url" == "https://dl.gizlet.io/github.com/fixture-org/hello-gizlet/v0.2.0/icon.jpg"
 
 # Listed gizlets are searchable.
 GET {{base}}/v1/gizlets?q=hello
