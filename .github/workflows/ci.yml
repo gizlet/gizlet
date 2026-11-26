@@ -110,10 +110,12 @@ jobs:
 
   deploy:
     needs: test
-    # `start` is skipped on push, so the default success() would skip this job too.
+    # `start` is skipped on push, so the default success() would skip this job too. A manual
+    # run on main with no pull request deploys again, for example after changing MIRROR_ORIGINS.
     if: >-
-      !cancelled() && needs.test.result == 'success'
-      && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      !cancelled() && needs.test.result == 'success' && github.ref == 'refs/heads/main'
+      && (github.event_name == 'push'
+          || (github.event_name == 'workflow_dispatch' && inputs.pull_request_number == ''))
     runs-on: ${{ fromJSON(vars.RUNNERS || '{}')['linux-x64'] || 'ubuntu-24.04' }}
     timeout-minutes: 20
     environment:
@@ -156,13 +158,18 @@ jobs:
       - name: Migrate Postgres
         run: node scripts/pg.ts migrate
       # Secrets go up with the new version, so the first deploy needs no existing Worker.
+      # MIRROR_ORIGINS (mirror domains that mailed links may point at) is a repository variable,
+      # so adding a mirror needs no pull request: set it, then run this workflow on main.
       - name: Deploy
         env:
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+          MIRROR_ORIGINS: ${{ vars.MIRROR_ORIGINS }}
         run: |
           secrets="$RUNNER_TEMP/worker-secrets.json"
           trap 'rm -f "$secrets"' EXIT
           (umask 077 && sops decrypt --output-type json secrets/worker.enc.yaml > "$secrets")
-          pnpm exec wrangler deploy --secrets-file "$secrets"
+          vars=()
+          if [[ -n "$MIRROR_ORIGINS" ]]; then vars=(--var "MIRROR_ORIGINS:$MIRROR_ORIGINS"); fi
+          pnpm exec wrangler deploy --secrets-file "$secrets" "${vars[@]}"
       - name: Smoke test production
         run: hurl --test --variable "run=$(date +%s)" tests/prod/*.hurl

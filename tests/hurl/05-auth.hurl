@@ -11,9 +11,11 @@ jsonpath "$.user.emailVerified" == false
 jsonpath "$.token" == null
 header "set-auth-token" not exists
 
-# Until the address is confirmed there is no session; each try mails a fresh link.
+# Until the address is confirmed there is no session; each try mails a fresh link. This one
+# comes through a listed mirror (MIRROR_ORIGINS), so its link is on the mirror.
 POST {{base}}/v1/auth/sign-in/email
 x-gizlet-host: api.gizlet.io
+X-Forwarded-Host: api.mirror.test
 Origin: {{site}}
 Accept-Language: zh-CN
 {"email": "player-{{run}}@example.com", "password": "correct horse battery", "callbackURL": "/login?verified=1&next=%2Faccount"}
@@ -30,7 +32,7 @@ HTTP 200
 verify_token: jsonpath "$.link" regex "token=([^&]+)"
 [Asserts]
 jsonpath "$.subject" == "确认你的 Gizlet 邮箱"
-jsonpath "$.link" startsWith "{{site}}/v1/auth/verify-email?token="
+jsonpath "$.link" startsWith "https://mirror.test/v1/auth/verify-email?token="
 jsonpath "$.link" contains "callbackURL=%2Flogin%3Fverified%3D1%26next%3D%252Faccount"
 
 # A forged or broken link changes nothing and says why.
@@ -58,8 +60,10 @@ HTTP 200
 jsonpath "$.user.email_verified" == true
 
 # Signing up again with the address answers like a new sign-up and mails the owner instead.
+# A host that is not a listed mirror changes nothing.
 POST {{base}}/v1/auth/sign-up/email
 x-gizlet-host: api.gizlet.io
+X-Forwarded-Host: evil.example
 Origin: {{site}}
 {"email": "player-{{run}}@example.com", "password": "another password!", "name": "Again"}
 HTTP 200

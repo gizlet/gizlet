@@ -54,3 +54,30 @@ test("sender addresses", async () => {
   assert.deepEqual(parseAddress('"Gizlet Team" <hello@gizlet.io>'), { name: "Gizlet Team", email: "hello@gizlet.io" });
   assert.equal(parseAddress(" hello@gizlet.io "), "hello@gizlet.io");
 });
+
+test("mailed links follow listed mirrors only", async () => {
+  const { linkOrigin, mirrorDomains } = await import("../../src/auth.ts");
+  const env = { SITE_ORIGIN: "https://gizlet.io", MIRROR_ORIGINS: " gizlet.xyz, https://Gizlet.Example/ " };
+  const via = (host?: string) => linkOrigin(env, new Request("https://gizlet.io/v1/auth/sign-up/email", { headers: host ? { "x-forwarded-host": host } : {} }));
+  assert.deepEqual(mirrorDomains(env), ["gizlet.xyz", "gizlet.example"]);
+  assert.equal(via(), "https://gizlet.io");
+  assert.equal(via("gizlet.xyz"), "https://gizlet.xyz");
+  assert.equal(via("API.gizlet.xyz"), "https://gizlet.xyz");
+  assert.equal(via("www.gizlet.example"), "https://gizlet.example");
+  for (const bad of ["evil.example", "gizlet.xyz.evil.example", "evilgizlet.xyz", "dl.evil.example", "x.gizlet.xyz"]) assert.equal(via(bad), "https://gizlet.io", bad);
+  assert.equal(linkOrigin({ SITE_ORIGIN: "https://gizlet.io" }, new Request("https://gizlet.io/", { headers: { "x-forwarded-host": "gizlet.xyz" } })), "https://gizlet.io");
+  assert.equal(linkOrigin(env, undefined), "https://gizlet.io");
+});
+
+test("the verification link moves to the mirror, token and all", async () => {
+  const { authOptions } = await import("../../src/auth.ts");
+  const sent: { text: string }[] = [];
+  const env = { SITE_ORIGIN: "https://gizlet.io", API_ORIGIN: "https://api.gizlet.io", GITHUB_API: "https://api.github.com", BETTER_AUTH_SECRET: "x", MAIL_FROM: "Gizlet <hello@gizlet.io>", MIRROR_ORIGINS: "gizlet.xyz", MAIL: { send: async (m: { text: string }) => (sent.push(m), {}) } };
+  const send = authOptions(env as never, {} as never).emailVerification!.sendVerificationEmail!;
+  const url = "https://gizlet.io/v1/auth/verify-email?token=t&callbackURL=%2Flogin";
+  await send({ user: { email: "p@example.com" } as never, url, token: "t" }, new Request("https://gizlet.io/", { headers: { "x-forwarded-host": "gizlet.xyz" } }));
+  await send({ user: { email: "p@example.com" } as never, url, token: "t" }, new Request("https://gizlet.io/"));
+  assert.match(sent[0]!.text, /https:\/\/gizlet\.xyz\/v1\/auth\/verify-email\?token=t&callbackURL=%2Flogin/);
+  assert.doesNotMatch(sent[0]!.text, /gizlet\.io/);
+  assert.match(sent[1]!.text, /https:\/\/gizlet\.io\/v1\/auth\/verify-email\?token=t/);
+});
