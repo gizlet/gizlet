@@ -1,16 +1,25 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { landingName, manifestFields, pathProblem } from "../../src/check.ts";
+import { landingName, manifestMismatches, parseManifest, pathProblem } from "../../src/check.ts";
 
-test("manifest.toml: basic and literal strings, tables ignored", () => {
-  const m = manifestFields(["id = 'dev.test'", 'version = "1.0.0"', "target = 'aarch64-unknown-linux-gnu' # comment", "entry = \"bin/game\"", "", "[names]", '"zh-CN" = "游戏"'].join("\n"));
-  assert.deepEqual(m, { id: "dev.test", version: "1.0.0", target: "aarch64-unknown-linux-gnu", entry: "bin/game" });
+const expected = { id: "dev.test", name: "Test", version: "1.0.0", runtime: 1, target: "aarch64-unknown-linux-gnu", tier: "lite", entry: "bin/game" };
+
+test("manifest.json: must be a JSON object", () => {
+  assert.deepEqual(parseManifest('{"id": "dev.test"}'), { id: "dev.test" });
+  assert.throws(() => parseManifest("id = 'dev.test'"), /not valid JSON/);
+  assert.throws(() => parseManifest("[1]"), /not a JSON object/);
+  assert.throws(() => parseManifest("null"), /not a JSON object/);
 });
 
-test("manifest.toml: non-string values are left out, invalid TOML throws", () => {
-  assert.deepEqual(manifestFields("id = 3\nentry = 'game'"), { entry: "game" });
-  assert.throws(() => manifestFields("id = 'unterminated"), /not valid TOML/);
-  assert.throws(() => manifestFields("id = 'a'\nid = 'b'"), /not valid TOML/);
+test("manifest.json: must match gizlet.toml, runtime defaulting to 1", () => {
+  const { runtime: _, ...rest } = expected;
+  assert.deepEqual(manifestMismatches({ ...rest, color: "#000000" }, expected), []);
+  assert.deepEqual(manifestMismatches({ ...expected, tier: "full", entry: "game" }, expected), [
+    'manifest.json has tier "full", gizlet.toml says "lite"',
+    'manifest.json has entry "game", gizlet.toml says "bin/game"',
+  ]);
+  assert.deepEqual(manifestMismatches({ ...expected, runtime: "1" }, expected), ['manifest.json has runtime "1", gizlet.toml says 1']);
+  assert.equal(manifestMismatches({}, expected).length, 6);
 });
 
 test("zip paths must be canonical", () => {

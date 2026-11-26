@@ -29,6 +29,8 @@ jsonpath "$.status" == "ready"
 jsonpath "$.warnings" count == 0
 jsonpath "$.mirrored" == true
 jsonpath "$.packages" count == 3
+jsonpath "$.packages[0].sha256" matches /^[0-9a-f]{64}$/
+jsonpath "$.packages[0].size" > 0
 jsonpath "$.visibility" == "listed"
 header "cache-control" == "no-store"
 
@@ -61,7 +63,8 @@ jsonpath "$.name" == "Hello Gizlet"
 jsonpath "$.version" == "0.2.0"
 jsonpath "$.visibility" == "listed"
 jsonpath "$.packages" count == 3
-jsonpath "$.icon_url" == "https://dl.gizlet.io/github.com/fixture-org/hello-gizlet/v0.2.0/icon.jpg"
+jsonpath "$.icon_url" == "https://dl.gizlet.io/github.com/fixture-org/hello-gizlet/v0.2.0/store/icon.png"
+jsonpath "$.packages[0].entry" == "game"
 
 # Listed gizlets are searchable.
 GET {{base}}/v1/gizlets?q=hello
@@ -70,7 +73,7 @@ HTTP 200
 [Asserts]
 jsonpath "$.gizlets[0].repo" == "github.com/fixture-org/hello-gizlet"
 
-# A tag that does not match gizlet.json's version is refused.
+# A tag with no gizlet.toml is refused.
 GET {{fixture}}/token?repo=fixture-org/hello-gizlet&ref=refs/tags/v9.9.9
 HTTP 200
 [Captures]
@@ -82,9 +85,9 @@ Authorization: Bearer {{token3}}
 {}
 HTTP 404
 [Asserts]
-jsonpath "$.error.message" contains "no gizlet.json"
+jsonpath "$.error.message" contains "has no gizlet.toml at v9.9.9"
 
-# Art must be images: an index that names a package as its icon is refused.
+# Art must be images: a gizlet.toml that names a package as its icon is refused.
 GET {{fixture}}/token?repo=fixture-org/gzl-icon&ref=refs/tags/v0.1.0
 HTTP 200
 [Captures]
@@ -97,14 +100,15 @@ Authorization: Bearer {{token4}}
 HTTP 422
 [Asserts]
 jsonpath "$.error.code" == "invalid_index"
-jsonpath "$.error.message" contains "icon must name a .png, .jpg or .webp"
+jsonpath "$.error.message" contains "icon must be a .png, .jpg or .webp file"
 
 # Broken releases fail their checks and are not served.
-GET {{base}}/v1/gizlets/github.com/fixture-org/bad-sum
+# A package gizlet.toml lists must be in the release.
+GET {{base}}/v1/gizlets/github.com/fixture-org/missing-package
 x-gizlet-host: api.gizlet.io
 HTTP 200
 
-GET {{base}}/v1/gizlets/github.com/fixture-org/bad-sum/releases/v0.1.0
+GET {{base}}/v1/gizlets/github.com/fixture-org/missing-package/releases/v0.1.0
 x-gizlet-host: api.gizlet.io
 [Options]
 retry: 40
@@ -112,7 +116,22 @@ retry-interval: 250ms
 HTTP 200
 [Asserts]
 jsonpath "$.status" == "failed"
-jsonpath "$.error" contains "sha256"
+jsonpath "$.error" contains "dev.fixture.missingpackage-0.1.0-aarch64-unknown-linux-gnu-lite.gzl is missing from the GitHub release"
+
+# A package's manifest.json must match gizlet.toml.
+GET {{base}}/v1/gizlets/github.com/fixture-org/mismatch
+x-gizlet-host: api.gizlet.io
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/mismatch/releases/v0.1.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "failed"
+jsonpath "$.error" contains "manifest.json has tier \"full\", gizlet.toml says \"lite\""
 
 GET {{base}}/v1/gizlets/github.com/fixture-org/symlink
 x-gizlet-host: api.gizlet.io
@@ -213,7 +232,7 @@ HTTP 200
 jsonpath "$.status" == "failed"
 jsonpath "$.error" contains "renames it (Unicode Path)"
 
-# A manifest.toml with TOML literal strings is valid.
+# A gizlet.toml with TOML literal strings is valid.
 GET {{base}}/v1/gizlets/github.com/fixture-org/literal-toml
 x-gizlet-host: api.gizlet.io
 HTTP 200
@@ -248,7 +267,7 @@ retry-interval: 250ms
 HTTP 200
 [Asserts]
 jsonpath "$.status" == "ready"
-jsonpath "$.warnings" contains "gizlet.json names no icon"
+jsonpath "$.warnings" contains "gizlet.toml names no icon"
 jsonpath "$.visibility" == "unlisted"
 jsonpath "$.visibility_reason" contains "no description"
 

@@ -18,8 +18,11 @@ export interface GizletRow {
   category: string;
   tags: string;
   color: string | null;
+  license: string | null;
+  links: string;
   icon: string | null;
   cover: string | null;
+  pattern: string | null;
   screenshots: string;
   about: string;
   controls: string;
@@ -53,7 +56,8 @@ export interface ReleaseRow {
   revision: number;
   error: string | null;
   warnings: string;
-  index_json: string;
+  /** The release's gizlet.toml, parsed (GizletToml). */
+  spec_json: string;
   mirrored: number;
   published_at: number;
   updated_at: number;
@@ -75,8 +79,12 @@ export interface PackageRow {
   file: string;
   target: string;
   tier: Tier;
-  size: number;
-  sha256: string;
+  entry: string;
+  /** Known once the package is mirrored. */
+  size: number | null;
+  sha256: string | null;
+  /** R2 key of the mirrored bytes `sha256` describes. */
+  object: string | null;
   /** The release revision this row belongs to. */
   revision: number;
 }
@@ -90,8 +98,9 @@ export const parse = <T>(s: string | null, fallback: T): T => {
   }
 };
 
+/** A download URL: a package (a release asset name) or art (a repository path). */
 export function dlUrl(env: Env, repo: string, tag: string, file: string): string {
-  return `${env.DL_ORIGIN}/${repo}/${encodeURIComponent(tag)}/${encodeURIComponent(file)}`;
+  return `${env.DL_ORIGIN}/${repo}/${encodeURIComponent(tag)}/${file.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 export function summary(env: Env, g: GizletRow) {
@@ -105,8 +114,10 @@ export function summary(env: Env, g: GizletRow) {
     category: g.category,
     tags: parse<string[]>(g.tags, []),
     color: g.color,
+    license: g.license,
     icon_url: g.icon && g.latest_tag ? dlUrl(env, g.repo, g.latest_tag, g.icon) : null,
     cover_url: g.cover && g.latest_tag ? dlUrl(env, g.repo, g.latest_tag, g.cover) : null,
+    pattern_url: g.pattern && g.latest_tag ? dlUrl(env, g.repo, g.latest_tag, g.pattern) : null,
     version: g.version,
     tag: g.latest_tag,
     updated_at: new Date(g.updated_at).toISOString(),
@@ -127,12 +138,14 @@ export function summary(env: Env, g: GizletRow) {
  * A package's download URL names its sha256: a republished tag can change a file's bytes, and
  * only a URL that pins them can be cached forever.
  */
-export function packageUrl(env: Env, p: Pick<PackageRow, "repo" | "tag" | "file" | "sha256">): string {
+export function packageUrl(env: Env, p: Pick<PackageRow, "repo" | "tag" | "file"> & { sha256: string }): string {
   return `${dlUrl(env, p.repo, p.tag, p.file)}?sha256=${p.sha256}`;
 }
 
+/** A package; `size`, `sha256` and `url` are null until it is mirrored. */
 export function packageJson(env: Env, p: PackageRow) {
-  return { file: p.file, target: p.target, tier: p.tier, size: p.size, sha256: p.sha256, url: packageUrl(env, p) };
+  const sha256 = p.sha256;
+  return { file: p.file, target: p.target, tier: p.tier, entry: p.entry, size: p.size, sha256, url: sha256 ? packageUrl(env, { ...p, sha256 }) : null };
 }
 
 export async function getGizlet(env: Env, repo: string): Promise<GizletRow | null> {
@@ -155,6 +168,7 @@ export async function gizletDetail(env: Env, g: GizletRow) {
     screenshots: tag ? shots.map((s) => dlUrl(env, g.repo, tag, s)) : [],
     about_urls: tag ? Object.fromEntries(Object.entries(parse<Record<string, string>>(g.about, {})).map(([k, f]) => [k, dlUrl(env, g.repo, tag, f)])) : {},
     controls: parse<Control[]>(g.controls, []),
+    links: parse<Record<string, string>>(g.links, {}),
     // A private repository's files are not public on GitHub.
     readme_url: tag && !g.private ? `${env.GITHUB_RAW}/${g.owner}/${g.name_repo}/${tag}/README.md` : null,
     packages: packages.map((p) => packageJson(env, p)),
@@ -191,10 +205,10 @@ export async function pickInstall(env: Env, repo: string, target: string, tier: 
   const { results } = await env.DB.prepare(
     `SELECT p.*, r.version AS version, r.published_at AS published_at FROM packages p
        JOIN releases r ON r.repo = p.repo AND r.tag = p.tag AND r.revision = p.revision
-      WHERE p.repo = ? AND p.target = ? AND r.status = 'ready'`,
+      WHERE p.repo = ? AND p.target = ? AND r.status = 'ready' AND p.sha256 IS NOT NULL`,
   )
     .bind(repo, target)
-    .all<PackageRow & { version: string; published_at: number }>();
+    .all<PackageRow & { size: number; sha256: string; version: string; published_at: number }>();
   const compatible = results.filter((p) => tierRunsOn(p.tier, tier)).sort((a, b) => compareVersions(b.version, a.version) || b.published_at - a.published_at);
   if (!compatible.length) return null;
   const newest = compatible[0]!.tag;

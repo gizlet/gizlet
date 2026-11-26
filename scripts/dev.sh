@@ -5,7 +5,7 @@
 #
 # GitHub is the test fixture server (tests/fixtures/server.mjs) and Postgres is in-memory
 # PGlite, so nothing touches the network and every start is fresh. A few fixture gizlets are
-# published on start; the admin token is `dev-admin`.
+# published on start, among them tests/fixtures/repos/rocket-snail; the admin token is `dev-admin`.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -42,10 +42,11 @@ APP_KEY=$(curl -fsS "$FIXTURE/_fixture/app-key" | awk '{printf "%s\\n", $0}')
     token=$(curl -fsS "$FIXTURE/token?repo=$1&ref=refs/tags/$2" | node -e 'process.stdin.on("data", (d) => console.log(JSON.parse(d).value))')
     curl -fsS -o /dev/null -X POST -H 'x-gizlet-host: api.gizlet.io' -H "authorization: Bearer $token" "$API/v1/publish" -d '{}'
   }
+  publish fixture-org/rocket-snail v0.1.0
   publish fixture-org/hello-gizlet v0.1.0
   publish fixture-org/hello-gizlet v0.2.0
   for repo in on-demand symlink; do curl -fsS -o /dev/null -H 'x-gizlet-host: api.gizlet.io' "$API/v1/gizlets/github.com/fixture-org/$repo" || true; done
-  echo "==> Sample gizlets published: http://localhost:$PORT/github.com/fixture-org/hello-gizlet"
+  echo "==> Sample gizlets published: http://localhost:$PORT/github.com/fixture-org/rocket-snail"
 ) &
 pids+=($!)
 

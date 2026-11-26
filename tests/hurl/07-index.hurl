@@ -189,7 +189,14 @@ HTTP 200
 jsonpath "$.status" == "ready"
 jsonpath "$.warnings" count == 0
 
+# The package came through the relocated asset API; gizlet.toml and the art, being repository
+# files, through the Contents API, since the private repository is not on the web.
 GET {{fixture}}/_fixture/hits?key=relocated:fixture-org/secret-gizlet
+HTTP 200
+[Asserts]
+jsonpath "$.count" >= 1
+
+GET {{fixture}}/_fixture/hits?key=contents:fixture-org/secret-gizlet
 HTTP 200
 [Asserts]
 jsonpath "$.count" > 2

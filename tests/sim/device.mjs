@@ -5,7 +5,7 @@
 //   player     signs up on gizlet.io, confirms the email and approves the console's code at /device
 //   console    signs in with the device flow, opens a share link, downloads the package in
 //              two parts (a dropped connection, then a Range resume), verifies its sha256,
-//              unpacks it and checks manifest.toml and the entry executable
+//              unpacks it and checks manifest.json and the entry executable
 //
 //   BASE=http://127.0.0.1:18787 FIXTURE=http://127.0.0.1:18788 SITE=http://gizlet.test node tests/sim/device.mjs
 import { createHash } from "node:crypto";
@@ -124,16 +124,10 @@ log("console", "downloaded and verified sha256");
 
 // Unpack as the console would.
 const files = unzip(file);
-const manifest = Object.fromEntries(
-  files
-    .get("manifest.toml")
-    .toString()
-    .split("\n")
-    .map((l) => /^([a-z_]+)\s*=\s*"(.*)"$/.exec(l.trim()))
-    .filter(Boolean)
-    .map((m) => [m[1], m[2]]),
-);
-if (manifest.id !== install.id || manifest.version !== install.version || manifest.target !== TARGET) fail(`manifest.toml says ${JSON.stringify(manifest)}`);
+const manifest = JSON.parse(files.get("manifest.json").toString());
+if (manifest.id !== install.id || manifest.version !== install.version || manifest.target !== TARGET || manifest.entry !== pkg.entry) {
+  fail(`manifest.json says ${JSON.stringify(manifest)}`);
+}
 const exe = files.get(manifest.entry) ?? fail(`entry ${manifest.entry} is missing`);
 if (exe.readUInt32BE(0) !== 0x7f454c46 || exe.readUInt16LE(18) !== 183) fail("entry is not an aarch64 ELF executable");
 log("console", `unpacked ${files.size} files; entry "${manifest.entry}" is an aarch64 ELF`);

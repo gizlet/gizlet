@@ -7,16 +7,18 @@
  *   GET /repos/<o>/<r>/releases/latest          -> the tag
  *   GET /repos/<o>/<r>/releases/tags/<tag>      -> asset ids
  *   GET /repos/<o>/<r>/releases/assets/<id>     -> 302 to a short-lived download URL
- * Elsewhere (no app configured, or not installed there) public github.com web URLs are used,
- * which need no credentials:
- *   /<o>/<r>/releases/latest                    -> 302 to /releases/tag/<tag>
- *   /<o>/<r>/releases/download/<tag>/<asset>    -> the asset
+ *   GET /repos/<o>/<r>/contents/<path>?ref=<tag> -> a repository file (gizlet.toml, art)
+ * Elsewhere (no app configured, or not installed there) public web URLs are used, which need no
+ * credentials:
+ *   github.com/<o>/<r>/releases/latest                   -> 302 to /releases/tag/<tag>
+ *   github.com/<o>/<r>/releases/download/<tag>/<asset>   -> a release asset (packages)
+ *   raw.githubusercontent.com/<o>/<r>/<tag>/<path>       -> a repository file
  */
 import { SignJWT } from "jose";
 import type { Env } from "./env";
 import { importRsaKey } from "./pem";
 import type { RepoRef } from "./repo";
-import { IndexError, parseIndex, type ReleaseIndex } from "./schema";
+import { IndexError, MAX_TOML_BYTES, parseGizletToml, type GizletToml } from "./schema";
 
 export class NotFound extends Error {}
 export class UpstreamError extends Error {}
@@ -24,7 +26,6 @@ export class UpstreamError extends Error {}
 class TokenDenied extends Error {}
 
 const UA = "gizlet (+https://gizlet.io)";
-const MAX_INDEX_BYTES = 256 * 1024;
 /** How long to remember which installation covers a repository, or that none does. */
 const INSTALLATION_TTL_MS = 10 * 60 * 1000;
 const NO_INSTALLATION_TTL_MS = 2 * 60 * 1000;
@@ -32,6 +33,13 @@ const NO_INSTALLATION_TTL_MS = 2 * 60 * 1000;
 export function assetUrl(env: Env, owner: string, name: string, tag: string, file: string): string {
   return `${env.GITHUB_WEB}/${owner}/${name}/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(file)}`;
 }
+
+/** A repository file at a tag, on the public web. */
+export function rawUrl(env: Env, owner: string, name: string, tag: string, path: string): string {
+  return `${env.GITHUB_RAW}/${owner}/${name}/${encodeURIComponent(tag)}/${encodeRepoPath(path)}`;
+}
+
+const encodeRepoPath = (path: string) => path.split("/").map(encodeURIComponent).join("/");
 
 export function ghFetch(url: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
@@ -56,6 +64,8 @@ export interface Reader {
   latestTag(): Promise<string | null>;
   /** A release asset; 404 when the release or asset is missing. */
   asset(tag: string, file: string): Promise<Response>;
+  /** A repository file at a tag (gizlet.toml, art); 404 when it is missing. */
+  file(tag: string, path: string): Promise<Response>;
   /**
    * How a client can get the asset: a URL anyone can download it from for the next few minutes,
    * or, when GitHub hands over the bytes instead of a URL, the response itself (for `range`, a
@@ -77,24 +87,27 @@ export async function reader(env: Env, ref: RepoRef): Promise<Reader> {
   return installation === null ? web : new AppReader(env, ref, installation, web);
 }
 
-export async function fetchIndex(src: Reader, ref: RepoRef, tag: string): Promise<ReleaseIndex> {
-  const res = await src.asset(tag, "gizlet.json");
+/** The repository's gizlet.toml at a release tag. */
+export async function fetchGizletToml(src: Reader, ref: RepoRef, tag: string): Promise<GizletToml> {
+  const res = await src.file(tag, "gizlet.toml");
   if (res.status === 404) {
     await res.body?.cancel();
-    throw new NotFound(`release ${tag} of ${ref.key} has no gizlet.json`);
+    throw new NotFound(`${ref.key} has no gizlet.toml at ${tag}`);
   }
   if (!res.ok) {
     await res.body?.cancel();
-    throw new UpstreamError(`GitHub answered ${res.status} for gizlet.json`);
+    throw new UpstreamError(`GitHub answered ${res.status} for gizlet.toml`);
   }
-  const text = await readCapped(res, MAX_INDEX_BYTES);
-  let json: unknown;
+  const bytes = await readCapped(res, MAX_TOML_BYTES).catch((e: unknown) => {
+    throw e instanceof IndexError ? new IndexError(`gizlet.toml is larger than ${MAX_TOML_BYTES} bytes`) : e;
+  });
+  let text: string;
   try {
-    json = JSON.parse(new TextDecoder().decode(text));
+    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
   } catch {
-    throw new IndexError("gizlet.json is not valid JSON");
+    throw new IndexError("gizlet.toml is not UTF-8");
   }
-  return parseIndex(json);
+  return parseGizletToml(text);
 }
 
 class WebReader implements Reader {
@@ -119,6 +132,10 @@ class WebReader implements Reader {
 
   asset(tag: string, file: string): Promise<Response> {
     return ghFetch(assetUrl(this.env, this.ref.owner, this.ref.name, tag, file));
+  }
+
+  file(tag: string, path: string): Promise<Response> {
+    return ghFetch(rawUrl(this.env, this.ref.owner, this.ref.name, tag, path));
   }
 
   async download(tag: string, file: string, _range?: string): Promise<Download | null> {
@@ -259,6 +276,22 @@ class AppReader implements Reader {
     if (got === undefined) return this.web.asset(tag, file);
     if (got === null) return new Response("Not Found", { status: 404 });
     return "response" in got ? got.response : ghFetch(got.url);
+  }
+
+  async file(tag: string, path: string): Promise<Response> {
+    if (this.fallback) return this.fallback.file(tag, path);
+    const res = await this.api(`/contents/${encodeRepoPath(path)}?ref=${encodeURIComponent(tag)}`, { headers: { accept: "application/vnd.github.raw" } });
+    // A 404 usually means the file is missing; the public web answers either way, without giving
+    // up on the app for the release's packages. 401 and 403 do give up on it.
+    if (res.status === 404) {
+      await res.body?.cancel();
+      return this.web.file(tag, path);
+    }
+    if (this.denied(res)) {
+      await res.body?.cancel();
+      return this.web.file(tag, path);
+    }
+    return res;
   }
 
   async download(tag: string, file: string, range?: string): Promise<Download | null> {
