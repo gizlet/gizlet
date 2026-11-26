@@ -246,6 +246,21 @@ GET {{base}}/github.com/fixture-org/twin-b/v1.0.0/dev.fixture.twina-1.0.0-aarch6
 x-gizlet-host: dl.gizlet.io
 HTTP 410
 
+# Reporting again redoes the follow-up work of every affected release, already failed or not.
+POST {{base}}/v1/admin/gizlets/github.com/fixture-org/twin-a/releases/v1.0.0/scan
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{admin_token}}
+{"result": "infected", "note": "Linux.Trojan.Twin"}
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "failed"
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/twin-b
+x-gizlet-host: api.gizlet.io
+HTTP 404
+[Asserts]
+jsonpath "$.error.code" == "failed_checks"
+
 # --- Ratings ------------------------------------------------------------------------------------
 
 POST {{base}}/v1/auth/sign-up/email

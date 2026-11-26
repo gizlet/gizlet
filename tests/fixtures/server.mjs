@@ -24,6 +24,8 @@ const jwk = { ...(await exportJWK(publicKey)), kid: "fixture", alg: "RS256", use
 // The GitHub App. GitHub issues PKCS#1 keys.
 const APP_CLIENT_ID = "Iv-fixture";
 const INSTALLATION = 77;
+/** Installed on fixture-org/suspended (public), but suspended: no tokens. */
+const SUSPENDED = 78;
 const app = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const APP_KEY = app.privateKey.export({ type: "pkcs1", format: "pem" });
 const INSTALLED = new Set(["fixture-org/hello-gizlet", "fixture-org/secret-gizlet"]);
@@ -243,6 +245,8 @@ addRelease("fixture-org/secret-gizlet", "1.2.0", { targets: [["aarch64-unknown-l
 addRelease("fixture-org/hidden", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 // Scanned infected by tests/hurl/08-marks.hurl.
 addRelease("fixture-org/infected", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+// Public, with a suspended installation of the app: read through the web.
+addRelease("fixture-org/suspended", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 // The same files released in two repositories; 08-marks.hurl reports twin-a infected.
 addRelease("fixture-org/twin-a", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
 {
@@ -321,6 +325,7 @@ createServer(async (req, res) => {
   };
   if (parts[0] === "app" && parts[1] === "installations" && parts[3] === "access_tokens" && req.method === "POST") {
     if (!(await asApp())) return json(401, { message: "A JSON web token could not be decoded" });
+    if (Number(parts[2]) === SUSPENDED) return json(403, { message: "This installation has been suspended" });
     if (Number(parts[2]) !== INSTALLATION) return json(404, { message: "Not Found" });
     const t = `ghs_fixture${randomBytes(12).toString("hex")}`;
     tokens.add(t);
@@ -331,6 +336,7 @@ createServer(async (req, res) => {
     const key = `${owner}/${name}`.toLowerCase();
     if (rest.join("/") === "installation") {
       if (!(await asApp())) return json(401, { message: "A JSON web token could not be decoded" });
+      if (key === "fixture-org/suspended") return json(200, { id: SUSPENDED });
       return INSTALLED.has(key) ? json(200, { id: INSTALLATION }) : json(404, { message: "Not Found" });
     }
     if (!bearer || !tokens.has(bearer)) return json(401, { message: "Bad credentials" });

@@ -165,6 +165,24 @@ HTTP 200
 [Asserts]
 jsonpath "$.count" > 2
 
+# --- A public repository whose installation is suspended ------------------------------------
+
+# GitHub refuses the app a token there; the public web is used instead.
+GET {{base}}/v1/gizlets/github.com/fixture-org/suspended
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.version" == "1.0.0"
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/suspended/releases/v1.0.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "ready"
+
 # --- A private repository without the app ---------------------------------------------------
 
 GET {{base}}/v1/gizlets/github.com/fixture-org/hidden

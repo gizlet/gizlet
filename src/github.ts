@@ -20,6 +20,8 @@ import { IndexError, parseIndex, type ReleaseIndex } from "./schema";
 
 export class NotFound extends Error {}
 export class UpstreamError extends Error {}
+/** GitHub refused the app an installation token (a suspended installation, say). */
+class TokenDenied extends Error {}
 
 const UA = "gizlet (+https://gizlet.io)";
 const MAX_INDEX_BYTES = 256 * 1024;
@@ -152,7 +154,14 @@ class AppReader implements Reader {
   }
 
   private async api(path: string, init: RequestInit = {}): Promise<Response> {
-    const token = await installationToken(this.env, this.installation);
+    let token: string;
+    try {
+      token = await installationToken(this.env, this.installation);
+    } catch (e) {
+      // Treated like any other denial: the caller falls back to the public web.
+      if (e instanceof TokenDenied) return new Response(null, { status: 403 });
+      throw e;
+    }
     const headers = new Headers(init.headers);
     headers.set("authorization", `Bearer ${token}`);
     headers.set("x-github-api-version", "2022-11-28");
@@ -311,6 +320,7 @@ function installationToken(env: Env, installation: number): Promise<string> {
     const res = await appFetch(env, `/app/installations/${installation}/access_tokens`, { method: "POST" });
     if (!res.ok) {
       await res.body?.cancel();
+      if (res.status === 401 || res.status === 403 || res.status === 404) throw new TokenDenied(`GitHub refused an installation token (${res.status})`);
       throw new UpstreamError(`GitHub answered ${res.status} for an installation token`);
     }
     const t = (await res.json()) as { token: string; expires_at: string };
