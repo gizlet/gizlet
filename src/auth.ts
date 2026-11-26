@@ -27,8 +27,11 @@ export interface AuthEnv {
   /** Cloudflare Email Sending, from MAIL_FROM. */
   MAIL?: SendEmail;
   MAIL_FROM: string;
-  /** Mirror domains (mirror/), comma-separated: "gizlet.xyz,gizlet.example". Mail links follow them. */
-  MIRROR_ORIGINS?: string;
+  /**
+   * The domains links in our emails may use, comma-separated: "gizlet.io,gizlet.xyz". Each email
+   * links to the domain its request came in on, if listed; else to SITE_ORIGIN.
+   */
+  SITE_DOMAINS?: string;
   /** "1" for local runs (pnpm dev, tests): account emails are logged and kept in devOutbox instead of sent. */
   DEV_HOST_OVERRIDE?: string;
 }
@@ -73,26 +76,28 @@ async function sendMail(env: AuthEnv, mail: Mail): Promise<void> {
 /** Account emails in the language of the request that caused them. */
 const mailText = (request: Request | undefined) => MESSAGES[requestLocale(request?.headers)].mail;
 
-/** MIRROR_ORIGINS as bare lowercase domains; "https://" and trailing slashes are allowed there. */
-export function mirrorDomains(env: Pick<AuthEnv, "MIRROR_ORIGINS">): string[] {
-  return (env.MIRROR_ORIGINS ?? "")
+/** SITE_DOMAINS as bare lowercase domains; "https://" and trailing slashes are allowed there. */
+export function siteDomains(env: Pick<AuthEnv, "SITE_DOMAINS">): string[] {
+  return (env.SITE_DOMAINS ?? "")
     .split(/[,\s]+/)
     .map((d) => d.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, ""))
     .filter(Boolean);
 }
 
 /**
- * The origin mailed links should use: the mirror a request came through, else the site. The
- * mirror's nginx sends its host as X-Forwarded-Host. Anyone can send that header to gizlet.io,
- * so only listed mirrors count: links (with sign-in and reset tokens) never go to other hosts.
+ * The origin for links in an email: the domain its request came in on, if SITE_DOMAINS lists it,
+ * else SITE_ORIGIN. A proxy in front of the Worker (mirror/) names its domain in
+ * X-Forwarded-Host. Anyone can run one, or send that header, so only listed domains are used:
+ * the links carry sign-in and reset tokens.
  */
-export function linkOrigin(env: Pick<AuthEnv, "SITE_ORIGIN" | "MIRROR_ORIGINS">, request: Request | undefined): string {
-  const host = request?.headers.get("x-forwarded-host")?.split(",")[0]?.trim().toLowerCase();
-  if (host) for (const d of mirrorDomains(env)) if (host === d || host === `api.${d}` || host === `www.${d}`) return `https://${d}`;
+export function linkOrigin(env: Pick<AuthEnv, "SITE_ORIGIN" | "SITE_DOMAINS">, request: Request | undefined): string {
+  if (!request) return env.SITE_ORIGIN;
+  const host = (request.headers.get("x-forwarded-host")?.split(",")[0] ?? new URL(request.url).hostname).trim().toLowerCase();
+  for (const d of siteDomains(env)) if (host === d || host === `api.${d}` || host === `www.${d}`) return `https://${d}`;
   return env.SITE_ORIGIN;
 }
 
-/** A link Better Auth built on SITE_ORIGIN, moved to the request's mirror (see linkOrigin). */
+/** A link Better Auth built on SITE_ORIGIN, moved to the request's domain (see linkOrigin). */
 const mailLink = (env: AuthEnv, url: string, request: Request | undefined) =>
   url.startsWith(`${env.SITE_ORIGIN}/`) ? linkOrigin(env, request) + url.slice(env.SITE_ORIGIN.length) : url;
 

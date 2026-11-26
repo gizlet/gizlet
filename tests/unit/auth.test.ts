@@ -55,24 +55,29 @@ test("sender addresses", async () => {
   assert.equal(parseAddress(" hello@gizlet.io "), "hello@gizlet.io");
 });
 
-test("mailed links follow listed mirrors only", async () => {
-  const { linkOrigin, mirrorDomains } = await import("../../src/auth.ts");
-  const env = { SITE_ORIGIN: "https://gizlet.io", MIRROR_ORIGINS: " gizlet.xyz, https://Gizlet.Example/ " };
-  const via = (host?: string) => linkOrigin(env, new Request("https://gizlet.io/v1/auth/sign-up/email", { headers: host ? { "x-forwarded-host": host } : {} }));
-  assert.deepEqual(mirrorDomains(env), ["gizlet.xyz", "gizlet.example"]);
-  assert.equal(via(), "https://gizlet.io");
+test("links in emails use the request's domain, if listed", async () => {
+  const { linkOrigin, siteDomains } = await import("../../src/auth.ts");
+  const env = { SITE_ORIGIN: "https://gizlet.io", SITE_DOMAINS: " gizlet.io, gizlet.xyz, https://Gizlet.Example/ " };
+  const req = (url: string, forwarded?: string) => new Request(url, { headers: forwarded ? { "x-forwarded-host": forwarded } : {} });
+  const via = (host: string) => linkOrigin(env, req("https://gizlet.io/v1/auth/sign-up/email", host));
+  assert.deepEqual(siteDomains(env), ["gizlet.io", "gizlet.xyz", "gizlet.example"]);
+  // Straight to the Worker: the request's own host.
+  assert.equal(linkOrigin(env, req("https://api.gizlet.io/v1/auth/sign-in/email")), "https://gizlet.io");
+  // Through a proxy: the host it names.
   assert.equal(via("gizlet.xyz"), "https://gizlet.xyz");
   assert.equal(via("API.gizlet.xyz"), "https://gizlet.xyz");
   assert.equal(via("www.gizlet.example"), "https://gizlet.example");
+  assert.equal(via("gizlet.io"), "https://gizlet.io");
   for (const bad of ["evil.example", "gizlet.xyz.evil.example", "evilgizlet.xyz", "dl.evil.example", "x.gizlet.xyz"]) assert.equal(via(bad), "https://gizlet.io", bad);
-  assert.equal(linkOrigin({ SITE_ORIGIN: "https://gizlet.io" }, new Request("https://gizlet.io/", { headers: { "x-forwarded-host": "gizlet.xyz" } })), "https://gizlet.io");
+  // Nothing listed: always the site.
+  assert.equal(linkOrigin({ SITE_ORIGIN: "https://gizlet.io" }, req("https://gizlet.io/", "gizlet.xyz")), "https://gizlet.io");
   assert.equal(linkOrigin(env, undefined), "https://gizlet.io");
 });
 
-test("the verification link moves to the mirror, token and all", async () => {
+test("the verification link moves to the request's domain, token and all", async () => {
   const { authOptions } = await import("../../src/auth.ts");
   const sent: { text: string }[] = [];
-  const env = { SITE_ORIGIN: "https://gizlet.io", API_ORIGIN: "https://api.gizlet.io", GITHUB_API: "https://api.github.com", BETTER_AUTH_SECRET: "x", MAIL_FROM: "Gizlet <hello@gizlet.io>", MIRROR_ORIGINS: "gizlet.xyz", MAIL: { send: async (m: { text: string }) => (sent.push(m), {}) } };
+  const env = { SITE_ORIGIN: "https://gizlet.io", API_ORIGIN: "https://api.gizlet.io", GITHUB_API: "https://api.github.com", BETTER_AUTH_SECRET: "x", MAIL_FROM: "Gizlet <hello@gizlet.io>", SITE_DOMAINS: "gizlet.io,gizlet.xyz", MAIL: { send: async (m: { text: string }) => (sent.push(m), {}) } };
   const send = authOptions(env as never, {} as never).emailVerification!.sendVerificationEmail!;
   const url = "https://gizlet.io/v1/auth/verify-email?token=t&callbackURL=%2Flogin";
   await send({ user: { email: "p@example.com" } as never, url, token: "t" }, new Request("https://gizlet.io/", { headers: { "x-forwarded-host": "gizlet.xyz" } }));

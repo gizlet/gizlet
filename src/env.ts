@@ -33,8 +33,8 @@ export interface Env {
   /** Account emails (Cloudflare Email Sending), from MAIL_FROM. Local runs log them instead. */
   MAIL?: SendEmail;
   MAIL_FROM: string;
-  /** Mirror domains (mirror/), comma-separated; set at deploy from the MIRROR_ORIGINS GitHub variable. */
-  MIRROR_ORIGINS?: string;
+  /** Domains links in our emails may use (src/auth.ts); set at deploy from the SITE_DOMAINS GitHub variable. */
+  SITE_DOMAINS?: string;
 }
 
 export interface MirrorJob {
