@@ -1,6 +1,6 @@
 /**
- * Gizlet accounts: Better Auth on Postgres (Neon through Hyperdrive), mounted at /v1/auth on
- * gizlet.io (browsers, cookies) and api.gizlet.io (devices and apps, bearer tokens).
+ * Gizlet accounts: Better Auth on Postgres (Neon through Hyperdrive), mounted at /api/v1/auth for
+ * browser and device clients.
  *
  * Sign-in: email + password, GitHub, and the OAuth device flow (RFC 8628) for consoles:
  * the console shows a code, the user approves it at gizlet.io/device, and the console gets a
@@ -24,7 +24,6 @@ import { DEFAULT_LINK_MIN_LENGTH } from "./links.ts";
 /** The settings auth needs; a subset of the Worker's Env so scripts can build the same schema. */
 export interface AuthEnv {
   SITE_ORIGIN: string;
-  API_ORIGIN: string;
   GITHUB_API: string;
   /** github.com, or the fixture server on local runs. */
   GITHUB_WEB?: string;
@@ -60,7 +59,7 @@ export interface Mail {
   text: string;
 }
 
-/** Mail of local runs, newest last, for the tests to follow links in (GET /v1/dev/mail). */
+/** Mail of local runs, newest last, for the tests to follow links in (GET /api/v1/dev/mail). */
 export const devOutbox: Mail[] = [];
 
 /** "Name <address>" or a bare address. */
@@ -161,10 +160,10 @@ export function authOptions(env: AuthEnv, pool: Pool): BetterAuthOptions {
   return {
     appName: "Gizlet",
     baseURL: env.SITE_ORIGIN,
-    basePath: "/v1/auth",
+    basePath: "/api/v1/auth",
     secret: env.BETTER_AUTH_SECRET,
     database: pool,
-    trustedOrigins: [env.SITE_ORIGIN, env.API_ORIGIN],
+    trustedOrigins: [env.SITE_ORIGIN],
     emailAndPassword: {
       enabled: true,
       minPasswordLength: 10,

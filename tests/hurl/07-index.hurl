@@ -20,16 +20,14 @@ GET {{fixture}}/fixture-org/secret-gizlet/releases/latest
 HTTP 404
 
 # Opening its link indexes the latest release through the app.
-GET {{base}}/v1/gizlets/github.com/fixture-org/secret-gizlet
-x-gizlet-host: api.gizlet.io
+GET {{base}}/api/v1/gizlets/github.com/fixture-org/secret-gizlet
 HTTP 200
 [Asserts]
 jsonpath "$.version" == "1.2.0"
 jsonpath "$.private" == true
 jsonpath "$.readme_url" == null
 
-GET {{base}}/v1/gizlets/github.com/fixture-org/secret-gizlet/releases/v1.2.0
-x-gizlet-host: api.gizlet.io
+GET {{base}}/api/v1/gizlets/github.com/fixture-org/secret-gizlet/releases/v1.2.0
 [Options]
 retry: 40
 retry-interval: 250ms
@@ -44,14 +42,12 @@ HTTP 200
 [Captures]
 secret_token: jsonpath "$.value"
 
-POST {{base}}/v1/publish
-x-gizlet-host: api.gizlet.io
+POST {{base}}/api/v1/publish
 Authorization: Bearer {{secret_token}}
 {}
 HTTP 202
 
-GET {{base}}/v1/gizlets/github.com/fixture-org/secret-gizlet/releases/v1.0.0
-x-gizlet-host: api.gizlet.io
+GET {{base}}/api/v1/gizlets/github.com/fixture-org/secret-gizlet/releases/v1.0.0
 [Options]
 retry: 40
 retry-interval: 250ms
@@ -59,14 +55,12 @@ HTTP 200
 [Asserts]
 jsonpath "$.status" == "ready"
 
-POST {{base}}/v1/publish
-x-gizlet-host: api.gizlet.io
+POST {{base}}/api/v1/publish
 Authorization: Bearer {{secret_token}}
 {"tag": "v1.1.0"}
 HTTP 202
 
-GET {{base}}/v1/gizlets/github.com/fixture-org/secret-gizlet/releases/v1.1.0
-x-gizlet-host: api.gizlet.io
+GET {{base}}/api/v1/gizlets/github.com/fixture-org/secret-gizlet/releases/v1.1.0
 [Options]
 retry: 40
 retry-interval: 250ms
@@ -75,24 +69,21 @@ HTTP 200
 jsonpath "$.status" == "ready"
 
 # Installs and downloads work like a public gizlet's, from R2.
-GET {{base}}/v1/gizlets/github.com/fixture-org/secret-gizlet/install?target=aarch64-unknown-linux-gnu&tier=lite
-x-gizlet-host: api.gizlet.io
+GET {{base}}/api/v1/gizlets/github.com/fixture-org/secret-gizlet/install?target=aarch64-unknown-linux-gnu&tier=lite
 HTTP 200
 [Captures]
-secret_url: jsonpath "$.package.url" replace "https://dl.gizlet.io" "{{base}}"
+secret_url: jsonpath "$.package.url" replace "https://gizlet.io" "{{base}}"
 [Asserts]
 jsonpath "$.version" == "1.2.0"
 
 GET {{secret_url}}
-x-gizlet-host: dl.gizlet.io
 HTTP 200
 [Asserts]
 header "x-checksum-sha256" exists
 
 # Only the newest two stay in R2. A pruned private release has no public GitHub URL, so the
 # download redirects to a fresh signed one, never cached.
-GET {{base}}/v1/gizlets/github.com/fixture-org/secret-gizlet/releases/v1.0.0
-x-gizlet-host: api.gizlet.io
+GET {{base}}/api/v1/gizlets/github.com/fixture-org/secret-gizlet/releases/v1.0.0
 [Options]
 retry: 40
 retry-interval: 250ms
@@ -100,8 +91,7 @@ HTTP 200
 [Asserts]
 jsonpath "$.mirrored" == false
 
-GET {{base}}/github.com/fixture-org/secret-gizlet/v1.0.0/dev.fixture.secretgizlet-1.0.0-aarch64-unknown-linux-gnu-lite.gzl
-x-gizlet-host: dl.gizlet.io
+GET {{base}}/assets/github.com/fixture-org/secret-gizlet/v1.0.0/dev.fixture.secretgizlet-1.0.0-aarch64-unknown-linux-gnu-lite.gzl
 HTTP 302
 [Captures]
 signed_url: header "location"
@@ -125,14 +115,12 @@ HTTP 200
 [Captures]
 secret_token_13: jsonpath "$.value"
 
-POST {{base}}/v1/publish
-x-gizlet-host: api.gizlet.io
+POST {{base}}/api/v1/publish
 Authorization: Bearer {{secret_token_13}}
 {}
 HTTP 202
 
-GET {{base}}/v1/gizlets/github.com/fixture-org/secret-gizlet/releases/v1.3.0
-x-gizlet-host: api.gizlet.io
+GET {{base}}/api/v1/gizlets/github.com/fixture-org/secret-gizlet/releases/v1.3.0
 [Options]
 retry: 40
 retry-interval: 250ms
@@ -141,8 +129,7 @@ HTTP 200
 jsonpath "$.status" == "ready"
 jsonpath "$.mirrored" == true
 
-GET {{base}}/github.com/fixture-org/secret-gizlet/v1.0.0/dev.fixture.secretgizlet-1.0.0-aarch64-unknown-linux-gnu-lite.gzl
-x-gizlet-host: dl.gizlet.io
+GET {{base}}/assets/github.com/fixture-org/secret-gizlet/v1.0.0/dev.fixture.secretgizlet-1.0.0-aarch64-unknown-linux-gnu-lite.gzl
 HTTP 200
 [Asserts]
 header "cache-control" == "no-store"
@@ -150,8 +137,7 @@ header "content-type" == "application/vnd.gizlet.package+zip"
 bytes startsWith hex,504b0304;
 
 # A resume of that download: the Range goes through to GitHub and its 206 comes back.
-GET {{base}}/github.com/fixture-org/secret-gizlet/v1.0.0/dev.fixture.secretgizlet-1.0.0-aarch64-unknown-linux-gnu-lite.gzl
-x-gizlet-host: dl.gizlet.io
+GET {{base}}/assets/github.com/fixture-org/secret-gizlet/v1.0.0/dev.fixture.secretgizlet-1.0.0-aarch64-unknown-linux-gnu-lite.gzl
 Range: bytes=0-3
 HTTP 206
 [Asserts]
@@ -173,14 +159,12 @@ HTTP 200
 [Captures]
 secret_token_14: jsonpath "$.value"
 
-POST {{base}}/v1/publish
-x-gizlet-host: api.gizlet.io
+POST {{base}}/api/v1/publish
 Authorization: Bearer {{secret_token_14}}
 {}
 HTTP 202
 
-GET {{base}}/v1/gizlets/github.com/fixture-org/secret-gizlet/releases/v1.4.0
-x-gizlet-host: api.gizlet.io
+GET {{base}}/api/v1/gizlets/github.com/fixture-org/secret-gizlet/releases/v1.4.0
 [Options]
 retry: 40
 retry-interval: 250ms
@@ -209,14 +193,12 @@ jsonpath "$.count" > 2
 # --- A public repository whose installation is suspended ------------------------------------
 
 # GitHub refuses the app a token there; the public web is used instead.
-GET {{base}}/v1/gizlets/github.com/fixture-org/suspended
-x-gizlet-host: api.gizlet.io
+GET {{base}}/api/v1/gizlets/github.com/fixture-org/suspended
 HTTP 200
 [Asserts]
 jsonpath "$.version" == "1.0.0"
 
-GET {{base}}/v1/gizlets/github.com/fixture-org/suspended/releases/v1.0.0
-x-gizlet-host: api.gizlet.io
+GET {{base}}/api/v1/gizlets/github.com/fixture-org/suspended/releases/v1.0.0
 [Options]
 retry: 40
 retry-interval: 250ms
@@ -226,8 +208,7 @@ jsonpath "$.status" == "ready"
 
 # --- A private repository without the app ---------------------------------------------------
 
-GET {{base}}/v1/gizlets/github.com/fixture-org/hidden
-x-gizlet-host: api.gizlet.io
+GET {{base}}/api/v1/gizlets/github.com/fixture-org/hidden
 HTTP 404
 [Asserts]
 jsonpath "$.error.code" == "not_found"
@@ -237,8 +218,7 @@ HTTP 200
 [Captures]
 hidden_token: jsonpath "$.value"
 
-POST {{base}}/v1/publish
-x-gizlet-host: api.gizlet.io
+POST {{base}}/api/v1/publish
 Authorization: Bearer {{hidden_token}}
 {}
 HTTP 403
@@ -249,14 +229,12 @@ jsonpath "$.error.install_url" == "https://github.com/apps/gizlet/installations/
 # --- Refreshing on views ----------------------------------------------------------------------
 
 # First sight indexes the latest release (a public repository without the app: the web).
-GET {{base}}/v1/gizlets/github.com/fixture-org/refresh-me
-x-gizlet-host: api.gizlet.io
+GET {{base}}/api/v1/gizlets/github.com/fixture-org/refresh-me
 HTTP 200
 [Asserts]
 jsonpath "$.version" == "1.0.0"
 
-GET {{base}}/v1/gizlets/github.com/fixture-org/refresh-me/releases/v1.0.0
-x-gizlet-host: api.gizlet.io
+GET {{base}}/api/v1/gizlets/github.com/fixture-org/refresh-me/releases/v1.0.0
 [Options]
 retry: 40
 retry-interval: 250ms
@@ -274,28 +252,23 @@ HTTP 200
 hits_before: jsonpath "$.count"
 
 # Once the interval has passed, a burst of views on every host refreshes it once.
-GET {{base}}/v1/gizlets/github.com/fixture-org/refresh-me
-x-gizlet-host: api.gizlet.io
+GET {{base}}/api/v1/gizlets/github.com/fixture-org/refresh-me
 [Options]
 delay: 3500ms
 HTTP 200
 [Asserts]
 jsonpath "$.version" == "1.0.0"
 
-GET {{base}}/v1/gizlets/github.com/fixture-org/refresh-me
-x-gizlet-host: api.gizlet.io
+GET {{base}}/api/v1/gizlets/github.com/fixture-org/refresh-me
 HTTP 200
 
 GET {{base}}/github.com/fixture-org/refresh-me
-x-gizlet-host: gizlet.io
 HTTP 200
 
-GET {{base}}/github.com/fixture-org/refresh-me?target=aarch64-unknown-linux-gnu&tier=lite
-x-gizlet-host: dl.gizlet.io
+GET {{base}}/assets/github.com/fixture-org/refresh-me?target=aarch64-unknown-linux-gnu&tier=lite
 HTTP 302
 
-GET {{base}}/v1/gizlets/github.com/fixture-org/refresh-me/releases
-x-gizlet-host: api.gizlet.io
+GET {{base}}/api/v1/gizlets/github.com/fixture-org/refresh-me/releases
 HTTP 200
 
 GET {{fixture}}/_fixture/hits?key=latest:fixture-org/refresh-me&since={{hits_before}}
@@ -306,8 +279,7 @@ HTTP 200
 jsonpath "$.since" == 1
 
 # Within the interval, views are answered from the registry and ask GitHub nothing.
-GET {{base}}/v1/gizlets/github.com/fixture-org/refresh-me
-x-gizlet-host: api.gizlet.io
+GET {{base}}/api/v1/gizlets/github.com/fixture-org/refresh-me
 HTTP 200
 
 GET {{fixture}}/_fixture/hits?key=latest:fixture-org/refresh-me&since={{hits_before}}
@@ -318,8 +290,7 @@ HTTP 200
 jsonpath "$.since" == 1
 
 # The new release was found, mirrored and checked, and the gizlet moved to it.
-GET {{base}}/v1/gizlets/github.com/fixture-org/refresh-me/releases/v1.1.0
-x-gizlet-host: api.gizlet.io
+GET {{base}}/api/v1/gizlets/github.com/fixture-org/refresh-me/releases/v1.1.0
 [Options]
 retry: 40
 retry-interval: 250ms
@@ -327,8 +298,7 @@ HTTP 200
 [Asserts]
 jsonpath "$.status" == "ready"
 
-GET {{base}}/v1/gizlets/github.com/fixture-org/refresh-me
-x-gizlet-host: api.gizlet.io
+GET {{base}}/api/v1/gizlets/github.com/fixture-org/refresh-me
 HTTP 200
 [Asserts]
 jsonpath "$.version" == "1.1.0"

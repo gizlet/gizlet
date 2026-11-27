@@ -141,7 +141,7 @@ export function summary(env: Env, g: GizletRow) {
     private: g.private === 1,
     visibility: g.visibility,
     share_url: `${env.SITE_ORIGIN}/${g.repo}`,
-    api_url: `${env.API_ORIGIN}/v1/gizlets/${g.repo}`,
+    api_url: `${env.SITE_ORIGIN}/api/v1/gizlets/${g.repo}`,
   };
 }
 

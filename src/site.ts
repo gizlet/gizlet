@@ -10,7 +10,7 @@ import { siteHosts, withAuth } from "./api";
 import { dlUrl, gizletDetail } from "./db";
 import type { Env } from "./env";
 import { devicePage, devicesPage, findHandheld, wantCounts } from "./devices";
-import { latestR36sRelease } from "./os-release";
+import { latestOsTag, latestR36sRelease } from "./os-release";
 import { explorePage } from "./explore";
 import { gizletPage } from "./gizlet-page";
 import { MAX_THEMES, patternHref, patternRule, THEME_FILE, THEME_VERSION, themeCss, themeHref } from "./theme";
@@ -25,8 +25,7 @@ type App = { Bindings: Env; Variables: { lang: Locale } };
 type C = Context<App>;
 export const site = new Hono<App>();
 
-const csp = (env: Env) =>
-  `default-src 'self'; img-src 'self' https: ${env.DL_ORIGIN}; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://github.com`;
+const csp = "default-src 'self'; img-src 'self' https:; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://github.com";
 
 const LANG_COOKIE = "lang";
 
@@ -104,7 +103,7 @@ site.use("*", async (c, next) => {
   c.set("lang", lang);
   await next();
   if ((c.res.headers.get("content-type") ?? "").startsWith("text/html")) {
-    c.res.headers.set("content-security-policy", csp(c.env));
+    c.res.headers.set("content-security-policy", csp);
     c.res.headers.set("x-content-type-options", "nosniff");
     c.res.headers.set("referrer-policy", "strict-origin-when-cross-origin");
     c.res.headers.set("content-language", lang);
@@ -156,11 +155,13 @@ site.get("/install/:id", async (c) => {
 });
 
 /** The writer for a supported handheld: `curl -fsSL gizlet.io/flash/r36s | bash`, or `/flash/r36s.ps1` for Windows. */
-site.get("/flash/:name", (c) => {
+site.get("/flash/:name", async (c) => {
   const match = /^([a-z0-9-]+?)(\.sh|\.ps1)?$/.exec(c.req.param("name"));
   if (!match || findHandheld(match[1]!)?.status !== "supported") return c.text("no such handheld\n", 404);
   const script = match[2] === ".ps1" ? "flash.ps1" : "flash.sh";
-  return c.redirect(`${c.env.DL_ORIGIN}/releases/latest/${script}`, 302);
+  const tag = await latestOsTag(c.env.BUCKET);
+  if (!tag) return c.notFound();
+  return c.redirect(`${c.env.DL_ORIGIN}/releases/${tag}/${script}`, 302);
 });
 
 site.get("/login", (c) => {

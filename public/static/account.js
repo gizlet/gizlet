@@ -1,5 +1,5 @@
 // The account page (src/account.ts): its tabs, and the forms that change the account through
-// Better Auth (/v1/auth) and the API (/v1/me, /v1/links). The page is rendered signed in.
+// Better Auth (/api/v1/auth) and the API (/api/v1/me, /api/v1/links). The page is rendered signed in.
 import { call, fmt, message, t } from "./auth.js";
 
 const TABS = ["profile", "handhelds", "gizlets", "links", "security"];
@@ -145,7 +145,7 @@ function drop(li, list, empty) {
 for (const button of document.querySelectorAll(".unwant")) {
   button.addEventListener("click", () =>
     busy(button, async () => {
-      await api("DELETE", `/v1/me/wants/${encodeURIComponent(button.dataset.handheld)}`);
+      await api("DELETE", `/api/v1/me/wants/${encodeURIComponent(button.dataset.handheld)}`);
       const list = document.querySelector("#wants");
       drop(button.closest("li"), list, "#no-wants");
       setCount("handhelds", list.children.length);
@@ -156,7 +156,7 @@ for (const button of document.querySelectorAll(".unwant")) {
 for (const button of document.querySelectorAll(".signout-device")) {
   button.addEventListener("click", () =>
     busy(button, async () => {
-      await api("DELETE", `/v1/me/devices/${encodeURIComponent(button.dataset.session)}`);
+      await api("DELETE", `/api/v1/me/devices/${encodeURIComponent(button.dataset.session)}`);
       drop(button.closest("li"), document.querySelector("#devices"), "#no-devices");
       say(fmt(t.deviceSignedOut, { name: button.dataset.name }));
     }),
@@ -225,7 +225,7 @@ for (const form of document.querySelectorAll(".link-form")) {
     if (bad) return setState(bad, "bad");
     setState(t.linkChecking);
     timer = setTimeout(async () => {
-      const res = await fetch(`/v1/links/${encodeURIComponent(id)}`, { credentials: "same-origin" }).catch(() => null);
+      const res = await fetch(`/api/v1/links/${encodeURIComponent(id)}`, { credentials: "same-origin" }).catch(() => null);
       const data = await res?.json().catch(() => null);
       if (ask !== asked || !res) return;
       const url = `${HOST}/${id}`;
@@ -249,7 +249,7 @@ for (const form of document.querySelectorAll(".link-form")) {
     asked++;
     busy(form.querySelector('button[type="submit"]'), async () => {
       try {
-        const link = await api("PUT", `/v1/me/gizlets/${row.dataset.repo}/link`, { id });
+        const link = await api("PUT", `/api/v1/me/gizlets/${row.dataset.repo}/link`, { id });
         setCurrent(link.id, link.url);
         setState("");
         say(fmt(t.linkSaved, { url: `${HOST}/${link.id}`, name: row.dataset.name }));
@@ -263,7 +263,7 @@ for (const form of document.querySelectorAll(".link-form")) {
   remove.addEventListener("click", () =>
     busy(remove, async () => {
       const old = form.dataset.current;
-      await api("DELETE", `/v1/me/gizlets/${row.dataset.repo}/link`);
+      await api("DELETE", `/api/v1/me/gizlets/${row.dataset.repo}/link`);
       setCurrent("", "");
       setState("");
       say(fmt(t.linkRemoved, { url: `${HOST}/${old}` }));

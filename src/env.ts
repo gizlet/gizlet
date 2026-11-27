@@ -11,7 +11,6 @@ export interface Env {
 
   SITE_ORIGIN: string;
   DL_ORIGIN: string;
-  API_ORIGIN: string;
   /** github.com, or a fixture server in local tests. */
   GITHUB_WEB: string;
   GITHUB_RAW: string;
@@ -32,7 +31,7 @@ export interface Env {
   /** Override for the issuer's JWKS URL (local tests only). */
   OIDC_JWKS_URL?: string;
   KEEP_MIRRORED_RELEASES: string;
-  /** "1" lets the X-Gizlet-Host header pick the host (local tests only). */
+  /** "1" uses local fixtures for development and tests. */
   DEV_HOST_OVERRIDE: string;
 
   /** Bearer token for /v1/admin. */

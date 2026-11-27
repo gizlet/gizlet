@@ -1,4 +1,4 @@
-// Shared helpers for the account pages: JSON calls to Better Auth at /v1/auth.
+// Shared helpers for the account pages: JSON calls to Better Auth at /api/v1/auth.
 
 /** The page's strings in its language, from the JSON block the server writes (src/i18n.ts). */
 export const t = JSON.parse(globalThis.document?.querySelector("#i18n")?.textContent ?? "{}");
@@ -10,7 +10,7 @@ export const message = (text) => {
 };
 
 export async function call(path, body) {
-  const res = await fetch(`/v1/auth${path}`, {
+  const res = await fetch(`/api/v1/auth${path}`, {
     method: body === undefined ? "GET" : "POST",
     headers: body === undefined ? {} : { "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),

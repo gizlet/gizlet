@@ -202,8 +202,8 @@ export function devicePage(lang: Locale, id: string, release: R36sRelease | null
   if (!d) return null;
   const t = MESSAGES[lang].devices;
   const keys = Object.keys(d.specs) as (keyof Supported["specs"])[];
-  const sh = release && `curl -fsSL ${release.shell} | bash -s -- --board ${d.board}`;
-  const ps1 = release && `& ([scriptblock]::Create((irm ${release.powershell}))) -Board ${d.board}`;
+  const sh = release && `curl -fsSL ${release.shell} | bash -s -- --board ${d.board} --release ${release.base}`;
+  const ps1 = release && `& ([scriptblock]::Create((irm ${release.powershell}))) -Board ${d.board} -Release ${release.base}`;
   const cmd = (label: string, prompt: string, line: string) => html`<div class="cmd">
         <div class="cmd-head"><span>${label}</span><button type="button" class="copy-btn" data-copy="${line}" data-done="${t.copied}" hidden>${t.copy}</button></div>
         <pre><code><span class="p" aria-hidden="true">${prompt}</span>${line}</code></pre>
