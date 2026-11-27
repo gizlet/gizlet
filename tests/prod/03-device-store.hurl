@@ -19,8 +19,15 @@ HTTP 200
 header "content-type" == "image/png"
 bytes startsWith hex,89504e470d0a1a0a0000000d494844520000008000000080;
 
+GET https://api.gizlet.io/v1/gizlets/{{repo}}/install?target=aarch64-unknown-linux-gnu&tier=lite
+HTTP 200
+[Captures]
+repository_id: jsonpath "$.repository_id"
+[Asserts]
+jsonpath "$.repository_id" isInteger
+
 POST https://api.gizlet.io/v1/updates
-{"target": "aarch64-unknown-linux-gnu", "tier": "lite", "installed": [{"repo": "{{repo}}", "id": "{{app_id}}", "version": "0.0.0"}]}
+{"target": "aarch64-unknown-linux-gnu", "tier": "lite", "installed": [{"repo": "{{repo}}", "repository_id": {{repository_id}}, "id": "{{app_id}}", "version": "0.0.0"}]}
 HTTP 200
 [Asserts]
 jsonpath "$.gizlets[0].status" == "update"

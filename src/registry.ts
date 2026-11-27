@@ -2,7 +2,7 @@
 import { parse, type GizletRow, type ReleaseRow } from "./db";
 import type { Env, Waiter } from "./env";
 import { fetchGizletToml, NotFound, reader, repositoryById, repositoryIdAt, type Reader, type RepoInfo } from "./github";
-import { bindLinks } from "./links";
+import { bindLinks, bindReleases } from "./links";
 import { queueMirror } from "./mirror";
 import { repoRef, type RepoRef } from "./repo";
 import { compareVersions, IndexError, sameSpec, storedSpec } from "./schema";
@@ -65,7 +65,7 @@ export async function indexRelease(env: Env, ref: RepoRef, tag: string, opts: In
     ).bind(ref.key, owner, name, learned, spec.id, spec.name, now, now, now, display ? 1 : 0, isPrivate),
     env.DB.prepare("DELETE FROM misses WHERE repo = ?").bind(ref.key),
     // Short links set while the id was unknown follow the repository from now on (src/links.ts).
-    ...(learned != null ? bindLinks(env, ref.key, learned) : []),
+    ...(learned != null ? [bindReleases(env, ref.key), ...bindLinks(env, ref.key, learned)] : []),
   ];
   if (!unchanged) {
     stmts.push(
@@ -244,13 +244,20 @@ export async function refreshGizlet(env: Env, ref: RepoRef, olderThanMs: number)
         const moved = await repositoryById(env, bound.repository_id);
         if (moved === undefined) return true;
         if (moved) await keepMoved(env, ref, bound.repository_id, moved);
-        await env.DB.prepare("UPDATE gizlets SET repository_id = ? WHERE repo = ?").bind(id, ref.key).run();
+        await env.DB.batch([bindReleases(env, ref.key), env.DB.prepare("UPDATE gizlets SET repository_id = ? WHERE repo = ?").bind(id, ref.key)]);
       }
     }
     if (info) {
-      await env.DB.prepare("UPDATE gizlets SET private = ?, repository_id = coalesce(repository_id, ?), owner = ?, name_repo = ? WHERE repo = ?")
-        .bind(info.private ? 1 : 0, info.id, info.owner, info.name, ref.key)
-        .run();
+      await env.DB.batch([
+        env.DB.prepare("UPDATE gizlets SET private = ?, repository_id = coalesce(repository_id, ?), owner = ?, name_repo = ? WHERE repo = ?").bind(
+          info.private ? 1 : 0,
+          info.id,
+          info.owner,
+          info.name,
+          ref.key,
+        ),
+        bindReleases(env, ref.key),
+      ]);
     }
     if (tag) {
       await indexRelease(env, ref, tag, { reader: src, info }).catch((e: unknown) => {
@@ -275,7 +282,7 @@ async function keepMoved(env: Env, from: RepoRef, id: number, now: RepoInfo): Pr
       if (!(e instanceof NotFound || e instanceof IndexError)) throw e;
     });
   }
-  await env.DB.prepare("UPDATE gizlets SET repository_id = ? WHERE repo = ? AND repository_id IS NULL").bind(id, ref.key).run();
+  await env.DB.batch([env.DB.prepare("UPDATE gizlets SET repository_id = ? WHERE repo = ? AND repository_id IS NULL").bind(id, ref.key), bindReleases(env, ref.key)]);
 }
 
 /** Cron: refresh gizlets nobody viewed recently. */
