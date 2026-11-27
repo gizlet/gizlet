@@ -272,6 +272,10 @@ api.post("/v1/updates", async (c) => {
     const base = { repo: r?.key ?? one.repo, repository_id: one.repository_id, id: one.id, installed: one.version };
     // Only gizlets the registry knows: a device installed each from one, so nothing is indexed here.
     const known = r ? await getGizlet(c.env, r.key) : null;
+    if (known?.visibility === "blocked") {
+      gizlets.push({ ...base, status: "blocked" });
+      continue;
+    }
     const g = r && known?.latest_tag ? await ensureGizlet(c.env, r, c.executionCtx) : null;
     if (!r || !g) {
       gizlets.push({ ...base, status: "not_found" });
