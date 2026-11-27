@@ -114,9 +114,9 @@ Credentials are SOPS files encrypted to one age key:
 | File | Contents |
 | --- | --- |
 | `secrets/deploy.enc.yaml` | `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, `DATABASE_URL` (Neon's direct endpoint, not `-pooler`, for migrations) |
-| `secrets/worker.enc.yaml` | Worker secrets, uploaded with each version by `wrangler deploy --secrets-file`: `ADMIN_TOKEN`, `BETTER_AUTH_SECRET`, and optionally `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` |
+| `secrets/worker.enc.yaml` | Worker secrets, uploaded with each version by `wrangler deploy --secrets-file`: `ADMIN_TOKEN`, `BETTER_AUTH_SECRET`, `GITHUB_APP_PRIVATE_KEY`, and optionally `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` |
 
-The deploy adds `GITHUB_APP_PRIVATE_KEY` from the `gizlet/gizlet` Actions repository secret `GIZLET_APP_PRIVATE_KEY`. Set it to the PEM generated in the [Gizlet GitHub App settings](https://github.com/organizations/gizlet/settings/apps/gizlet). Its client ID is `GITHUB_APP_CLIENT_ID` in `wrangler.jsonc`. Install the [Gizlet App](https://github.com/apps/gizlet/installations/new) on each private repository whose releases Gizlet Store should distribute, including repositories previously using gizlet-bot. PR triage uses its own gizlet-bot credentials.
+Set `GITHUB_APP_PRIVATE_KEY` in `secrets/worker.enc.yaml` to the PEM generated in the [Gizlet GitHub App settings](https://github.com/organizations/gizlet/settings/apps/gizlet/key_pairs). Its client ID is `GITHUB_APP_CLIENT_ID` in `wrangler.jsonc`. Install the [Gizlet App](https://github.com/apps/gizlet/installations/new) on each private repository whose releases Gizlet Store should distribute, including repositories previously using gizlet-bot. PR triage uses its own gizlet-bot credentials.
 
 The age identity is in the macOS login Keychain (service `io.gizlet.sops.age`, account = your user name) and in the repository secret `SOPS_AGE_KEY`. `scripts/sops.sh` uses whichever is available:
 
