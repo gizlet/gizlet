@@ -87,7 +87,7 @@ Repository paths are relative to the repository root, `/`-separated, with no emp
 | Kind | Is | On a device |
 | --- | --- | --- |
 | `app` | A program the player opens: a game (`category = "game"`) or any other foreground program (`category = "app"`) | Installed and shown on the launcher's shelf; it takes the screen while it runs |
-| `service` | A background program with no screen of its own | Recognized, never shown or started as an app. Installing and supervising services is not part of Gizlet OS yet, so the launcher refuses to install one for now |
+| `service` | A background program with no screen of its own | Never shown or started as an app. From Gizlet OS v0.4.0, `gizlet install` installs it, systemd runs it in the background, and it starts at boot unless that is turned off in Settings → Services or with `gizlet service`. Earlier releases refuse to install one. The folders and environment it gets, its update and uninstall behavior are in [Services](https://github.com/gizlet/os/blob/main/launcher/README.md#services) |
 
 Every gizlet published before kinds existed is an app. ROM packages and platform categories for ROMs are not part of this format.
 
