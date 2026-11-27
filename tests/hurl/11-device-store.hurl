@@ -520,6 +520,11 @@ HTTP 200
 [Asserts]
 jsonpath "$.status" == "ready"
 
+# The download shortcut recovers it the same way.
+GET {{base}}/github.com/fixture-org/legacy?target=aarch64-unknown-linux-gnu&tier=lite
+x-gizlet-host: dl.gizlet.io
+HTTP 409
+
 GET {{base}}/v1/gizlets/github.com/fixture-org/legacy/install?target=aarch64-unknown-linux-gnu&tier=lite
 x-gizlet-host: api.gizlet.io
 HTTP 409
@@ -535,3 +540,9 @@ HTTP 200
 [Asserts]
 jsonpath "$.version" == "1.0.0"
 jsonpath "$.repository_id" isInteger
+
+GET {{base}}/github.com/fixture-org/legacy?target=aarch64-unknown-linux-gnu&tier=lite
+x-gizlet-host: dl.gizlet.io
+HTTP 302
+[Asserts]
+header "Location" contains "/v1.0.0/"

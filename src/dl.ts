@@ -1,12 +1,12 @@
 /** dl.gizlet.io: package and art downloads, from R2 or else GitHub. */
 import { Hono, type Context } from "hono";
-import { packageUrl, pickInstall, type ReleaseRow } from "./db";
+import { packageUrl, type ReleaseRow } from "./db";
 import { deviceArt, deviceArtKey, storeDeviceArt } from "./device-art";
 import type { Env } from "./env";
 import { assetUrl, rawUrl, readCapped, reader } from "./github";
 import { artKey, contentType, indexedFiles, MAX_ART_BYTES } from "./mirror";
 import { latestOsTag, OS_FILE, OS_TAG } from "./os-release";
-import { ensureGizlet } from "./registry";
+import { ensureGizlet, pickInstallRecovering } from "./registry";
 import { repoRef } from "./repo";
 import { isAssetName, isRepoPath, TARGET, type GizletToml, type Tier } from "./schema";
 
@@ -78,8 +78,12 @@ dl.get("/github.com/:owner/:repo", async (c) => {
   const g = await ensureGizlet(c.env, r, c.executionCtx);
   if (!g) return c.text(`${r.key} has no Gizlet release`, 404);
   if (g.visibility === "blocked") return c.text(`${r.key} is blocked`, 403);
-  const pkg = await pickInstall(c.env, g.repo, target, tier);
-  if (!pkg) return c.text(`${g.name} has no package for ${target} (${tier})`, 404);
+  const pkg = await pickInstallRecovering(c.env, g, target, tier);
+  if (!pkg) {
+    const pending = await c.env.DB.prepare("SELECT 1 FROM releases WHERE repo = ? AND status IN ('pending', 'mirroring', 'checking')").bind(g.repo).first();
+    if (pending) return c.text(`${g.name} is still being checked; try again in a minute`, 409);
+    return c.text(`${g.name} has no package for ${target} (${tier})`, 404);
+  }
   return c.redirect(packageUrl(c.env, pkg), 302);
 });
 

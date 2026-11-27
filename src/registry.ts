@@ -1,11 +1,11 @@
 /** Indexing releases into the registry, and deciding what is listed. */
-import { parse, type GizletRow, type ReleaseRow } from "./db";
+import { parse, pickInstall, type GizletRow, type ReleaseRow } from "./db";
 import type { Env, Waiter } from "./env";
 import { fetchGizletToml, NotFound, reader, repositoryById, repositoryIdAt, type Reader, type RepoInfo } from "./github";
 import { bindLinks } from "./links";
 import { queueMirror } from "./mirror";
 import { repoRef, type RepoRef } from "./repo";
-import { compareVersions, IndexError, sameSpec, storedSpec } from "./schema";
+import { compareVersions, IndexError, sameSpec, storedSpec, tierRunsOn, type Tier } from "./schema";
 import { rescore } from "./score";
 
 const MISS_TTL_MS = 10 * 60 * 1000;
@@ -297,4 +297,27 @@ export async function refreshStale(env: Env): Promise<void> {
   for (const g of results) {
     await refreshGizlet(env, { owner: g.owner, name: g.name_repo, key: g.repo }, STALE_AFTER_MS).catch((e: unknown) => console.error("refresh failed", g.repo, e));
   }
+}
+
+/**
+ * The package to install, as `pickInstall` picks it, for the install API and the download
+ * shortcut. When only releases indexed under another repository, or under none (from before
+ * repository ids, or while GitHub could not say), would fit, the newest of them is indexed again
+ * under the gizlet's id, which mirroring checks against the repository at the path now; until
+ * then there is none, and the release is pending.
+ */
+export async function pickInstallRecovering(env: Env, g: GizletRow, target: string, tier: Tier) {
+  const pkg = await pickInstall(env, g.repo, target, tier);
+  if (pkg || g.repository_id == null) return pkg;
+  const { results } = await env.DB.prepare(
+    `SELECT r.tag, r.version, p.tier FROM releases r JOIN packages p ON p.repo = r.repo AND p.tag = r.tag AND p.revision = r.revision
+      WHERE r.repo = ? AND p.target = ? AND r.status = 'ready' AND r.repository_id IS NOT ?`,
+  )
+    .bind(g.repo, target, g.repository_id)
+    .all<{ tag: string; version: string; tier: Tier }>();
+  const newest = results.filter((p) => tierRunsOn(p.tier, tier)).sort((a, b) => compareVersions(b.version, a.version))[0];
+  if (!newest) return null;
+  const ref = { owner: g.owner, name: g.name_repo, key: g.repo };
+  await indexRelease(env, ref, newest.tag, { repositoryId: g.repository_id }).catch((e: unknown) => console.error("re-index under the repository id failed", ref.key, e));
+  return pickInstall(env, g.repo, target, tier);
 }
