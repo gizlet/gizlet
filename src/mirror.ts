@@ -127,13 +127,18 @@ async function infectedError(env: Env, job: MirrorJob): Promise<string | null> {
 /**
  * GitHub's id for the repository at the release's path now: null when there is none, undefined
  * when GitHub did not say. When `pinned`, the id the release was indexed under, the release is
- * rejected for another repository and asked about again later when GitHub does not say.
+ * rejected when GitHub names another repository. When GitHub does not answer, which is common
+ * for requests without the app (they share Cloudflare's addresses and rate limits), mirroring goes
+ * on: a pinned release keeps the id it was indexed under, and an unpinned one learns none.
  */
 async function checkRepository(env: Env, src: Reader, ref: RepoRef, pinned: number | null, tag: string): Promise<number | null | undefined> {
   const info = await src.info().catch(() => null);
   const id = info ? info.id : await repositoryIdAt(env, ref).catch(() => undefined);
   if (pinned == null) return id;
-  if (id === undefined) throw new UpstreamError(`GitHub did not say which repository ${ref.key} is`);
+  if (id === undefined) {
+    console.warn("GitHub did not say which repository holds the path; mirroring under the indexed id", ref.key, tag);
+    return undefined;
+  }
   if (id !== pinned) throw new Rejected(`${ref.key} is no longer the GitHub repository ${tag} was indexed from`);
   return id;
 }
