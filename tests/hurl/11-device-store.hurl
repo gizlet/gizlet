@@ -390,3 +390,44 @@ HTTP 200
 [Asserts]
 jsonpath "$.version" == "1.0.0"
 jsonpath "$.repository_id" != {{old_recreated_id}}
+
+# Another repository takes the path while a release is being mirrored: the files read by path may
+# be the newcomer's, so the release fails rather than being offered under the first one's id.
+POST {{fixture}}/_fixture/hold?repo=fixture-org/takeover
+HTTP 200
+
+GET {{fixture}}/token?repo=fixture-org/takeover&ref=refs/tags/v1.0.0
+HTTP 200
+[Captures]
+takeover_token: jsonpath "$.value"
+
+POST {{base}}/v1/publish
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{takeover_token}}
+{}
+HTTP 202
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/takeover/releases/v1.0.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "mirroring"
+
+POST {{fixture}}/_fixture/replace?repo=fixture-org/takeover
+HTTP 200
+
+POST {{fixture}}/_fixture/release-hold?repo=fixture-org/takeover
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/takeover/releases/v1.0.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "failed"
+jsonpath "$.error" contains "no longer the GitHub repository v1.0.0 was indexed from"

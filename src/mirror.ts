@@ -12,7 +12,8 @@ import { checkPackage } from "./check";
 import type { PackageRow, ReleaseRow } from "./db";
 import { deviceArt, deviceRoot, storeDeviceArt } from "./device-art";
 import type { Env, MirrorJob } from "./env";
-import { readCapped, reader, UpstreamError } from "./github";
+import type { RepoRef } from "./repo";
+import { readCapped, reader, repositoryIdAt, UpstreamError, type Reader } from "./github";
 import { artKey } from "./r2";
 import { deletePrefix, newPackageKey, packagesPrefix, pruneRevisions } from "./r2";
 import { refreshLatest } from "./registry";
@@ -122,6 +123,18 @@ async function infectedError(env: Env, job: MirrorJob): Promise<string | null> {
   return row?.error ?? null;
 }
 
+/**
+ * Rejects the release when its path holds another GitHub repository than `pinned`, the one it was
+ * indexed from; asks again later when GitHub does not say. Nothing to check while `pinned` is
+ * unknown: devices then install it unpinned, and are not offered it as an update.
+ */
+async function checkRepository(env: Env, src: Reader, ref: RepoRef, pinned: number | null, tag: string): Promise<void> {
+  if (pinned == null) return;
+  const id = (await src.info().catch(() => null))?.id ?? (await repositoryIdAt(env, ref));
+  if (id === undefined) throw new UpstreamError(`GitHub did not say which repository ${ref.key} is`);
+  if (id !== pinned) throw new Rejected(`${ref.key} is no longer the GitHub repository ${tag} was indexed from`);
+}
+
 export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): Promise<void> {
   const rel = await env.DB.prepare("SELECT * FROM releases WHERE repo = ? AND tag = ?").bind(job.repo, job.tag).first<ReleaseRow>();
   if (!rel || rel.revision !== job.revision) return;
@@ -136,7 +149,12 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
     const infected = await infectedError(env, job);
     if (infected) throw new Rejected(infected);
     if (!(await setStatus(env, job, "mirroring", null))) throw new Superseded();
-    const src = await reader(env, { owner: g.owner, name: g.name_repo, key: job.repo });
+    const ref = { owner: g.owner, name: g.name_repo, key: job.repo };
+    const src = await reader(env, ref);
+    // Files are read by path. The path must still hold the repository the release was indexed
+    // from, before the first file and after the last, or another repository's bytes would be
+    // recorded under its id and offered to its installs as an update.
+    await checkRepository(env, src, ref, rel.repository_id, job.tag);
     for (const p of pkgs) {
       // Mirrored already, by an earlier attempt or another delivery of this job.
       if (p.object && p.sha256 && p.size && (await env.BUCKET.head(p.object))?.size === p.size) continue;
@@ -170,11 +188,14 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
       if (!res.ok) {
         await res.body?.cancel();
         warnings.push(`${file} is missing from the repository at ${job.tag}`);
+        // A copy an earlier revision left is not this revision's art.
+        await env.BUCKET.delete(artKey(job.repo, job.tag, file));
         continue;
       }
       const bytes = await readCapped(res, MAX_ART_BYTES).catch(() => null);
       if (!bytes) {
         warnings.push(`${file} is larger than 10 MiB`);
+        await env.BUCKET.delete(artKey(job.repo, job.tag, file));
         continue;
       }
       // Labelled with its revision: device art is made from it only for that revision (src/dl.ts).
@@ -185,6 +206,7 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
       }
       if (unreadable) warnings.push(`${file} could not be read as an image`);
     }
+    await checkRepository(env, src, ref, rel.repository_id, job.tag);
 
     if (!(await setStatus(env, job, "checking", null))) throw new Superseded();
     const errors: string[] = [];
