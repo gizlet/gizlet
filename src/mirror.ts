@@ -10,14 +10,17 @@
  */
 import { checkPackage } from "./check";
 import type { PackageRow, ReleaseRow } from "./db";
+import { deviceArt, deviceRoot, storeDeviceArt } from "./device-art";
 import type { Env, MirrorJob } from "./env";
-import { readCapped, reader, UpstreamError } from "./github";
+import { adoptRepositoryId } from "./links";
+import type { RepoRef } from "./repo";
+import { readCapped, reader, repositoryIdAt, UpstreamError, type Reader } from "./github";
 import { artKey } from "./r2";
 import { deletePrefix, newPackageKey, packagesPrefix, pruneRevisions } from "./r2";
 import { refreshLatest } from "./registry";
 import { compareVersions, MAX_PACKAGE_BYTES, storedSpec, type GizletToml } from "./schema";
 
-const MAX_ART_BYTES = 10 * 1024 * 1024;
+export const MAX_ART_BYTES = 10 * 1024 * 1024;
 const MAX_ATTEMPTS = 5;
 /** A release this long in pending, mirroring or checking has lost its job; queue it again. */
 export const STUCK_AFTER_MS = 30 * 60 * 1000;
@@ -121,6 +124,33 @@ async function infectedError(env: Env, job: MirrorJob): Promise<string | null> {
   return row?.error ?? null;
 }
 
+/**
+ * GitHub's id for the repository at the release's path now: null when there is none, undefined
+ * when GitHub did not say. When `pinned`, the id the release was indexed under, the release is
+ * rejected for another repository and asked about again later when GitHub does not say.
+ */
+async function checkRepository(env: Env, src: Reader, ref: RepoRef, pinned: number | null, tag: string): Promise<number | null | undefined> {
+  const info = await src.info().catch(() => null);
+  const id = info ? info.id : await repositoryIdAt(env, ref).catch(() => undefined);
+  if (pinned == null) return id;
+  if (id === undefined) throw new UpstreamError(`GitHub did not say which repository ${ref.key} is`);
+  if (id !== pinned) throw new Rejected(`${ref.key} is no longer the GitHub repository ${tag} was indexed from`);
+  return id;
+}
+
+/**
+ * A release indexed without GitHub's id, whose path held repository `id` before its first file was
+ * read and after its last: its files are that repository's, so it takes the id, and so does its
+ * gizlet if it has none yet.
+ */
+async function learnRepository(env: Env, job: MirrorJob, id: number): Promise<void> {
+  await env.DB.prepare("UPDATE releases SET repository_id = ? WHERE repo = ? AND tag = ? AND revision = ? AND repository_id IS NULL")
+    .bind(id, job.repo, job.tag, job.revision)
+    .run();
+  const g = await env.DB.prepare("SELECT repo, repository_id FROM gizlets WHERE repo = ?").bind(job.repo).first<{ repo: string; repository_id: number | null }>();
+  if (g && g.repository_id == null) await adoptRepositoryId(env, g, id);
+}
+
 export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): Promise<void> {
   const rel = await env.DB.prepare("SELECT * FROM releases WHERE repo = ? AND tag = ?").bind(job.repo, job.tag).first<ReleaseRow>();
   if (!rel || rel.revision !== job.revision) return;
@@ -135,10 +165,20 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
     const infected = await infectedError(env, job);
     if (infected) throw new Rejected(infected);
     if (!(await setStatus(env, job, "mirroring", null))) throw new Superseded();
-    const src = await reader(env, { owner: g.owner, name: g.name_repo, key: job.repo });
+    const ref = { owner: g.owner, name: g.name_repo, key: job.repo };
+    const src = await reader(env, ref);
+    // Files are read by path. The path must still hold the repository the release was indexed
+    // from, before the first file and after the last, or another repository's bytes would be
+    // recorded under its id and offered to its installs as an update.
+    const first = await checkRepository(env, src, ref, rel.repository_id, job.tag);
+    // Packages another attempt mirrored were read while the path held whatever it held then.
+    let reused = false;
     for (const p of pkgs) {
       // Mirrored already, by an earlier attempt or another delivery of this job.
-      if (p.object && p.sha256 && p.size && (await env.BUCKET.head(p.object))?.size === p.size) continue;
+      if (p.object && p.sha256 && p.size && (await env.BUCKET.head(p.object))?.size === p.size) {
+        reused = true;
+        continue;
+      }
       const key = newPackageKey(job.repo, job.tag, job.revision, p.file);
       const got = await copyToR2(env, await src.asset(job.tag, p.file), key, p.file);
       // The first attempt to finish is the package; a later one drops its copy and uses that one.
@@ -150,6 +190,7 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
       if (won.meta.changes > 0) {
         Object.assign(p, got, { object: key });
       } else {
+        reused = true;
         await env.BUCKET.delete(key);
         const mine = await env.DB.prepare("SELECT size, sha256, object FROM packages WHERE repo = ? AND tag = ? AND file = ? AND revision = ?")
           .bind(job.repo, job.tag, p.file, job.revision)
@@ -161,17 +202,34 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
       const infected = await infectedError(env, job);
       if (infected) throw new Rejected(infected);
     }
+    // The handhelds' copies, made again on every index (the art at the tag may have changed), from
+    // each file as it is copied, so no more than one file's bytes are held at a time.
+    const devices = [...deviceArt(spec)];
     for (const file of indexedFiles(spec).art) {
       const res = await src.file(job.tag, file);
       if (!res.ok) {
         await res.body?.cancel();
         warnings.push(`${file} is missing from the repository at ${job.tag}`);
+        // A copy an earlier revision left is not this revision's art.
+        await env.BUCKET.delete(artKey(job.repo, job.tag, file));
         continue;
       }
       const bytes = await readCapped(res, MAX_ART_BYTES).catch(() => null);
-      if (bytes) await env.BUCKET.put(artKey(job.repo, job.tag, file), bytes, { httpMetadata: { contentType: contentType(file) } });
-      else warnings.push(`${file} is larger than 10 MiB`);
+      if (!bytes) {
+        warnings.push(`${file} is larger than 10 MiB`);
+        await env.BUCKET.delete(artKey(job.repo, job.tag, file));
+        continue;
+      }
+      // Labelled with its revision: device art is made from it only for that revision (src/dl.ts).
+      await env.BUCKET.put(artKey(job.repo, job.tag, file), bytes, { httpMetadata: { contentType: contentType(file) }, customMetadata: { revision: String(job.revision) } });
+      let unreadable = false;
+      for (const [name, art] of devices.filter(([, a]) => a.source === file)) {
+        if (!(await storeDeviceArt(env, job.repo, job.tag, job.revision, name, art, bytes))) unreadable = true;
+      }
+      if (unreadable) warnings.push(`${file} could not be read as an image`);
     }
+    const last = await checkRepository(env, src, ref, rel.repository_id, job.tag);
+    if (rel.repository_id == null && !reused && typeof first === "number" && first === last) await learnRepository(env, job, first);
 
     if (!(await setStatus(env, job, "checking", null))) throw new Superseded();
     const errors: string[] = [];
@@ -194,6 +252,7 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
     if (e instanceof Superseded) {
       // A newer revision is being indexed; nothing this job wrote will be served.
       await deletePrefix(env, packagesPrefix(job.repo, job.tag, job.revision));
+      await deletePrefix(env, `${deviceRoot(job.repo, job.tag)}r${job.revision}/`);
       return;
     }
     if (e instanceof Rejected || attempt >= MAX_ATTEMPTS) {

@@ -3,6 +3,8 @@ export interface Env {
   DB: D1Database;
   /** Mirrored packages and store art, keyed github.com/<owner>/<repo>/<tag>/<file>. */
   BUCKET: R2Bucket;
+  /** Cloudflare Images: scales store art into the PNGs handhelds draw (src/device-art.ts). */
+  IMAGES: ImagesBinding;
   MIRROR: Queue<MirrorJob>;
   /** Accounts (Better Auth) in Neon Postgres. */
   HYPERDRIVE: Hyperdrive;

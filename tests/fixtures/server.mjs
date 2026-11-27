@@ -67,6 +67,8 @@ const hit = (key) => hits.set(key, (hits.get(key) ?? 0) + 1);
 const REPLACED = new Map();
 /** Public repositories off GitHub for now (POST /_fixture/hide). */
 const HIDDEN = new Set();
+/** Public repositories whose metadata the API cannot answer for now (POST /_fixture/api-down); files stay readable. */
+const API_DOWN = new Set();
 /** A repository's GitHub id, stable per repository (the API, OIDC tokens and asset URLs agree). */
 function repoId(key) {
   if (REPLACED.has(key)) return REPLACED.get(key);
@@ -343,6 +345,19 @@ addRelease("fixture-org/v1-service-kind", "1.0.0", { manifest: { kind: "service"
 addRelease("fixture-org/schema-3", "1.0.0", { manifest: { schema: 3, kind: "app" }, targets: handheld });
 // A service for handhelds that became an x86-64-only app: a handheld still installs the service.
 addRelease("fixture-org/turncoat", "1.0.0", { kind: "service", targets: handheld });
+// An arm64 full package and an x86-64 lite one: nothing for an arm64 lite handheld (tests/hurl/11-device-store.hurl).
+// Replaced by another repository at its path that publishes the same id (tests/hurl/11-device-store.hurl).
+addRelease("fixture-org/path-reuse", "1.0.0", { targets: handheld });
+// Deleted and created again at its path with the very same release (tests/hurl/11-device-store.hurl).
+addRelease("fixture-org/recreated", "1.0.0", { targets: handheld });
+// Taken over by another repository while its release is being mirrored (tests/hurl/11-device-store.hurl).
+addRelease("fixture-org/takeover", "1.0.0", { targets: handheld });
+// Read from the public web, and taken over before anyone installs it (tests/hurl/11-device-store.hurl).
+addRelease("fixture-org/early-reuse", "1.0.0", { targets: handheld });
+// Its handheld release is indexed while GitHub cannot say which repository it is, like releases from
+// before repository ids; a newer one is built for x86-64 only (tests/hurl/11-device-store.hurl).
+addRelease("fixture-org/legacy", "1.0.0", { targets: handheld });
+addRelease("fixture-org/mixed-tiers", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "full"], ["x86_64-unknown-linux-gnu", "lite"]] });
 addRelease("fixture-org/turncoat", "2.0.0", { targets: [["x86_64-unknown-linux-gnu", "lite"]] });
 addTag("fixture-org/no-index", "v1.0.0", new Map([["other.zip", Buffer.from("x")]]), new Map());
 // Visited by tests/hurl/07-index.hurl, which adds releases while it runs.
@@ -426,8 +441,16 @@ createServer(async (req, res) => {
   if (url.pathname === "/_fixture/release" && req.method === "POST") {
     const key = url.searchParams.get("repo");
     if (!repos.has(key)) return json(404, { message: "no such fixture repository" });
-    addRelease(key, url.searchParams.get("version"), { targets: [["aarch64-unknown-linux-gnu", "lite"]] });
+    // targets=<triple>:<tier>,... (aarch64-unknown-linux-gnu:lite when left out).
+    const targets = (url.searchParams.get("targets") ?? "aarch64-unknown-linux-gnu:lite").split(",").map((t) => t.split(":"));
+    addRelease(key, url.searchParams.get("version"), { targets });
     return json(201, { latest: repos.get(key).latest });
+  }
+  if (url.pathname === "/_fixture/api-down" && req.method === "POST") {
+    const key = url.searchParams.get("repo");
+    if (url.searchParams.get("down") === "0") API_DOWN.delete(key);
+    else API_DOWN.add(key);
+    return json(200, { repo: key, down: API_DOWN.has(key) });
   }
   if (url.pathname === "/_fixture/revoke" && req.method === "POST") {
     const login = url.searchParams.get("login");
@@ -549,6 +572,7 @@ createServer(async (req, res) => {
     if (!bearer || !tokens.has(bearer)) return json(401, { message: "Bad credentials" });
     const repo = repos.get(key);
     // Any token reads a public repository's metadata.
+    if (rest.length === 0 && API_DOWN.has(key)) return json(503, { message: "Service unavailable" });
     if (rest.length === 0 && HIDDEN.has(key)) {
       hit(`gone:${key}`);
       return json(404, { message: "Not Found" });

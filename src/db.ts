@@ -1,4 +1,5 @@
 import type { Env } from "./env";
+import { deviceArtUrl } from "./device-art";
 import { parseFeaturedConfig } from "./featured-config";
 import { compareVersions, tierRunsOn, type Control, type Kind, type Tier } from "./schema";
 import { ratingAverage } from "./score";
@@ -67,6 +68,8 @@ export interface ReleaseRow {
   /** Malware scan of this revision's packages: null until scanned, clean or infected. */
   scan: "clean" | "infected" | null;
   scan_report: string | null;
+  /** GitHub's id for the repository it was indexed from; null while unknown. */
+  repository_id: number | null;
 }
 
 export interface ScanReport {
@@ -123,6 +126,9 @@ export function summary(env: Env, g: GizletRow) {
     icon_url: g.icon && g.latest_tag ? dlUrl(env, g.repo, g.latest_tag, g.icon) : null,
     cover_url: g.cover && g.latest_tag ? dlUrl(env, g.repo, g.latest_tag, g.cover) : null,
     pattern_url: g.pattern && g.latest_tag ? dlUrl(env, g.repo, g.latest_tag, g.pattern) : null,
+    /** The icon and cover as handhelds draw them: PNG, 128×128 and 640×360. */
+    device_icon_url: g.icon && g.latest_tag ? deviceArtUrl(env, g.repo, g.latest_tag, "icon.png") : null,
+    device_cover_url: g.cover && g.latest_tag ? deviceArtUrl(env, g.repo, g.latest_tag, "cover.png") : null,
     version: g.version,
     tag: g.latest_tag,
     updated_at: new Date(g.updated_at).toISOString(),
@@ -171,6 +177,8 @@ export async function gizletDetail(env: Env, g: GizletRow) {
     owner: g.owner,
     github_url: `https://github.com/${g.owner}/${g.name_repo}`,
     screenshots: tag ? shots.map((s) => dlUrl(env, g.repo, tag, s)) : [],
+    /** The screenshots as handhelds draw them: PNG, 640×480. */
+    device_screenshots: tag ? shots.map((_, i) => deviceArtUrl(env, g.repo, tag, `screenshot-${i + 1}.png`)) : [],
     about_urls: tag ? Object.fromEntries(Object.entries(parse<Record<string, string>>(g.about, {})).map(([k, f]) => [k, dlUrl(env, g.repo, tag, f)])) : {},
     controls: parse<Control[]>(g.controls, []),
     links: parse<Record<string, string>>(g.links, {}),
@@ -205,16 +213,25 @@ export async function listReleases(env: Env, repo: string, limit = 50) {
 /**
  * The package to install on a device: newest ready release with a package for `target`
  * whose tier runs on `tier`, preferring the device's own tier. Its `kind` is that release's
- * (an older release can differ from the newest), `app` for releases stored before kinds.
+ * (an older release can differ from the newest), `app` for releases stored before kinds, and its
+ * `app_id` that release's gizlet.toml id. Its `repository_id` is GitHub's id for the repository
+ * the release was indexed from, null while that is unknown. Only releases of the repository at the
+ * path now are picked (by its id, or both unknown); with `repositoryId`, only
+ * a release of that GitHub repository is, in the same statement, so a repository that takes the
+ * path meanwhile is never offered in its place.
  */
-export async function pickInstall(env: Env, repo: string, target: string, tier: Tier) {
+export async function pickInstall(env: Env, repo: string, target: string, tier: Tier, repositoryId?: number) {
   const { results } = await env.DB.prepare(
-    `SELECT p.*, r.version AS version, r.published_at AS published_at, coalesce(json_extract(r.spec_json, '$.kind'), 'app') AS kind FROM packages p
+    `SELECT p.*, r.version AS version, r.published_at AS published_at, coalesce(json_extract(r.spec_json, '$.kind'), 'app') AS kind,
+            json_extract(r.spec_json, '$.id') AS app_id, r.repository_id AS repository_id FROM packages p
        JOIN releases r ON r.repo = p.repo AND r.tag = p.tag AND r.revision = p.revision
-      WHERE p.repo = ? AND p.target = ? AND r.status = 'ready' AND p.sha256 IS NOT NULL`,
+       JOIN gizlets g ON g.repo = p.repo
+      WHERE p.repo = ?1 AND p.target = ?2 AND r.status = 'ready' AND p.sha256 IS NOT NULL
+        AND r.repository_id IS g.repository_id
+        AND (?3 IS NULL OR r.repository_id = ?3)`,
   )
-    .bind(repo, target)
-    .all<PackageRow & { size: number; sha256: string; version: string; published_at: number; kind: Kind }>();
+    .bind(repo, target, repositoryId ?? null)
+    .all<PackageRow & { size: number; sha256: string; version: string; published_at: number; kind: Kind; app_id: string; repository_id: number | null }>();
   const compatible = results.filter((p) => tierRunsOn(p.tier, tier)).sort((a, b) => compareVersions(b.version, a.version) || b.published_at - a.published_at);
   if (!compatible.length) return null;
   const newest = compatible[0]!.tag;
@@ -256,40 +273,70 @@ const ORDER: Record<ListSort, string> = {
 export const publicListed = (g: string) =>
   `${g}.visibility = 'listed' AND ${g}.latest_tag IS NOT NULL AND EXISTS (SELECT 1 FROM releases lr WHERE lr.repo = ${g}.repo AND lr.tag = ${g}.latest_tag AND lr.status = 'ready')`;
 
+/** What a device can install: a kind, and packages for its target and tier. */
+export interface DeviceFilter {
+  kind?: Kind;
+  target?: string;
+  tier?: string;
+}
+
+/** SQL conditions on the gizlets table `g` for a DeviceFilter; `bind` returns a parameter's placeholder. */
+function deviceConditions(g: string, f: DeviceFilter, bind: (v: unknown) => string): string[] {
+  const where: string[] = [];
+  if (f.kind) where.push(`${g}.kind = ${bind(f.kind)}`);
+  // One package of the shown release must fit both: its target, and a tier that runs here (a lite device runs only lite).
+  const fits = [
+    ...(f.target ? [`dp.target = ${bind(f.target)}`] : []),
+    ...(f.tier === "lite" ? ["dp.tier = 'lite'"] : []),
+  ];
+  if (fits.length) {
+    where.push(
+      `EXISTS (SELECT 1 FROM packages dp JOIN releases dr ON dr.repo = dp.repo AND dr.tag = dp.tag AND dr.revision = dp.revision
+        WHERE dp.repo = ${g}.repo AND dp.tag = ${g}.latest_tag AND ${fits.join(" AND ")})`,
+    );
+  }
+  return where;
+}
+
+function binder(binds: unknown[]) {
+  return (v: unknown) => {
+    binds.push(v);
+    return `?${binds.length}`;
+  };
+}
+
 /** Search: listed gizlets only, unless `all` (never blocked ones). */
 export async function listGizlets(env: Env, query: ListQuery): Promise<GizletRow[]> {
   const where = [query.all ? "visibility != 'blocked' AND latest_tag IS NOT NULL" : publicListed("gizlets")];
   const binds: unknown[] = [];
-  const bind = (v: unknown) => {
-    binds.push(v);
-    return `?${binds.length}`;
-  };
+  const bind = binder(binds);
   if (query.q) {
     const p = bind(`%${query.q.toLowerCase().replace(/[%_\\]/g, (m) => `\\${m}`)}%`);
     const cols = ["lower(name)", "lower(names)", "lower(coalesce(description,''))", "lower(descriptions)", "tags", "repo"];
     where.push(`(${cols.map((c) => `${c} LIKE ${p} ESCAPE '\\'`).join(" OR ")})`);
   }
-  if (query.kind) where.push(`kind = ${bind(query.kind)}`);
+  where.push(...deviceConditions("gizlets", query, bind));
   if (query.category) where.push(`kind = 'app' AND category = ${bind(query.category)}`);
   if (query.owner) where.push(`owner = ${bind(query.owner)} COLLATE NOCASE`);
   if (query.mark) where.push(`EXISTS (SELECT 1 FROM json_each(gizlets.marks) WHERE value = ${bind(query.mark)})`);
-  if (query.target) where.push(`EXISTS (SELECT 1 FROM json_each(gizlets.targets) WHERE value = ${bind(query.target)})`);
-  // A lite device runs only lite packages.
-  if (query.tier === "lite") where.push("EXISTS (SELECT 1 FROM json_each(gizlets.tiers) WHERE value = 'lite')");
   const sql = `SELECT * FROM gizlets WHERE ${where.join(" AND ")} ORDER BY ${ORDER[query.sort ?? "updated"]} LIMIT ${bind(query.limit)} OFFSET ${bind(query.offset)}`;
   const { results } = await env.DB.prepare(sql).bind(...binds).all<GizletRow>();
   return results;
 }
 
-/** Home lists: hand-picked collections plus automatic sections, all of listed gizlets. */
-export async function featured(env: Env) {
+/** Home lists: hand-picked collections plus automatic sections, all of listed gizlets; a device passes what it can install. */
+export async function featured(env: Env, filter: DeviceFilter = {}) {
   const collections = getFeaturedCollections(env.FEATURED_JSON);
   const repos = [...new Set(collections.flatMap((collection) => collection.repos))];
-  const listed = publicListed("g");
+  const statement = (sql: (listed: string) => string, ...first: unknown[]) => {
+    const binds = [...first];
+    const listed = [publicListed("g"), ...deviceConditions("g", filter, binder(binds))].join(" AND ");
+    return env.DB.prepare(sql(listed)).bind(...binds);
+  };
   const [{ results: items = [] } = {}, { results: recent = [] } = {}, { results: popular = [] } = {}] = await env.DB.batch<GizletRow>([
-    env.DB.prepare(`SELECT g.* FROM json_each(?) AS pick JOIN gizlets g ON g.repo = pick.value WHERE ${listed}`).bind(JSON.stringify(repos)),
-    env.DB.prepare(`SELECT g.* FROM gizlets g WHERE ${listed} ORDER BY g.updated_at DESC LIMIT 24`),
-    env.DB.prepare(`SELECT g.* FROM gizlets g WHERE ${listed} AND g.downloads > 0 ORDER BY g.downloads DESC, g.updated_at DESC LIMIT 12`),
+    statement((listed) => `SELECT g.* FROM json_each(?1) AS pick JOIN gizlets g ON g.repo = pick.value WHERE ${listed}`, JSON.stringify(repos)),
+    statement((listed) => `SELECT g.* FROM gizlets g WHERE ${listed} ORDER BY g.updated_at DESC LIMIT 24`),
+    statement((listed) => `SELECT g.* FROM gizlets g WHERE ${listed} AND g.downloads > 0 ORDER BY g.downloads DESC, g.updated_at DESC LIMIT 12`),
   ]);
   const byRepo = new Map(items.map((g) => [g.repo, g]));
   const section = (id: string, title: string, titles: Record<string, string>, layout: string, rows: GizletRow[]) => ({

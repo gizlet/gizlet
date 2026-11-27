@@ -33,6 +33,7 @@
     }
   ],
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "gizlet-assets" }],
+  "images": { "binding": "IMAGES" },
   "send_email": [{ "name": "MAIL", "allowed_sender_addresses": ["hello@gizlet.io"] }],
   "queues": {
     "producers": [{ "binding": "MIRROR", "queue": "gizlet-mirror" }],

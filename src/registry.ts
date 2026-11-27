@@ -1,11 +1,11 @@
 /** Indexing releases into the registry, and deciding what is listed. */
-import { parse, type GizletRow, type ReleaseRow } from "./db";
+import { parse, pickInstall, type GizletRow, type ReleaseRow } from "./db";
 import type { Env, Waiter } from "./env";
 import { fetchGizletToml, NotFound, reader, repositoryById, repositoryIdAt, type Reader, type RepoInfo } from "./github";
 import { bindLinks } from "./links";
 import { queueMirror } from "./mirror";
 import { repoRef, type RepoRef } from "./repo";
-import { compareVersions, IndexError, sameSpec, storedSpec } from "./schema";
+import { compareVersions, IndexError, sameSpec, storedSpec, tierRunsOn, type Tier } from "./schema";
 import { rescore } from "./score";
 
 const MISS_TTL_MS = 10 * 60 * 1000;
@@ -45,14 +45,19 @@ export async function indexRelease(env: Env, ref: RepoRef, tag: string, opts: In
   // Browsing re-indexes a release only when its gizlet.toml changed, and never re-checks a failed
   // one. A publish always does, since the packages may have been rebuilt; bytes a malware scan
   // found infected fail again when they are mirrored (src/mirror.ts), whatever the release.
-  if (existing?.status === "failed" && sameSpec(existing.spec_json, spec) && !opts.force) return existing;
-  const unchanged = existing && sameSpec(existing.spec_json, spec) && !opts.force;
+  // A release indexed from another repository than the one at the path now (it was deleted or
+  // renamed, and another created there) is indexed again from this one, whatever its gizlet.toml.
+  const learnedId = opts.repositoryId ?? opts.info?.id ?? null;
+  const boundId = learnedId ?? (await env.DB.prepare("SELECT repository_id FROM gizlets WHERE repo = ?").bind(ref.key).first<{ repository_id: number | null }>())?.repository_id ?? null;
+  const sameRepository = (existing?.repository_id ?? null) === boundId;
+  if (existing?.status === "failed" && sameRepository && sameSpec(existing.spec_json, spec) && !opts.force) return existing;
+  const unchanged = existing && sameRepository && sameSpec(existing.spec_json, spec) && !opts.force;
   const display = opts.display ?? (opts.info ? { owner: opts.info.owner, name: opts.info.name } : undefined);
   const owner = display?.owner ?? ref.owner;
   const name = display?.name ?? ref.name;
   const isPrivate = opts.info ? (opts.info.private ? 1 : 0) : null;
 
-  const learned = opts.repositoryId ?? opts.info?.id ?? null;
+  const learned = learnedId;
   const stmts: D1PreparedStatement[] = [
     env.DB.prepare(
       `INSERT INTO gizlets (repo, owner, name_repo, repository_id, app_id, name, created_at, updated_at, checked_at, private)
@@ -70,12 +75,13 @@ export async function indexRelease(env: Env, ref: RepoRef, tag: string, opts: In
   if (!unchanged) {
     stmts.push(
       env.DB.prepare(
-        `INSERT INTO releases (repo, tag, version, status, error, warnings, spec_json, mirrored, published_at, updated_at)
-         VALUES (?, ?, ?, 'pending', NULL, '[]', ?, 0, ?, ?)
+        // The repository it is indexed from: the id learnt now, else the gizlet's, as the statement above left it.
+        `INSERT INTO releases (repo, tag, version, status, error, warnings, spec_json, mirrored, published_at, updated_at, repository_id)
+         VALUES (?1, ?2, ?3, 'pending', NULL, '[]', ?4, 0, ?5, ?6, coalesce(?7, (SELECT repository_id FROM gizlets WHERE repo = ?1)))
          ON CONFLICT (repo, tag) DO UPDATE SET version = excluded.version, status = 'pending', error = NULL, warnings = '[]',
            spec_json = excluded.spec_json, mirrored = 0, updated_at = excluded.updated_at, revision = releases.revision + 1,
-           scan = NULL, scan_report = NULL`,
-      ).bind(ref.key, tag, spec.version, specJson, now, now),
+           scan = NULL, scan_report = NULL, repository_id = excluded.repository_id`,
+      ).bind(ref.key, tag, spec.version, specJson, now, now, learned),
       env.DB.prepare("DELETE FROM packages WHERE repo = ? AND tag = ?").bind(ref.key, tag),
       // Size, sha256 and the R2 object are filled in by the mirror job.
       ...spec.packages.map((p) =>
@@ -247,9 +253,15 @@ export async function refreshGizlet(env: Env, ref: RepoRef, olderThanMs: number)
       }
     }
     if (info) {
-      await env.DB.prepare("UPDATE gizlets SET private = ?, repository_id = coalesce(repository_id, ?), owner = ?, name_repo = ? WHERE repo = ?")
-        .bind(info.private ? 1 : 0, info.id, info.owner, info.name, ref.key)
-        .run();
+      await env.DB.batch([
+        env.DB.prepare("UPDATE gizlets SET private = ?, repository_id = coalesce(repository_id, ?), owner = ?, name_repo = ? WHERE repo = ?").bind(
+          info.private ? 1 : 0,
+          info.id,
+          info.owner,
+          info.name,
+          ref.key,
+        ),
+      ]);
     }
     if (tag) {
       await indexRelease(env, ref, tag, { reader: src, info }).catch((e: unknown) => {
@@ -285,4 +297,27 @@ export async function refreshStale(env: Env): Promise<void> {
   for (const g of results) {
     await refreshGizlet(env, { owner: g.owner, name: g.name_repo, key: g.repo }, STALE_AFTER_MS).catch((e: unknown) => console.error("refresh failed", g.repo, e));
   }
+}
+
+/**
+ * The package to install, as `pickInstall` picks it, for the install API and the download
+ * shortcut. When only releases indexed under another repository, or under none (from before
+ * repository ids, or while GitHub could not say), would fit, the newest of them is indexed again
+ * under the gizlet's id, which mirroring checks against the repository at the path now; until
+ * then there is none, and the release is pending.
+ */
+export async function pickInstallRecovering(env: Env, g: GizletRow, target: string, tier: Tier) {
+  const pkg = await pickInstall(env, g.repo, target, tier);
+  if (pkg || g.repository_id == null) return pkg;
+  const { results } = await env.DB.prepare(
+    `SELECT r.tag, r.version, p.tier FROM releases r JOIN packages p ON p.repo = r.repo AND p.tag = r.tag AND p.revision = r.revision
+      WHERE r.repo = ? AND p.target = ? AND r.status = 'ready' AND r.repository_id IS NOT ?`,
+  )
+    .bind(g.repo, target, g.repository_id)
+    .all<{ tag: string; version: string; tier: Tier }>();
+  const newest = results.filter((p) => tierRunsOn(p.tier, tier)).sort((a, b) => compareVersions(b.version, a.version))[0];
+  if (!newest) return null;
+  const ref = { owner: g.owner, name: g.name_repo, key: g.repo };
+  await indexRelease(env, ref, newest.tag, { repositoryId: g.repository_id }).catch((e: unknown) => console.error("re-index under the repository id failed", ref.key, e));
+  return pickInstall(env, g.repo, target, tier);
 }

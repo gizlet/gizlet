@@ -1,11 +1,12 @@
 /** dl.gizlet.io: package and art downloads, from R2 or else GitHub. */
 import { Hono, type Context } from "hono";
-import { packageUrl, pickInstall, type ReleaseRow } from "./db";
+import { packageUrl, type ReleaseRow } from "./db";
+import { deviceArt, deviceArtKey, storeDeviceArt } from "./device-art";
 import type { Env } from "./env";
-import { assetUrl, rawUrl, reader } from "./github";
-import { artKey, contentType, indexedFiles } from "./mirror";
+import { assetUrl, rawUrl, readCapped, reader } from "./github";
+import { artKey, contentType, indexedFiles, MAX_ART_BYTES } from "./mirror";
 import { latestOsTag, OS_FILE, OS_TAG } from "./os-release";
-import { ensureGizlet } from "./registry";
+import { ensureGizlet, pickInstallRecovering } from "./registry";
 import { repoRef } from "./repo";
 import { isAssetName, isRepoPath, TARGET, type GizletToml, type Tier } from "./schema";
 
@@ -77,9 +78,54 @@ dl.get("/github.com/:owner/:repo", async (c) => {
   const g = await ensureGizlet(c.env, r, c.executionCtx);
   if (!g) return c.text(`${r.key} has no Gizlet release`, 404);
   if (g.visibility === "blocked") return c.text(`${r.key} is blocked`, 403);
-  const pkg = await pickInstall(c.env, g.repo, target, tier);
-  if (!pkg) return c.text(`${g.name} has no package for ${target} (${tier})`, 404);
+  const pkg = await pickInstallRecovering(c.env, g, target, tier);
+  if (!pkg) {
+    const pending = await c.env.DB.prepare("SELECT 1 FROM releases WHERE repo = ? AND status IN ('pending', 'mirroring', 'checking')").bind(g.repo).first();
+    if (pending) return c.text(`${g.name} is still being checked; try again in a minute`, 409);
+    return c.text(`${g.name} has no package for ${target} (${tier})`, 404);
+  }
   return c.redirect(packageUrl(c.env, pkg), 302);
+});
+
+/**
+ * A release's art as handhelds draw it (src/device-art.ts), for the release's current revision.
+ * Releases mirrored before device art existed, and ones pruned from R2, get theirs made on first
+ * request from the art, mirrored or else read from the repository at the tag.
+ */
+dl.on(["GET", "HEAD"], "/github.com/:owner/:repo/:tag/~device/:name", async (c) => {
+  const r = repoRef(c.req.param("owner"), c.req.param("repo"));
+  const tag = c.req.param("tag");
+  const name = c.req.param("name");
+  if (!r || !TAG.test(tag)) return c.text("Not found", 404);
+  const [g, rel] = await Promise.all([
+    c.env.DB.prepare("SELECT owner, name_repo, visibility FROM gizlets WHERE repo = ?").bind(r.key).first<{ owner: string; name_repo: string; visibility: string }>(),
+    c.env.DB.prepare("SELECT status, revision, spec_json FROM releases WHERE repo = ? AND tag = ?").bind(r.key, tag).first<Pick<ReleaseRow, "status" | "revision" | "spec_json">>(),
+  ]);
+  if (!g || !rel) return c.text("Not found", 404);
+  if (g.visibility === "blocked") return c.text(`${r.key} is blocked`, 403);
+  if (rel.status === "failed") return c.text(`${r.key} ${tag} failed its checks`, 410);
+  const art = deviceArt(JSON.parse(rel.spec_json) as GizletToml).get(name);
+  if (!art) return c.text("Not found", 404);
+  const key = deviceArtKey(r.key, tag, rel.revision, name);
+  const serve = () => fromR2(c, key, name, "public, max-age=3600", null, () => {});
+  const found = await serve();
+  if (found) return found;
+  // The mirrored copy only if this revision wrote it: a re-index that could not copy the art
+  // leaves the previous revision's in place. Otherwise the file in the repository at the tag, and
+  // failing that a copy mirrored before copies were labelled with their revision.
+  const mirrored = await c.env.BUCKET.get(artKey(r.key, tag, art.source));
+  const labelled = mirrored?.customMetadata?.revision;
+  let source: Uint8Array | ReadableStream<Uint8Array> | null = null;
+  if (labelled === String(rel.revision)) source = mirrored!.body;
+  else await mirrored?.body.cancel();
+  if (!source) {
+    const got = await (await reader(c.env, { owner: g.owner, name: g.name_repo, key: r.key })).file(tag, art.source);
+    if (got.ok) source = await readCapped(got, MAX_ART_BYTES).catch(() => null);
+    else await got.body?.cancel();
+  }
+  if (!source && mirrored && labelled === undefined) source = (await c.env.BUCKET.get(artKey(r.key, tag, art.source)))?.body ?? null;
+  if (!source || !(await storeDeviceArt(c.env, r.key, tag, rel.revision, name, art, source))) return c.text("Not found", 404);
+  return (await serve()) ?? c.text("Not found", 404);
 });
 
 /** A package (a release asset name) or store art (a repository path) of a release. */

@@ -30,23 +30,24 @@ export async function deletePrefix(env: Env, prefix: string): Promise<void> {
 }
 
 /**
- * Delete the package objects of a tag's revisions older than `revision`: each publish indexes the
- * tag again, and only the newest revision's packages are ever served. A job of an older revision
+ * Delete the package and device art objects of a tag's revisions older than `revision`: each
+ * publish indexes the tag again, and only the newest revision's are ever served. A job of an older revision
  * still running when this runs finds itself superseded and deletes what it wrote after
  * (`mirrorRelease`).
  */
 export async function pruneRevisions(env: Env, repo: string, tag: string, revision: number): Promise<void> {
-  const root = packagesRoot(repo, tag);
-  // List them all first: deleting while paging through a listing would skip some.
-  const old: string[] = [];
-  let cursor: string | undefined;
-  do {
-    const list = await env.BUCKET.list({ prefix: root, delimiter: "/", cursor });
-    for (const prefix of list.delimitedPrefixes) {
-      const n = Number(/^r(\d+)\/$/.exec(prefix.slice(root.length))?.[1]);
-      if (Number.isSafeInteger(n) && n < revision) old.push(prefix);
-    }
-    cursor = list.truncated ? list.cursor : undefined;
-  } while (cursor);
-  for (const prefix of old) await deletePrefix(env, prefix);
+  for (const root of [packagesRoot(repo, tag), `${repo}/${tag}/device/`]) {
+    // List them all first: deleting while paging through a listing would skip some.
+    const old: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const list = await env.BUCKET.list({ prefix: root, delimiter: "/", cursor });
+      for (const prefix of list.delimitedPrefixes) {
+        const n = Number(/^r(\d+)\/$/.exec(prefix.slice(root.length))?.[1]);
+        if (Number.isSafeInteger(n) && n < revision) old.push(prefix);
+      }
+      cursor = list.truncated ? list.cursor : undefined;
+    } while (cursor);
+    for (const prefix of old) await deletePrefix(env, prefix);
+  }
 }

@@ -74,6 +74,7 @@ function d1() {
   const db = new DatabaseSync(":memory:");
   db.exec(readFileSync(new URL("../../migrations/d1/0006_links.sql", import.meta.url), "utf8"));
   db.exec("CREATE TABLE gizlets (repo TEXT PRIMARY KEY, repository_id INTEGER, visibility TEXT NOT NULL DEFAULT 'listed', updated_at INTEGER NOT NULL DEFAULT 0)");
+  db.exec("CREATE TABLE releases (repo TEXT NOT NULL, tag TEXT NOT NULL, repository_id INTEGER, PRIMARY KEY (repo, tag))");
   const tick = () => new Promise((r) => setImmediate(r));
   type Arg = string | number | null;
   const stmt = (sql: string, args: Arg[] = []) => ({
@@ -155,6 +156,7 @@ test("a link follows its repository's id, never another repository created at it
 test("a gizlet indexed without GitHub's id takes the one GitHub confirms, and so do its links", async () => {
   const { db, env } = d1();
   db.exec("INSERT INTO gizlets (repo, repository_id) VALUES ('github.com/o/web', NULL)");
+  db.exec("INSERT INTO releases (repo, tag, repository_id) VALUES ('github.com/o/web', 'v1.0.0', NULL), ('github.com/o/other', 'v1.0.0', NULL)");
   const web = { repo: "github.com/o/web", repository_id: null };
   await claimLink(env, web, "early-one", "u1");
   assert.equal(db.prepare("SELECT gizlet FROM links WHERE id = 'early-one'").get()!.gizlet, "repo:github.com/o/web");
@@ -162,6 +164,15 @@ test("a gizlet indexed without GitHub's id takes the one GitHub confirms, and so
   const bound = await adoptRepositoryId(env, web, 7);
   assert.equal(bound.repository_id, 7);
   assert.equal(db.prepare("SELECT repository_id FROM gizlets").get()!.repository_id, 7);
+  // Its releases indexed while the id was unknown are not taken for that repository's: the path
+  // may have changed hands since. They are indexed again under the id (src/api.ts, src/registry.ts).
+  assert.deepEqual(
+    db.prepare("SELECT repo, repository_id FROM releases ORDER BY repo").all().map((r) => ({ ...r })),
+    [
+      { repo: "github.com/o/other", repository_id: null },
+      { repo: "github.com/o/web", repository_id: null },
+    ],
+  );
   assert.deepEqual(await claimLink(env, bound, "later-one", "u1"), { ok: true, id: "later-one" });
   assert.deepEqual(
     db.prepare("SELECT id, gizlet FROM links ORDER BY id").all().map((r) => ({ ...r })),
