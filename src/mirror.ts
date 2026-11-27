@@ -171,9 +171,14 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
     // from, before the first file and after the last, or another repository's bytes would be
     // recorded under its id and offered to its installs as an update.
     const first = await checkRepository(env, src, ref, rel.repository_id, job.tag);
+    // Packages another attempt mirrored were read while the path held whatever it held then.
+    let reused = false;
     for (const p of pkgs) {
       // Mirrored already, by an earlier attempt or another delivery of this job.
-      if (p.object && p.sha256 && p.size && (await env.BUCKET.head(p.object))?.size === p.size) continue;
+      if (p.object && p.sha256 && p.size && (await env.BUCKET.head(p.object))?.size === p.size) {
+        reused = true;
+        continue;
+      }
       const key = newPackageKey(job.repo, job.tag, job.revision, p.file);
       const got = await copyToR2(env, await src.asset(job.tag, p.file), key, p.file);
       // The first attempt to finish is the package; a later one drops its copy and uses that one.
@@ -185,6 +190,7 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
       if (won.meta.changes > 0) {
         Object.assign(p, got, { object: key });
       } else {
+        reused = true;
         await env.BUCKET.delete(key);
         const mine = await env.DB.prepare("SELECT size, sha256, object FROM packages WHERE repo = ? AND tag = ? AND file = ? AND revision = ?")
           .bind(job.repo, job.tag, p.file, job.revision)
@@ -223,7 +229,7 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
       if (unreadable) warnings.push(`${file} could not be read as an image`);
     }
     const last = await checkRepository(env, src, ref, rel.repository_id, job.tag);
-    if (rel.repository_id == null && typeof first === "number" && first === last) await learnRepository(env, job, first);
+    if (rel.repository_id == null && !reused && typeof first === "number" && first === last) await learnRepository(env, job, first);
 
     if (!(await setStatus(env, job, "checking", null))) throw new Superseded();
     const errors: string[] = [];

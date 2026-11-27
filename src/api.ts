@@ -12,7 +12,7 @@ import { AuthError, verifyActionsToken } from "./oidc";
 import { ensureGizlet, indexRelease, setVisibility } from "./registry";
 import { ADMIN_MARKS, MARKS, ratingAverage, rescore, type Mark } from "./score";
 import { parseRepoAddress, repoRef, type RepoRef } from "./repo";
-import { CATEGORIES, compareVersions, IndexError, KINDS, type Category, type Kind, type Tier } from "./schema";
+import { CATEGORIES, compareVersions, IndexError, KINDS, tierRunsOn, type Category, type Kind, type Tier } from "./schema";
 
 export const VERSION = "2.2.0";
 
@@ -232,7 +232,24 @@ api.get(`${GIZLET}/install`, async (c) => {
       await indexRelease(c.env, ref, shown, { repositoryId: id }).catch((e: unknown) => console.error("re-index under the repository id failed", ref.key, e));
     }
   }
-  const pkg = await pickInstall(c.env, r.gizlet.repo, target, tier);
+  let pkg = await pickInstall(c.env, r.gizlet.repo, target, tier);
+  // Only releases indexed under another repository, or under none (from before repository ids, or
+  // while GitHub could not say), would fit: index the newest of them again, which mirroring checks
+  // against the repository at the path now. Meanwhile the answer is not_ready.
+  if (!pkg && r.gizlet.repository_id != null) {
+    const stale = await c.env.DB.prepare(
+      `SELECT r.tag, r.version, p.tier FROM releases r JOIN packages p ON p.repo = r.repo AND p.tag = r.tag AND p.revision = r.revision
+        WHERE r.repo = ? AND p.target = ? AND r.status = 'ready' AND r.repository_id IS NOT ?`,
+    )
+      .bind(r.gizlet.repo, target, r.gizlet.repository_id)
+      .all<{ tag: string; version: string; tier: Tier }>();
+    const newest = stale.results.filter((p) => tierRunsOn(p.tier, tier)).sort((a, b) => compareVersions(b.version, a.version))[0];
+    if (newest) {
+      const ref = { owner: r.gizlet.owner, name: r.gizlet.name_repo, key: r.gizlet.repo };
+      await indexRelease(c.env, ref, newest.tag, { repositoryId: r.gizlet.repository_id }).catch((e: unknown) => console.error("re-index under the repository id failed", ref.key, e));
+      pkg = await pickInstall(c.env, r.gizlet.repo, target, tier);
+    }
+  }
   if (!pkg) {
     const pending = await c.env.DB.prepare("SELECT 1 FROM releases WHERE repo = ? AND status IN ('pending', 'mirroring', 'checking')").bind(r.gizlet.repo).first();
     if (pending) return apiError(c, 409, "not_ready", `${r.gizlet.name} is still being checked; try again in a minute`);

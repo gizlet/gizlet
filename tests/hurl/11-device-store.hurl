@@ -479,3 +479,59 @@ HTTP 200
 [Asserts]
 jsonpath "$.repository_id" isInteger
 jsonpath "$.repository_id" != {{early_first_id}}
+
+# A release indexed while GitHub could not say which repository the path holds has no repository id,
+# like every release from before repository ids. When the gizlet later learns its id from a newer
+# release that has nothing for this device, an install indexes the older one again under the id.
+POST {{fixture}}/_fixture/api-down?repo=fixture-org/legacy
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/legacy
+x-gizlet-host: api.gizlet.io
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/legacy/releases/v1.0.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "ready"
+
+POST {{fixture}}/_fixture/api-down?repo=fixture-org/legacy&down=0
+HTTP 200
+
+POST {{fixture}}/_fixture/release?repo=fixture-org/legacy&version=2.0.0&targets=x86_64-unknown-linux-gnu:full
+HTTP 201
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/legacy
+x-gizlet-host: api.gizlet.io
+[Options]
+delay: 3500
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/legacy/releases/v2.0.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "ready"
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/legacy/install?target=aarch64-unknown-linux-gnu&tier=lite
+x-gizlet-host: api.gizlet.io
+HTTP 409
+[Asserts]
+jsonpath "$.error.code" == "not_ready"
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/legacy/install?target=aarch64-unknown-linux-gnu&tier=lite
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.version" == "1.0.0"
+jsonpath "$.repository_id" isInteger
