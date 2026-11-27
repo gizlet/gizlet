@@ -221,8 +221,8 @@ x-gizlet-host: api.gizlet.io
   "tier": "lite",
   "installed": [
     {"repo": "github.com/fixture-org/hello-gizlet", "repository_id": {{hello_repository_id}}, "id": "dev.fixture.hellogizlet", "version": "0.1.0"},
-    {"repo": "https://github.com/Fixture-Org/hello-gizlet", "id": "dev.fixture.hellogizlet", "version": "0.2.0"},
-    {"repo": "github.com/fixture-org/hello-gizlet", "id": "dev.someone.else", "version": "0.1.0"},
+    {"repo": "https://github.com/Fixture-Org/hello-gizlet", "repository_id": {{hello_repository_id}}, "id": "dev.fixture.hellogizlet", "version": "0.2.0"},
+    {"repo": "github.com/fixture-org/hello-gizlet", "repository_id": {{hello_repository_id}}, "id": "dev.someone.else", "version": "0.1.0"},
     {"repo": "github.com/fixture-org/on-demand", "id": "dev.fixture.ondemand", "version": "0.1.0"},
     {"repo": "github.com/fixture-org/never-published", "id": "dev.fixture.never", "version": "1.0.0"},
     {"repo": "not a repository", "id": "dev.fixture.never", "version": "1.0.0"}
@@ -250,9 +250,19 @@ jsonpath "$.gizlets[1].repo" == "github.com/fixture-org/hello-gizlet"
 jsonpath "$.gizlets[1].package" not exists
 jsonpath "$.gizlets[2].status" == "id_changed"
 jsonpath "$.gizlets[2].package" not exists
-jsonpath "$.gizlets[3].status" == "no_package"
+# Installed without GitHub's id for its repository: updated only by installing it again.
+jsonpath "$.gizlets[3].status" == "unverified"
+jsonpath "$.gizlets[3].package" not exists
 jsonpath "$.gizlets[4].status" == "not_found"
 jsonpath "$.gizlets[5].status" == "not_found"
+
+# Nothing for this target any more.
+POST {{base}}/v1/updates
+x-gizlet-host: api.gizlet.io
+{"target": "riscv64gc-unknown-linux-gnu", "installed": [{"repo": "github.com/fixture-org/hello-gizlet", "repository_id": {{hello_repository_id}}, "id": "dev.fixture.hellogizlet", "version": "0.1.0"}]}
+HTTP 200
+[Asserts]
+jsonpath "$.gizlets[0].status" == "no_package"
 
 # The path now holds another GitHub repository than the one the app came from: no update.
 POST {{base}}/v1/updates
@@ -282,3 +292,64 @@ POST {{base}}/v1/updates
 x-gizlet-host: api.gizlet.io
 {"target": "aarch64-unknown-linux-gnu"}
 HTTP 400
+
+# A gizlet read from the public web learns GitHub's repository id when a device installs it. When
+# another repository takes its path and publishes a higher version with the same app id, devices
+# that installed the first never get it as an update, and its release is not offered in its name.
+GET {{base}}/v1/gizlets/github.com/fixture-org/path-reuse
+x-gizlet-host: api.gizlet.io
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/path-reuse/releases/v1.0.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "ready"
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/path-reuse/install?target=aarch64-unknown-linux-gnu&tier=lite
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Captures]
+first_repository_id: jsonpath "$.repository_id"
+[Asserts]
+jsonpath "$.repository_id" isInteger
+jsonpath "$.version" == "1.0.0"
+
+POST {{fixture}}/_fixture/replace?repo=fixture-org/path-reuse
+HTTP 200
+
+POST {{fixture}}/_fixture/release?repo=fixture-org/path-reuse&version=2.0.0
+HTTP 201
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/path-reuse
+x-gizlet-host: api.gizlet.io
+[Options]
+delay: 3500
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/path-reuse/releases/v2.0.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "ready"
+
+POST {{base}}/v1/updates
+x-gizlet-host: api.gizlet.io
+{"target": "aarch64-unknown-linux-gnu", "installed": [{"repo": "github.com/fixture-org/path-reuse", "repository_id": {{first_repository_id}}, "id": "dev.fixture.pathreuse", "version": "1.0.0"}]}
+HTTP 200
+[Asserts]
+jsonpath "$.gizlets[0].status" == "repository_changed"
+jsonpath "$.gizlets[0].package" not exists
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/path-reuse/install?target=aarch64-unknown-linux-gnu&tier=lite
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.version" == "2.0.0"
+jsonpath "$.repository_id" != {{first_repository_id}}

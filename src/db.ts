@@ -213,17 +213,20 @@ export async function listReleases(env: Env, repo: string, limit = 50) {
  * whose tier runs on `tier`, preferring the device's own tier. Its `kind` is that release's
  * (an older release can differ from the newest), `app` for releases stored before kinds, and its
  * `app_id` that release's gizlet.toml id. Its `repository_id` is GitHub's id for the repository
- * as the same statement read it; with `repositoryId`, only a package of that GitHub repository
- * is picked, so a repository that takes the path meanwhile is never offered in its place.
+ * the release was indexed from (the gizlet's, for releases indexed before either was known).
+ * Releases of a repository that held the path before are never picked; with `repositoryId`, only
+ * a release of that GitHub repository is, in the same statement, so a repository that takes the
+ * path meanwhile is never offered in its place.
  */
 export async function pickInstall(env: Env, repo: string, target: string, tier: Tier, repositoryId?: number) {
   const { results } = await env.DB.prepare(
     `SELECT p.*, r.version AS version, r.published_at AS published_at, coalesce(json_extract(r.spec_json, '$.kind'), 'app') AS kind,
-            json_extract(r.spec_json, '$.id') AS app_id, g.repository_id AS repository_id FROM packages p
+            json_extract(r.spec_json, '$.id') AS app_id, coalesce(r.repository_id, g.repository_id) AS repository_id FROM packages p
        JOIN releases r ON r.repo = p.repo AND r.tag = p.tag AND r.revision = p.revision
        JOIN gizlets g ON g.repo = p.repo
       WHERE p.repo = ?1 AND p.target = ?2 AND r.status = 'ready' AND p.sha256 IS NOT NULL
-        AND (?3 IS NULL OR g.repository_id = ?3)`,
+        AND (r.repository_id IS NULL OR g.repository_id IS NULL OR r.repository_id = g.repository_id)
+        AND (?3 IS NULL OR coalesce(r.repository_id, g.repository_id) = ?3)`,
   )
     .bind(repo, target, repositoryId ?? null)
     .all<PackageRow & { size: number; sha256: string; version: string; published_at: number; kind: Kind; app_id: string; repository_id: number | null }>();

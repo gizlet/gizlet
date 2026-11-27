@@ -220,6 +220,12 @@ api.get(`${GIZLET}/install`, async (c) => {
   if (tier !== "lite" && tier !== "full") return apiError(c, 400, "bad_request", "tier must be lite or full");
   const r = await gizletOr404(c);
   if ("error" in r) return r.error;
+  // A device pins what it installs to GitHub's id for the repository: learn it now if the gizlet
+  // was indexed from the public web, which has none.
+  if (r.gizlet.repository_id == null) {
+    const id = await repositoryIdAt(c.env, { owner: r.gizlet.owner, name: r.gizlet.name_repo, key: r.gizlet.repo }).catch(() => undefined);
+    if (typeof id === "number") r.gizlet = await adoptRepositoryId(c.env, r.gizlet, id);
+  }
   const pkg = await pickInstall(c.env, r.gizlet.repo, target, tier);
   if (!pkg) {
     const pending = await c.env.DB.prepare("SELECT 1 FROM releases WHERE repo = ? AND status IN ('pending', 'mirroring', 'checking')").bind(r.gizlet.repo).first();
@@ -238,7 +244,8 @@ const MAX_UPDATES = 200;
  * holds another one), and only with a package whose id is the installed one: another repository
  * claiming the same id, or the repository moving to another id, never replaces an app and
  * reaches its saves. Each `status` is `update` (with the package and the `repository_id` to keep),
- * `current`, `not_found`, `blocked`, `repository_changed`, `no_package` (nothing for this target
+ * `current`, `not_found`, `blocked`, `unverified` (installed without a `repository_id`: install it
+ * again to update it), `repository_changed`, `no_package` (nothing for this target
  * and tier any more) or `id_changed`. Stale gizlets are refreshed in the background, as views
  * refresh them.
  */
@@ -273,14 +280,20 @@ api.post("/v1/updates", async (c) => {
       gizlets.push({ ...base, status: "blocked" });
       continue;
     }
+    // Installed without GitHub's id for its repository: nothing says the path still holds it, so
+    // it is updated only by installing it again, which the user chooses.
+    if (one.repository_id === null) {
+      gizlets.push({ ...base, status: "unverified" });
+      continue;
+    }
     // The path now holds another GitHub repository (the one installed from was renamed or deleted
     // and someone else took its name): it never updates what the device installed.
-    if (one.repository_id !== null && g.repository_id !== one.repository_id) {
+    if (g.repository_id !== one.repository_id) {
       gizlets.push({ ...base, status: "repository_changed" });
       continue;
     }
     // Checked again in the statement that picks the package, which a publish meanwhile cannot get between.
-    const pkg = await pickInstall(c.env, g.repo, target, tier, one.repository_id ?? undefined);
+    const pkg = await pickInstall(c.env, g.repo, target, tier, one.repository_id);
     const s = summary(c.env, g);
     const about = { name: s.name, names: s.names, color: s.color, visibility: s.visibility, device_icon_url: s.device_icon_url };
     if (!pkg) gizlets.push({ ...base, ...about, status: "no_package" });

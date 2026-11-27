@@ -70,12 +70,13 @@ export async function indexRelease(env: Env, ref: RepoRef, tag: string, opts: In
   if (!unchanged) {
     stmts.push(
       env.DB.prepare(
-        `INSERT INTO releases (repo, tag, version, status, error, warnings, spec_json, mirrored, published_at, updated_at)
-         VALUES (?, ?, ?, 'pending', NULL, '[]', ?, 0, ?, ?)
+        // The repository it is indexed from: the id learnt now, else the gizlet's, as the statement above left it.
+        `INSERT INTO releases (repo, tag, version, status, error, warnings, spec_json, mirrored, published_at, updated_at, repository_id)
+         VALUES (?1, ?2, ?3, 'pending', NULL, '[]', ?4, 0, ?5, ?6, coalesce(?7, (SELECT repository_id FROM gizlets WHERE repo = ?1)))
          ON CONFLICT (repo, tag) DO UPDATE SET version = excluded.version, status = 'pending', error = NULL, warnings = '[]',
            spec_json = excluded.spec_json, mirrored = 0, updated_at = excluded.updated_at, revision = releases.revision + 1,
-           scan = NULL, scan_report = NULL`,
-      ).bind(ref.key, tag, spec.version, specJson, now, now),
+           scan = NULL, scan_report = NULL, repository_id = excluded.repository_id`,
+      ).bind(ref.key, tag, spec.version, specJson, now, now, learned),
       env.DB.prepare("DELETE FROM packages WHERE repo = ? AND tag = ?").bind(ref.key, tag),
       // Size, sha256 and the R2 object are filled in by the mirror job.
       ...spec.packages.map((p) =>
