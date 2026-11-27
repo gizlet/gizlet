@@ -226,19 +226,21 @@ api.get(`${GIZLET}/install`, async (c) => {
     if (pending) return apiError(c, 409, "not_ready", `${r.gizlet.name} is still being checked; try again in a minute`);
     return apiError(c, 404, "no_compatible_package", `${r.gizlet.name} has no package for ${target} (${tier})`);
   }
-  return c.json({ repo: r.gizlet.repo, id: r.gizlet.app_id, name: r.gizlet.name, kind: pkg.kind, version: pkg.version, tag: pkg.tag, package: packageJson(c.env, pkg) }, 200, { "cache-control": "no-store" });
+  return c.json({ repo: r.gizlet.repo, repository_id: r.gizlet.repository_id, id: r.gizlet.app_id, name: r.gizlet.name, kind: pkg.kind, version: pkg.version, tag: pkg.tag, package: packageJson(c.env, pkg) }, 200, { "cache-control": "no-store" });
 });
 
 const MAX_UPDATES = 200;
 
 /**
  * What a device's installed gizlets can update to, in one request. Each entry names the
- * repository the device installed it from, and only that repository can update it, and only
- * with a package whose id is the installed one: another repository claiming the same id, or the
- * repository moving to another id, never replaces an app and reaches its saves. Each `status` is
- * `update` (with the package), `current`, `not_found`, `blocked`, `no_package` (nothing for this
- * target and tier any more) or `id_changed`. Stale gizlets are refreshed in the background, as
- * views refresh them.
+ * repository the device installed it from and, when the install answer gave one, GitHub's
+ * `repository_id` for it. Only that repository updates it (`repository_changed` once its path
+ * holds another one), and only with a package whose id is the installed one: another repository
+ * claiming the same id, or the repository moving to another id, never replaces an app and
+ * reaches its saves. Each `status` is `update` (with the package and the `repository_id` to keep),
+ * `current`, `not_found`, `blocked`, `repository_changed`, `no_package` (nothing for this target
+ * and tier any more) or `id_changed`. Stale gizlets are refreshed in the background, as views
+ * refresh them.
  */
 api.post("/v1/updates", async (c) => {
   const body = await c.req.json<{ target?: unknown; tier?: unknown; installed?: unknown }>().catch(() => null);
@@ -247,18 +249,19 @@ api.post("/v1/updates", async (c) => {
   if (typeof target !== "string" || !TARGET.test(target)) return apiError(c, 400, "bad_request", "target must be a target triple such as aarch64-unknown-linux-gnu");
   if (tier !== "lite" && tier !== "full") return apiError(c, 400, "bad_request", "tier must be lite or full");
   if (!Array.isArray(body?.installed) || body.installed.length > MAX_UPDATES) return apiError(c, 400, "bad_request", `installed must be a list of at most ${MAX_UPDATES} {repo, id, version}`);
-  const installed: { repo: string; id: string; version: string }[] = [];
+  const installed: { repo: string; repository_id: number | null; id: string; version: string }[] = [];
   for (const one of body.installed as unknown[]) {
-    const { repo, id, version } = (one ?? {}) as Record<string, unknown>;
+    const { repo, repository_id = null, id, version } = (one ?? {}) as Record<string, unknown>;
     if (typeof repo !== "string" || typeof id !== "string" || typeof version !== "string" || !id || !version) {
       return apiError(c, 400, "bad_request", "each installed gizlet needs repo, id and version");
     }
-    installed.push({ repo, id, version });
+    if (repository_id !== null && !Number.isSafeInteger(repository_id)) return apiError(c, 400, "bad_request", "repository_id must be GitHub's repository id");
+    installed.push({ repo, repository_id: repository_id as number | null, id, version });
   }
   const gizlets = [];
   for (const one of installed) {
     const r = parseRepoAddress(one.repo);
-    const base = { repo: r?.key ?? one.repo, id: one.id, installed: one.version };
+    const base = { repo: r?.key ?? one.repo, repository_id: one.repository_id, id: one.id, installed: one.version };
     // Only gizlets the registry knows: a device installed each from one, so nothing is indexed here.
     const known = r ? await getGizlet(c.env, r.key) : null;
     const g = r && known?.latest_tag ? await ensureGizlet(c.env, r, c.executionCtx) : null;
@@ -270,13 +273,19 @@ api.post("/v1/updates", async (c) => {
       gizlets.push({ ...base, status: "blocked" });
       continue;
     }
+    // The path now holds another GitHub repository (the one installed from was renamed or deleted
+    // and someone else took its name): it never updates what the device installed.
+    if (one.repository_id !== null && g.repository_id !== one.repository_id) {
+      gizlets.push({ ...base, status: "repository_changed" });
+      continue;
+    }
     const pkg = await pickInstall(c.env, g.repo, target, tier);
     const s = summary(c.env, g);
     const about = { name: s.name, names: s.names, color: s.color, visibility: s.visibility, device_icon_url: s.device_icon_url };
     if (!pkg) gizlets.push({ ...base, ...about, status: "no_package" });
     else if (pkg.app_id !== one.id) gizlets.push({ ...base, ...about, status: "id_changed", version: pkg.version });
     else if (compareVersions(pkg.version, one.version) <= 0) gizlets.push({ ...base, ...about, status: "current", version: pkg.version });
-    else gizlets.push({ ...base, ...about, status: "update", version: pkg.version, tag: pkg.tag, kind: pkg.kind, package: packageJson(c.env, pkg) });
+    else gizlets.push({ ...base, ...about, repository_id: g.repository_id, status: "update", version: pkg.version, tag: pkg.tag, kind: pkg.kind, package: packageJson(c.env, pkg) });
   }
   return c.json({ gizlets }, 200, { "cache-control": "no-store" });
 });

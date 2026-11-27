@@ -206,13 +206,21 @@ HTTP 200
 [Asserts]
 jsonpath "$.status" == "ready"
 
+GET {{base}}/v1/gizlets/github.com/fixture-org/hello-gizlet/install?target=aarch64-unknown-linux-gnu&tier=lite
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Captures]
+hello_repository_id: jsonpath "$.repository_id"
+[Asserts]
+jsonpath "$.repository_id" isInteger
+
 POST {{base}}/v1/updates
 x-gizlet-host: api.gizlet.io
 {
   "target": "aarch64-unknown-linux-gnu",
   "tier": "lite",
   "installed": [
-    {"repo": "github.com/fixture-org/hello-gizlet", "id": "dev.fixture.hellogizlet", "version": "0.1.0"},
+    {"repo": "github.com/fixture-org/hello-gizlet", "repository_id": {{hello_repository_id}}, "id": "dev.fixture.hellogizlet", "version": "0.1.0"},
     {"repo": "https://github.com/Fixture-Org/hello-gizlet", "id": "dev.fixture.hellogizlet", "version": "0.2.0"},
     {"repo": "github.com/fixture-org/hello-gizlet", "id": "dev.someone.else", "version": "0.1.0"},
     {"repo": "github.com/fixture-org/on-demand", "id": "dev.fixture.ondemand", "version": "0.1.0"},
@@ -227,6 +235,7 @@ jsonpath "$.gizlets" count == 6
 jsonpath "$.gizlets[0].status" == "update"
 jsonpath "$.gizlets[0].repo" == "github.com/fixture-org/hello-gizlet"
 jsonpath "$.gizlets[0].installed" == "0.1.0"
+jsonpath "$.gizlets[0].repository_id" == {{hello_repository_id}}
 jsonpath "$.gizlets[0].version" == "0.2.0"
 jsonpath "$.gizlets[0].tag" == "v0.2.0"
 jsonpath "$.gizlets[0].kind" == "app"
@@ -244,6 +253,20 @@ jsonpath "$.gizlets[2].package" not exists
 jsonpath "$.gizlets[3].status" == "no_package"
 jsonpath "$.gizlets[4].status" == "not_found"
 jsonpath "$.gizlets[5].status" == "not_found"
+
+# The path now holds another GitHub repository than the one the app came from: no update.
+POST {{base}}/v1/updates
+x-gizlet-host: api.gizlet.io
+{"target": "aarch64-unknown-linux-gnu", "installed": [{"repo": "github.com/fixture-org/hello-gizlet", "repository_id": 1, "id": "dev.fixture.hellogizlet", "version": "0.1.0"}]}
+HTTP 200
+[Asserts]
+jsonpath "$.gizlets[0].status" == "repository_changed"
+jsonpath "$.gizlets[0].package" not exists
+
+POST {{base}}/v1/updates
+x-gizlet-host: api.gizlet.io
+{"target": "aarch64-unknown-linux-gnu", "installed": [{"repo": "github.com/fixture-org/hello-gizlet", "repository_id": "1", "id": "dev.fixture.hellogizlet", "version": "0.1.0"}]}
+HTTP 400
 
 POST {{base}}/v1/updates
 x-gizlet-host: api.gizlet.io

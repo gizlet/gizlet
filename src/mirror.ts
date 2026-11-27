@@ -18,7 +18,7 @@ import { deletePrefix, newPackageKey, packagesPrefix, pruneRevisions } from "./r
 import { refreshLatest } from "./registry";
 import { compareVersions, MAX_PACKAGE_BYTES, storedSpec, type GizletToml } from "./schema";
 
-const MAX_ART_BYTES = 10 * 1024 * 1024;
+export const MAX_ART_BYTES = 10 * 1024 * 1024;
 const MAX_ATTEMPTS = 5;
 /** A release this long in pending, mirroring or checking has lost its job; queue it again. */
 export const STUCK_AFTER_MS = 30 * 60 * 1000;
@@ -180,7 +180,7 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
       await env.BUCKET.put(artKey(job.repo, job.tag, file), bytes, { httpMetadata: { contentType: contentType(file) } });
       let unreadable = false;
       for (const [name, art] of devices.filter(([, a]) => a.source === file)) {
-        if (!(await storeDeviceArt(env, job.repo, job.tag, name, art, bytes))) unreadable = true;
+        if (!(await storeDeviceArt(env, job.repo, job.tag, job.revision, name, art, bytes))) unreadable = true;
       }
       if (unreadable) warnings.push(`${file} could not be read as an image`);
     }

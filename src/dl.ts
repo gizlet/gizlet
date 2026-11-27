@@ -3,8 +3,8 @@ import { Hono, type Context } from "hono";
 import { packageUrl, pickInstall, type ReleaseRow } from "./db";
 import { deviceArt, deviceArtKey, storeDeviceArt } from "./device-art";
 import type { Env } from "./env";
-import { assetUrl, rawUrl, reader } from "./github";
-import { artKey, contentType, indexedFiles } from "./mirror";
+import { assetUrl, rawUrl, readCapped, reader } from "./github";
+import { artKey, contentType, indexedFiles, MAX_ART_BYTES } from "./mirror";
 import { latestOsTag, OS_FILE, OS_TAG } from "./os-release";
 import { ensureGizlet } from "./registry";
 import { repoRef } from "./repo";
@@ -84,8 +84,9 @@ dl.get("/github.com/:owner/:repo", async (c) => {
 });
 
 /**
- * A release's art as handhelds draw it (src/device-art.ts). Releases mirrored before device art
- * existed get theirs made from the mirrored art on first request.
+ * A release's art as handhelds draw it (src/device-art.ts), for the release's current revision.
+ * Releases mirrored before device art existed, and ones pruned from R2, get theirs made on first
+ * request from the art, mirrored or else read from the repository at the tag.
  */
 dl.on(["GET", "HEAD"], "/github.com/:owner/:repo/:tag/~device/:name", async (c) => {
   const r = repoRef(c.req.param("owner"), c.req.param("repo"));
@@ -93,20 +94,25 @@ dl.on(["GET", "HEAD"], "/github.com/:owner/:repo/:tag/~device/:name", async (c) 
   const name = c.req.param("name");
   if (!r || !TAG.test(tag)) return c.text("Not found", 404);
   const [g, rel] = await Promise.all([
-    c.env.DB.prepare("SELECT visibility FROM gizlets WHERE repo = ?").bind(r.key).first<{ visibility: string }>(),
-    c.env.DB.prepare("SELECT status, spec_json FROM releases WHERE repo = ? AND tag = ?").bind(r.key, tag).first<Pick<ReleaseRow, "status" | "spec_json">>(),
+    c.env.DB.prepare("SELECT owner, name_repo, visibility FROM gizlets WHERE repo = ?").bind(r.key).first<{ owner: string; name_repo: string; visibility: string }>(),
+    c.env.DB.prepare("SELECT status, revision, spec_json FROM releases WHERE repo = ? AND tag = ?").bind(r.key, tag).first<Pick<ReleaseRow, "status" | "revision" | "spec_json">>(),
   ]);
   if (!g || !rel) return c.text("Not found", 404);
   if (g.visibility === "blocked") return c.text(`${r.key} is blocked`, 403);
   if (rel.status === "failed") return c.text(`${r.key} ${tag} failed its checks`, 410);
   const art = deviceArt(JSON.parse(rel.spec_json) as GizletToml).get(name);
   if (!art) return c.text("Not found", 404);
-  const key = deviceArtKey(r.key, tag, name);
+  const key = deviceArtKey(r.key, tag, rel.revision, name);
   const serve = () => fromR2(c, key, name, "public, max-age=3600", null, () => {});
   const found = await serve();
   if (found) return found;
-  const source = await c.env.BUCKET.get(artKey(r.key, tag, art.source));
-  if (!source || !(await storeDeviceArt(c.env, r.key, tag, name, art, source.body))) return c.text("Not found", 404);
+  let source: Uint8Array | ReadableStream<Uint8Array> | null = (await c.env.BUCKET.get(artKey(r.key, tag, art.source)))?.body ?? null;
+  if (!source) {
+    const got = await (await reader(c.env, { owner: g.owner, name: g.name_repo, key: r.key })).file(tag, art.source);
+    if (got.ok) source = await readCapped(got, MAX_ART_BYTES).catch(() => null);
+    else await got.body?.cancel();
+  }
+  if (!source || !(await storeDeviceArt(c.env, r.key, tag, rel.revision, name, art, source))) return c.text("Not found", 404);
   return (await serve()) ?? c.text("Not found", 404);
 });
 

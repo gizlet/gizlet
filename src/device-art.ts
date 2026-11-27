@@ -31,8 +31,14 @@ export function deviceArt(spec: Pick<GizletToml, "icon" | "cover" | "screenshots
   return art;
 }
 
-/** R2 key of a device art file; under the tag, so pruning a release removes it too. */
-export const deviceArtKey = (repo: string, tag: string, name: string) => `${repo}/${tag}/device/${name}`;
+/** Where a tag's device art lives in R2: under the tag, so pruning a release removes it too. */
+export const deviceRoot = (repo: string, tag: string) => `${repo}/${tag}/device/`;
+
+/**
+ * R2 key of a device art file of one release revision: a re-index whose art cannot be made again
+ * never leaves the previous revision's art in place.
+ */
+export const deviceArtKey = (repo: string, tag: string, revision: number, name: string) => `${deviceRoot(repo, tag)}r${revision}/${name}`;
 
 export const deviceArtUrl = (env: Env, repo: string, tag: string, name: string) => `${env.DL_ORIGIN}/${repo}/${encodeURIComponent(tag)}/${DEVICE_DIR}/${name}`;
 
@@ -51,9 +57,9 @@ export async function renderDeviceArt(env: Env, bytes: Uint8Array | ReadableStre
 }
 
 /** Make and store one device art file; false when its source is not a readable image. */
-export async function storeDeviceArt(env: Env, repo: string, tag: string, name: string, art: DeviceArt, bytes: Uint8Array | ReadableStream<Uint8Array>): Promise<boolean> {
+export async function storeDeviceArt(env: Env, repo: string, tag: string, revision: number, name: string, art: DeviceArt, bytes: Uint8Array | ReadableStream<Uint8Array>): Promise<boolean> {
   const png = await renderDeviceArt(env, bytes, art);
   if (!png) return false;
-  await env.BUCKET.put(deviceArtKey(repo, tag, name), png, { httpMetadata: { contentType: "image/png" } });
+  await env.BUCKET.put(deviceArtKey(repo, tag, revision, name), png, { httpMetadata: { contentType: "image/png" } });
   return true;
 }
