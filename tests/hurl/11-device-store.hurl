@@ -353,3 +353,40 @@ HTTP 200
 [Asserts]
 jsonpath "$.version" == "2.0.0"
 jsonpath "$.repository_id" != {{first_repository_id}}
+
+# A repository created again at the same path with the very same release is indexed again from the
+# new repository, so its release is offered under the new repository's id rather than dropped.
+GET {{base}}/v1/gizlets/github.com/fixture-org/recreated
+x-gizlet-host: api.gizlet.io
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/recreated/install?target=aarch64-unknown-linux-gnu&tier=lite
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Captures]
+old_recreated_id: jsonpath "$.repository_id"
+[Asserts]
+jsonpath "$.repository_id" isInteger
+jsonpath "$.id" == "dev.fixture.recreated"
+
+POST {{fixture}}/_fixture/replace?repo=fixture-org/recreated
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/recreated
+x-gizlet-host: api.gizlet.io
+[Options]
+delay: 3500
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/recreated/install?target=aarch64-unknown-linux-gnu&tier=lite
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.version" == "1.0.0"
+jsonpath "$.repository_id" != {{old_recreated_id}}

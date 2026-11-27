@@ -68,6 +68,8 @@ export interface ReleaseRow {
   /** Malware scan of this revision's packages: null until scanned, clean or infected. */
   scan: "clean" | "infected" | null;
   scan_report: string | null;
+  /** GitHub's id for the repository it was indexed from; null while unknown. */
+  repository_id: number | null;
 }
 
 export interface ScanReport {

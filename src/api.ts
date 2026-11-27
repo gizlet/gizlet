@@ -232,7 +232,8 @@ api.get(`${GIZLET}/install`, async (c) => {
     if (pending) return apiError(c, 409, "not_ready", `${r.gizlet.name} is still being checked; try again in a minute`);
     return apiError(c, 404, "no_compatible_package", `${r.gizlet.name} has no package for ${target} (${tier})`);
   }
-  return c.json({ repo: r.gizlet.repo, repository_id: pkg.repository_id, id: r.gizlet.app_id, name: r.gizlet.name, kind: pkg.kind, version: pkg.version, tag: pkg.tag, package: packageJson(c.env, pkg) }, 200, { "cache-control": "no-store" });
+  // The picked release's id and name: an older release can be the newest one for this target.
+  return c.json({ repo: r.gizlet.repo, repository_id: pkg.repository_id, id: pkg.app_id, name: r.gizlet.name, kind: pkg.kind, version: pkg.version, tag: pkg.tag, package: packageJson(c.env, pkg) }, 200, { "cache-control": "no-store" });
 });
 
 const MAX_UPDATES = 200;

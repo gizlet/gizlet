@@ -346,6 +346,8 @@ addRelease("fixture-org/turncoat", "1.0.0", { kind: "service", targets: handheld
 // An arm64 full package and an x86-64 lite one: nothing for an arm64 lite handheld (tests/hurl/11-device-store.hurl).
 // Replaced by another repository at its path that publishes the same id (tests/hurl/11-device-store.hurl).
 addRelease("fixture-org/path-reuse", "1.0.0", { targets: handheld });
+// Deleted and created again at its path with the very same release (tests/hurl/11-device-store.hurl).
+addRelease("fixture-org/recreated", "1.0.0", { targets: handheld });
 addRelease("fixture-org/mixed-tiers", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "full"], ["x86_64-unknown-linux-gnu", "lite"]] });
 addRelease("fixture-org/turncoat", "2.0.0", { targets: [["x86_64-unknown-linux-gnu", "lite"]] });
 addTag("fixture-org/no-index", "v1.0.0", new Map([["other.zip", Buffer.from("x")]]), new Map());

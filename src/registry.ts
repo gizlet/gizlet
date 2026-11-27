@@ -45,14 +45,19 @@ export async function indexRelease(env: Env, ref: RepoRef, tag: string, opts: In
   // Browsing re-indexes a release only when its gizlet.toml changed, and never re-checks a failed
   // one. A publish always does, since the packages may have been rebuilt; bytes a malware scan
   // found infected fail again when they are mirrored (src/mirror.ts), whatever the release.
-  if (existing?.status === "failed" && sameSpec(existing.spec_json, spec) && !opts.force) return existing;
-  const unchanged = existing && sameSpec(existing.spec_json, spec) && !opts.force;
+  // A release indexed from another repository than the one at the path now (it was deleted or
+  // renamed, and another created there) is indexed again from this one, whatever its gizlet.toml.
+  const learnedId = opts.repositoryId ?? opts.info?.id ?? null;
+  const boundId = learnedId ?? (await env.DB.prepare("SELECT repository_id FROM gizlets WHERE repo = ?").bind(ref.key).first<{ repository_id: number | null }>())?.repository_id ?? null;
+  const sameRepository = (existing?.repository_id ?? null) === boundId;
+  if (existing?.status === "failed" && sameRepository && sameSpec(existing.spec_json, spec) && !opts.force) return existing;
+  const unchanged = existing && sameRepository && sameSpec(existing.spec_json, spec) && !opts.force;
   const display = opts.display ?? (opts.info ? { owner: opts.info.owner, name: opts.info.name } : undefined);
   const owner = display?.owner ?? ref.owner;
   const name = display?.name ?? ref.name;
   const isPrivate = opts.info ? (opts.info.private ? 1 : 0) : null;
 
-  const learned = opts.repositoryId ?? opts.info?.id ?? null;
+  const learned = learnedId;
   const stmts: D1PreparedStatement[] = [
     env.DB.prepare(
       `INSERT INTO gizlets (repo, owner, name_repo, repository_id, app_id, name, created_at, updated_at, checked_at, private)
