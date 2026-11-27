@@ -1,6 +1,7 @@
 /** dl.gizlet.io: package and art downloads, from R2 or else GitHub. */
 import { Hono, type Context } from "hono";
 import { packageUrl, pickInstall, type ReleaseRow } from "./db";
+import { deviceArt, deviceArtKey, storeDeviceArt } from "./device-art";
 import type { Env } from "./env";
 import { assetUrl, rawUrl, reader } from "./github";
 import { artKey, contentType, indexedFiles } from "./mirror";
@@ -80,6 +81,33 @@ dl.get("/github.com/:owner/:repo", async (c) => {
   const pkg = await pickInstall(c.env, g.repo, target, tier);
   if (!pkg) return c.text(`${g.name} has no package for ${target} (${tier})`, 404);
   return c.redirect(packageUrl(c.env, pkg), 302);
+});
+
+/**
+ * A release's art as handhelds draw it (src/device-art.ts). Releases mirrored before device art
+ * existed get theirs made from the mirrored art on first request.
+ */
+dl.on(["GET", "HEAD"], "/github.com/:owner/:repo/:tag/~device/:name", async (c) => {
+  const r = repoRef(c.req.param("owner"), c.req.param("repo"));
+  const tag = c.req.param("tag");
+  const name = c.req.param("name");
+  if (!r || !TAG.test(tag)) return c.text("Not found", 404);
+  const [g, rel] = await Promise.all([
+    c.env.DB.prepare("SELECT visibility FROM gizlets WHERE repo = ?").bind(r.key).first<{ visibility: string }>(),
+    c.env.DB.prepare("SELECT status, spec_json FROM releases WHERE repo = ? AND tag = ?").bind(r.key, tag).first<Pick<ReleaseRow, "status" | "spec_json">>(),
+  ]);
+  if (!g || !rel) return c.text("Not found", 404);
+  if (g.visibility === "blocked") return c.text(`${r.key} is blocked`, 403);
+  if (rel.status === "failed") return c.text(`${r.key} ${tag} failed its checks`, 410);
+  const art = deviceArt(JSON.parse(rel.spec_json) as GizletToml).get(name);
+  if (!art) return c.text("Not found", 404);
+  const key = deviceArtKey(r.key, tag, name);
+  const serve = () => fromR2(c, key, name, "public, max-age=3600", null, () => {});
+  const found = await serve();
+  if (found) return found;
+  const source = await c.env.BUCKET.get(artKey(r.key, tag, art.source));
+  if (!source || !(await storeDeviceArt(c.env, r.key, tag, name, art, source.body))) return c.text("Not found", 404);
+  return (await serve()) ?? c.text("Not found", 404);
 });
 
 /** A package (a release asset name) or store art (a repository path) of a release. */
