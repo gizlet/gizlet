@@ -177,7 +177,8 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
         warnings.push(`${file} is larger than 10 MiB`);
         continue;
       }
-      await env.BUCKET.put(artKey(job.repo, job.tag, file), bytes, { httpMetadata: { contentType: contentType(file) } });
+      // Labelled with its revision: device art is made from it only for that revision (src/dl.ts).
+      await env.BUCKET.put(artKey(job.repo, job.tag, file), bytes, { httpMetadata: { contentType: contentType(file) }, customMetadata: { revision: String(job.revision) } });
       let unreadable = false;
       for (const [name, art] of devices.filter(([, a]) => a.source === file)) {
         if (!(await storeDeviceArt(env, job.repo, job.tag, job.revision, name, art, bytes))) unreadable = true;

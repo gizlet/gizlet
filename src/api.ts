@@ -226,7 +226,7 @@ api.get(`${GIZLET}/install`, async (c) => {
     if (pending) return apiError(c, 409, "not_ready", `${r.gizlet.name} is still being checked; try again in a minute`);
     return apiError(c, 404, "no_compatible_package", `${r.gizlet.name} has no package for ${target} (${tier})`);
   }
-  return c.json({ repo: r.gizlet.repo, repository_id: r.gizlet.repository_id, id: r.gizlet.app_id, name: r.gizlet.name, kind: pkg.kind, version: pkg.version, tag: pkg.tag, package: packageJson(c.env, pkg) }, 200, { "cache-control": "no-store" });
+  return c.json({ repo: r.gizlet.repo, repository_id: pkg.repository_id, id: r.gizlet.app_id, name: r.gizlet.name, kind: pkg.kind, version: pkg.version, tag: pkg.tag, package: packageJson(c.env, pkg) }, 200, { "cache-control": "no-store" });
 });
 
 const MAX_UPDATES = 200;
@@ -279,13 +279,14 @@ api.post("/v1/updates", async (c) => {
       gizlets.push({ ...base, status: "repository_changed" });
       continue;
     }
-    const pkg = await pickInstall(c.env, g.repo, target, tier);
+    // Checked again in the statement that picks the package, which a publish meanwhile cannot get between.
+    const pkg = await pickInstall(c.env, g.repo, target, tier, one.repository_id ?? undefined);
     const s = summary(c.env, g);
     const about = { name: s.name, names: s.names, color: s.color, visibility: s.visibility, device_icon_url: s.device_icon_url };
     if (!pkg) gizlets.push({ ...base, ...about, status: "no_package" });
     else if (pkg.app_id !== one.id) gizlets.push({ ...base, ...about, status: "id_changed", version: pkg.version });
     else if (compareVersions(pkg.version, one.version) <= 0) gizlets.push({ ...base, ...about, status: "current", version: pkg.version });
-    else gizlets.push({ ...base, ...about, repository_id: g.repository_id, status: "update", version: pkg.version, tag: pkg.tag, kind: pkg.kind, package: packageJson(c.env, pkg) });
+    else gizlets.push({ ...base, ...about, repository_id: pkg.repository_id, status: "update", version: pkg.version, tag: pkg.tag, kind: pkg.kind, package: packageJson(c.env, pkg) });
   }
   return c.json({ gizlets }, 200, { "cache-control": "no-store" });
 });

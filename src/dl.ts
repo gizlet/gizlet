@@ -106,7 +106,12 @@ dl.on(["GET", "HEAD"], "/github.com/:owner/:repo/:tag/~device/:name", async (c) 
   const serve = () => fromR2(c, key, name, "public, max-age=3600", null, () => {});
   const found = await serve();
   if (found) return found;
-  let source: Uint8Array | ReadableStream<Uint8Array> | null = (await c.env.BUCKET.get(artKey(r.key, tag, art.source)))?.body ?? null;
+  // The mirrored copy only if this revision wrote it: a re-index that could not copy the art
+  // leaves the previous revision's in place. Otherwise the file in the repository at the tag.
+  const mirrored = await c.env.BUCKET.get(artKey(r.key, tag, art.source));
+  let source: Uint8Array | ReadableStream<Uint8Array> | null = null;
+  if (mirrored?.customMetadata?.revision === String(rel.revision)) source = mirrored.body;
+  else await mirrored?.body.cancel();
   if (!source) {
     const got = await (await reader(c.env, { owner: g.owner, name: g.name_repo, key: r.key })).file(tag, art.source);
     if (got.ok) source = await readCapped(got, MAX_ART_BYTES).catch(() => null);
