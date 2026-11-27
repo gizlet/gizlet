@@ -137,6 +137,57 @@ GET {{base}}/v1/featured?kind=widget
 x-gizlet-host: api.gizlet.io
 HTTP 400
 
+# The target and the tier must fit the same package.
+GET {{base}}/v1/gizlets/github.com/fixture-org/mixed-tiers
+x-gizlet-host: api.gizlet.io
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/mixed-tiers/releases/v1.0.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "ready"
+
+POST {{base}}/v1/admin/gizlets/github.com/fixture-org/mixed-tiers/visibility
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{admin_token}}
+{"visibility": "listed"}
+HTTP 200
+
+GET {{base}}/v1/featured?kind=app&target=aarch64-unknown-linux-gnu&tier=lite
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.sections[*].gizlets[?(@.repo == 'github.com/fixture-org/mixed-tiers')]" not exists
+jsonpath "$.hero[?(@.repo == 'github.com/fixture-org/mixed-tiers')]" not exists
+
+GET {{base}}/v1/gizlets?kind=app&target=aarch64-unknown-linux-gnu&tier=lite&q=mixed
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.gizlets" count == 0
+
+GET {{base}}/v1/featured?kind=app&target=aarch64-unknown-linux-gnu&tier=full
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.sections[*].gizlets[?(@.repo == 'github.com/fixture-org/mixed-tiers')]" exists
+
+GET {{base}}/v1/gizlets?kind=app&target=x86_64-unknown-linux-gnu&tier=lite&q=mixed
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.gizlets" count == 1
+
+POST {{base}}/v1/admin/gizlets/github.com/fixture-org/mixed-tiers/visibility
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{admin_token}}
+{"visibility": "auto"}
+HTTP 200
+
 GET {{base}}/v1/featured?tier=huge
 x-gizlet-host: api.gizlet.io
 HTTP 400

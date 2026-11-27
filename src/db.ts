@@ -275,9 +275,17 @@ export interface DeviceFilter {
 function deviceConditions(g: string, f: DeviceFilter, bind: (v: unknown) => string): string[] {
   const where: string[] = [];
   if (f.kind) where.push(`${g}.kind = ${bind(f.kind)}`);
-  if (f.target) where.push(`EXISTS (SELECT 1 FROM json_each(${g}.targets) WHERE value = ${bind(f.target)})`);
-  // A lite device runs only lite packages.
-  if (f.tier === "lite") where.push(`EXISTS (SELECT 1 FROM json_each(${g}.tiers) WHERE value = 'lite')`);
+  // One package of the shown release must fit both: its target, and a tier that runs here (a lite device runs only lite).
+  const fits = [
+    ...(f.target ? [`dp.target = ${bind(f.target)}`] : []),
+    ...(f.tier === "lite" ? ["dp.tier = 'lite'"] : []),
+  ];
+  if (fits.length) {
+    where.push(
+      `EXISTS (SELECT 1 FROM packages dp JOIN releases dr ON dr.repo = dp.repo AND dr.tag = dp.tag AND dr.revision = dp.revision
+        WHERE dp.repo = ${g}.repo AND dp.tag = ${g}.latest_tag AND ${fits.join(" AND ")})`,
+    );
+  }
   return where;
 }
 

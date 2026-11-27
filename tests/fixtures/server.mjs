@@ -343,6 +343,8 @@ addRelease("fixture-org/v1-service-kind", "1.0.0", { manifest: { kind: "service"
 addRelease("fixture-org/schema-3", "1.0.0", { manifest: { schema: 3, kind: "app" }, targets: handheld });
 // A service for handhelds that became an x86-64-only app: a handheld still installs the service.
 addRelease("fixture-org/turncoat", "1.0.0", { kind: "service", targets: handheld });
+// An arm64 full package and an x86-64 lite one: nothing for an arm64 lite handheld (tests/hurl/11-device-store.hurl).
+addRelease("fixture-org/mixed-tiers", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "full"], ["x86_64-unknown-linux-gnu", "lite"]] });
 addRelease("fixture-org/turncoat", "2.0.0", { targets: [["x86_64-unknown-linux-gnu", "lite"]] });
 addTag("fixture-org/no-index", "v1.0.0", new Map([["other.zip", Buffer.from("x")]]), new Map());
 // Visited by tests/hurl/07-index.hurl, which adds releases while it runs.

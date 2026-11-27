@@ -162,7 +162,9 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
       const infected = await infectedError(env, job);
       if (infected) throw new Rejected(infected);
     }
-    const copied = new Map<string, Uint8Array>();
+    // The handhelds' copies, made again on every index (the art at the tag may have changed), from
+    // each file as it is copied, so no more than one file's bytes are held at a time.
+    const devices = [...deviceArt(spec)];
     for (const file of indexedFiles(spec).art) {
       const res = await src.file(job.tag, file);
       if (!res.ok) {
@@ -171,15 +173,16 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
         continue;
       }
       const bytes = await readCapped(res, MAX_ART_BYTES).catch(() => null);
-      if (bytes) {
-        await env.BUCKET.put(artKey(job.repo, job.tag, file), bytes, { httpMetadata: { contentType: contentType(file) } });
-        copied.set(file, bytes);
-      } else warnings.push(`${file} is larger than 10 MiB`);
-    }
-    // The handhelds' copies, made again on every index, since the art at the tag may have changed.
-    for (const [name, art] of deviceArt(spec)) {
-      const bytes = copied.get(art.source);
-      if (bytes && !(await storeDeviceArt(env, job.repo, job.tag, name, art, bytes))) warnings.push(`${art.source} could not be read as an image`);
+      if (!bytes) {
+        warnings.push(`${file} is larger than 10 MiB`);
+        continue;
+      }
+      await env.BUCKET.put(artKey(job.repo, job.tag, file), bytes, { httpMetadata: { contentType: contentType(file) } });
+      let unreadable = false;
+      for (const [name, art] of devices.filter(([, a]) => a.source === file)) {
+        if (!(await storeDeviceArt(env, job.repo, job.tag, name, art, bytes))) unreadable = true;
+      }
+      if (unreadable) warnings.push(`${file} could not be read as an image`);
     }
 
     if (!(await setStatus(env, job, "checking", null))) throw new Superseded();
