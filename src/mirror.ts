@@ -12,6 +12,7 @@ import { checkPackage } from "./check";
 import type { PackageRow, ReleaseRow } from "./db";
 import { deviceArt, deviceRoot, storeDeviceArt } from "./device-art";
 import type { Env, MirrorJob } from "./env";
+import { adoptRepositoryId } from "./links";
 import type { RepoRef } from "./repo";
 import { readCapped, reader, repositoryIdAt, UpstreamError, type Reader } from "./github";
 import { artKey } from "./r2";
@@ -124,15 +125,30 @@ async function infectedError(env: Env, job: MirrorJob): Promise<string | null> {
 }
 
 /**
- * Rejects the release when its path holds another GitHub repository than `pinned`, the one it was
- * indexed from; asks again later when GitHub does not say. Nothing to check while `pinned` is
- * unknown: devices then install it unpinned, and are not offered it as an update.
+ * GitHub's id for the repository at the release's path now: null when there is none, undefined
+ * when GitHub did not say. When `pinned`, the id the release was indexed under, the release is
+ * rejected for another repository and asked about again later when GitHub does not say.
  */
-async function checkRepository(env: Env, src: Reader, ref: RepoRef, pinned: number | null, tag: string): Promise<void> {
-  if (pinned == null) return;
-  const id = (await src.info().catch(() => null))?.id ?? (await repositoryIdAt(env, ref));
+async function checkRepository(env: Env, src: Reader, ref: RepoRef, pinned: number | null, tag: string): Promise<number | null | undefined> {
+  const info = await src.info().catch(() => null);
+  const id = info ? info.id : await repositoryIdAt(env, ref).catch(() => undefined);
+  if (pinned == null) return id;
   if (id === undefined) throw new UpstreamError(`GitHub did not say which repository ${ref.key} is`);
   if (id !== pinned) throw new Rejected(`${ref.key} is no longer the GitHub repository ${tag} was indexed from`);
+  return id;
+}
+
+/**
+ * A release indexed without GitHub's id, whose path held repository `id` before its first file was
+ * read and after its last: its files are that repository's, so it takes the id, and so does its
+ * gizlet if it has none yet.
+ */
+async function learnRepository(env: Env, job: MirrorJob, id: number): Promise<void> {
+  await env.DB.prepare("UPDATE releases SET repository_id = ? WHERE repo = ? AND tag = ? AND revision = ? AND repository_id IS NULL")
+    .bind(id, job.repo, job.tag, job.revision)
+    .run();
+  const g = await env.DB.prepare("SELECT repo, repository_id FROM gizlets WHERE repo = ?").bind(job.repo).first<{ repo: string; repository_id: number | null }>();
+  if (g && g.repository_id == null) await adoptRepositoryId(env, g, id);
 }
 
 export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): Promise<void> {
@@ -154,7 +170,7 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
     // Files are read by path. The path must still hold the repository the release was indexed
     // from, before the first file and after the last, or another repository's bytes would be
     // recorded under its id and offered to its installs as an update.
-    await checkRepository(env, src, ref, rel.repository_id, job.tag);
+    const first = await checkRepository(env, src, ref, rel.repository_id, job.tag);
     for (const p of pkgs) {
       // Mirrored already, by an earlier attempt or another delivery of this job.
       if (p.object && p.sha256 && p.size && (await env.BUCKET.head(p.object))?.size === p.size) continue;
@@ -206,7 +222,8 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
       }
       if (unreadable) warnings.push(`${file} could not be read as an image`);
     }
-    await checkRepository(env, src, ref, rel.repository_id, job.tag);
+    const last = await checkRepository(env, src, ref, rel.repository_id, job.tag);
+    if (rel.repository_id == null && typeof first === "number" && first === last) await learnRepository(env, job, first);
 
     if (!(await setStatus(env, job, "checking", null))) throw new Superseded();
     const errors: string[] = [];

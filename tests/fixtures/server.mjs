@@ -350,6 +350,8 @@ addRelease("fixture-org/path-reuse", "1.0.0", { targets: handheld });
 addRelease("fixture-org/recreated", "1.0.0", { targets: handheld });
 // Taken over by another repository while its release is being mirrored (tests/hurl/11-device-store.hurl).
 addRelease("fixture-org/takeover", "1.0.0", { targets: handheld });
+// Read from the public web, and taken over before anyone installs it (tests/hurl/11-device-store.hurl).
+addRelease("fixture-org/early-reuse", "1.0.0", { targets: handheld });
 addRelease("fixture-org/mixed-tiers", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "full"], ["x86_64-unknown-linux-gnu", "lite"]] });
 addRelease("fixture-org/turncoat", "2.0.0", { targets: [["x86_64-unknown-linux-gnu", "lite"]] });
 addTag("fixture-org/no-index", "v1.0.0", new Map([["other.zip", Buffer.from("x")]]), new Map());

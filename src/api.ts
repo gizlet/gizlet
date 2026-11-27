@@ -221,10 +221,16 @@ api.get(`${GIZLET}/install`, async (c) => {
   const r = await gizletOr404(c);
   if ("error" in r) return r.error;
   // A device pins what it installs to GitHub's id for the repository: learn it now if the gizlet
-  // was indexed from the public web, which has none.
-  if (r.gizlet.repository_id == null) {
-    const id = await repositoryIdAt(c.env, { owner: r.gizlet.owner, name: r.gizlet.name_repo, key: r.gizlet.repo }).catch(() => undefined);
-    if (typeof id === "number") r.gizlet = await adoptRepositoryId(c.env, r.gizlet, id);
+  // was indexed from the public web, which has none. Its releases were not read as that
+  // repository's, so the newest is indexed and mirrored again under the id, checked as it is.
+  const shown = r.gizlet.latest_tag;
+  if (r.gizlet.repository_id == null && shown) {
+    const ref = { owner: r.gizlet.owner, name: r.gizlet.name_repo, key: r.gizlet.repo };
+    const id = await repositoryIdAt(c.env, ref).catch(() => undefined);
+    if (typeof id === "number") {
+      r.gizlet = await adoptRepositoryId(c.env, r.gizlet, id);
+      await indexRelease(c.env, ref, shown, { repositoryId: id }).catch((e: unknown) => console.error("re-index under the repository id failed", ref.key, e));
+    }
   }
   const pkg = await pickInstall(c.env, r.gizlet.repo, target, tier);
   if (!pkg) {

@@ -164,12 +164,13 @@ test("a gizlet indexed without GitHub's id takes the one GitHub confirms, and so
   const bound = await adoptRepositoryId(env, web, 7);
   assert.equal(bound.repository_id, 7);
   assert.equal(db.prepare("SELECT repository_id FROM gizlets").get()!.repository_id, 7);
-  // Its releases indexed while the id was unknown are that repository's from now on.
+  // Its releases indexed while the id was unknown are not taken for that repository's: the path
+  // may have changed hands since. They are indexed again under the id (src/api.ts, src/registry.ts).
   assert.deepEqual(
     db.prepare("SELECT repo, repository_id FROM releases ORDER BY repo").all().map((r) => ({ ...r })),
     [
       { repo: "github.com/o/other", repository_id: null },
-      { repo: "github.com/o/web", repository_id: 7 },
+      { repo: "github.com/o/web", repository_id: null },
     ],
   );
   assert.deepEqual(await claimLink(env, bound, "later-one", "u1"), { ok: true, id: "later-one" });

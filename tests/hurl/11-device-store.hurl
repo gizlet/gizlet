@@ -309,8 +309,12 @@ HTTP 200
 [Asserts]
 jsonpath "$.status" == "ready"
 
+# Read from the public web, so its release is indexed and mirrored again under the id first.
 GET {{base}}/v1/gizlets/github.com/fixture-org/path-reuse/install?target=aarch64-unknown-linux-gnu&tier=lite
 x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
 HTTP 200
 [Captures]
 first_repository_id: jsonpath "$.repository_id"
@@ -431,3 +435,47 @@ HTTP 200
 [Asserts]
 jsonpath "$.status" == "failed"
 jsonpath "$.error" contains "no longer the GitHub repository v1.0.0 was indexed from"
+
+# A gizlet read from the public web: mirroring checks which repository the path holds before the
+# first file and after the last, and pins its release to it. When another repository takes the
+# path before anyone installs it, the release stays the first one's, and the newcomer's is indexed
+# under its own id once a refresh sees the change.
+GET {{base}}/v1/gizlets/github.com/fixture-org/early-reuse
+x-gizlet-host: api.gizlet.io
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/early-reuse/releases/v1.0.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "ready"
+
+POST {{fixture}}/_fixture/replace?repo=fixture-org/early-reuse
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/early-reuse/install?target=aarch64-unknown-linux-gnu&tier=lite
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Captures]
+early_first_id: jsonpath "$.repository_id"
+[Asserts]
+jsonpath "$.repository_id" isInteger
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/early-reuse
+x-gizlet-host: api.gizlet.io
+[Options]
+delay: 3500
+HTTP 200
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/early-reuse/install?target=aarch64-unknown-linux-gnu&tier=lite
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.repository_id" isInteger
+jsonpath "$.repository_id" != {{early_first_id}}

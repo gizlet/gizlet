@@ -169,21 +169,9 @@ export async function adoptRepositoryId<T extends Gizlet>(env: Env, g: T, id: nu
   if (g.repository_id != null) return g;
   await env.DB.batch([
     env.DB.prepare("UPDATE gizlets SET repository_id = ? WHERE repo = ? AND repository_id IS NULL").bind(id, g.repo),
-    bindReleases(env, g.repo),
     ...bindLinks(env, g.repo, id),
   ]);
   return { ...g, repository_id: id };
-}
-
-/**
- * The statement that gives a gizlet's releases indexed while GitHub's id for its repository was
- * unknown the id it has now: run whenever the gizlet learns an id, so those releases keep that
- * repository's id when the path later changes hands, and are never taken for the next one's.
- */
-export function bindReleases(env: Env, repo: string): D1PreparedStatement {
-  return env.DB.prepare(
-    "UPDATE releases SET repository_id = (SELECT repository_id FROM gizlets WHERE repo = ?1) WHERE repo = ?1 AND repository_id IS NULL",
-  ).bind(repo);
 }
 
 /**
