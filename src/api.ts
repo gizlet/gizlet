@@ -9,6 +9,7 @@ import { appCanManage, canManage, githubUser, NotFound, repositoryIdAt, reader, 
 import { adoptRepositoryId, claimLink, getLink, LINK_MAX, LINK_MIN, linkProblem, minLengthOf, normalizeLinkId, releaseLink, resolveLink, shortLinkIn, shortUrl, type LinkProblem } from "./links";
 import { reportInfected } from "./mirror";
 import { AuthError, verifyActionsToken } from "./oidc";
+import { latestOsRelease } from "./os-release";
 import { ensureGizlet, indexRelease, pickInstallRecovering, setVisibility } from "./registry";
 import { ADMIN_MARKS, MARKS, ratingAverage, rescore, type Mark } from "./score";
 import { parseRepoAddress, repoRef, type RepoRef } from "./repo";
@@ -53,7 +54,7 @@ async function devGithubResponse(env: Env, res: Response): Promise<Response> {
   return out;
 }
 
-/** The Better Auth handler, mounted under /v1/auth on gizlet.io and api.gizlet.io. */
+/** The Better Auth handler, mounted under /api/v1/auth on gizlet.io. */
 export const authHandler = (c: C) =>
   withAuth(c, async ({ auth }) => {
     const res = await auth.handler(c.req.raw);
@@ -71,12 +72,12 @@ const accountCors = cors({
   exposeHeaders: ["set-auth-token"],
   maxAge: 86400,
 });
-api.use("/v1/auth/*", accountCors);
-api.use("/v1/me", accountCors);
-api.use("/v1/me/*", accountCors);
+api.use("/api/v1/auth/*", accountCors);
+api.use("/api/v1/me", accountCors);
+api.use("/api/v1/me/*", accountCors);
 api.use("*", async (c, next) => {
   const path = new URL(c.req.url).pathname;
-  if (path.startsWith("/v1/auth/") || path === "/v1/me" || path.startsWith("/v1/me/")) return next();
+  if (path.startsWith("/api/v1/auth/") || path === "/api/v1/me" || path.startsWith("/api/v1/me/")) return next();
   return cors({ origin: "*", allowMethods: ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"], maxAge: 86400 })(c, next);
 });
 api.use("*", async (c, next) => {
@@ -91,45 +92,51 @@ api.onError((e, c) => {
 });
 api.notFound((c) => apiError(c, 404, "not_found", `no route for ${c.req.method} ${new URL(c.req.url).pathname}`));
 
-api.get("/", (c) => c.redirect("/v1", 302));
-api.get("/v1", (c) =>
+api.get("/api/v1", (c) =>
   c.json({
     name: "Gizlet API",
     version: VERSION,
     source: "https://github.com/gizlet/gizlet",
     endpoints: [
-      "GET /v1/featured",
-      "GET /v1/gizlets?q=&kind=&category=&target=&tier=&mark=&sort=&limit=&cursor=",
-      "GET /v1/gizlets/github.com/{owner}/{repo}",
-      "GET /v1/gizlets/github.com/{owner}/{repo}/releases",
-      "GET /v1/gizlets/github.com/{owner}/{repo}/releases/{tag}",
-      "GET /v1/gizlets/github.com/{owner}/{repo}/install?target=&tier=",
-      "POST /v1/updates",
-      "GET /v1/resolve?url=",
-      "GET /v1/links/{id}",
-      "GET /v1/handhelds?status=",
-      "POST /v1/publish",
-      "/v1/auth/* (Better Auth: sign-up/email, sign-in/email, sign-in/social, device/code, device/token, ...)",
-      "GET /v1/me",
-      "GET /v1/me/gizlets",
-      "PUT|DELETE /v1/me/gizlets/github.com/{owner}/{repo}/link",
-      "GET /v1/me/devices",
-      "DELETE /v1/me/devices/{id}",
-      "GET /v1/me/ratings",
-      "PUT|DELETE /v1/me/ratings/github.com/{owner}/{repo}",
-      "GET /v1/me/wants",
-      "PUT|DELETE /v1/me/wants/{handheld}",
+      "GET /api/v1/featured",
+      "GET /api/v1/gizlets?q=&kind=&category=&target=&tier=&mark=&sort=&limit=&cursor=",
+      "GET /api/v1/gizlets/github.com/{owner}/{repo}",
+      "GET /api/v1/gizlets/github.com/{owner}/{repo}/releases",
+      "GET /api/v1/gizlets/github.com/{owner}/{repo}/releases/{tag}",
+      "GET /api/v1/gizlets/github.com/{owner}/{repo}/install?target=&tier=",
+      "POST /api/v1/updates",
+      "GET /api/v1/resolve?url=",
+      "GET /api/v1/links/{id}",
+      "GET /api/v1/handhelds?status=",
+      "GET /api/v1/os/releases/latest",
+      "POST /api/v1/publish",
+      "/api/v1/auth/* (Better Auth: sign-up/email, sign-in/email, sign-in/social, device/code, device/token, ...)",
+      "GET /api/v1/me",
+      "GET /api/v1/me/gizlets",
+      "PUT|DELETE /api/v1/me/gizlets/github.com/{owner}/{repo}/link",
+      "GET /api/v1/me/devices",
+      "DELETE /api/v1/me/devices/{id}",
+      "GET /api/v1/me/ratings",
+      "PUT|DELETE /api/v1/me/ratings/github.com/{owner}/{repo}",
+      "GET /api/v1/me/wants",
+      "PUT|DELETE /api/v1/me/wants/{handheld}",
     ],
   }),
 );
-api.get("/v1/healthz", async (c) => {
+api.get("/api/v1/healthz", async (c) => {
   await c.env.DB.prepare("SELECT 1").first();
   return c.json({ ok: true }, 200, { "cache-control": "no-store" });
 });
 
+api.get("/api/v1/os/releases/latest", async (c) => {
+  const release = await latestOsRelease(c.env.BUCKET, c.env.DL_ORIGIN);
+  if (!release) return apiError(c, 404, "not_found", "no completed Gizlet OS release");
+  return c.json(release, 200, { "cache-control": "public, max-age=60" });
+});
+
 /** Local runs only: the newest account email to an address, so tests can follow its link. */
-api.get("/v1/dev/mail", (c) => {
-  if (c.env.DEV_HOST_OVERRIDE !== "1") return apiError(c, 404, "not_found", "no route for GET /v1/dev/mail");
+api.get("/api/v1/dev/mail", (c) => {
+  if (c.env.DEV_HOST_OVERRIDE !== "1") return apiError(c, 404, "not_found", "no route for GET /api/v1/dev/mail");
   const to = (c.req.query("to") ?? "").toLowerCase();
   const mail = devOutbox.findLast((m) => m.to === to);
   if (!mail) return apiError(c, 404, "not_found", `no mail to ${to}`);
@@ -147,13 +154,13 @@ function deviceFilter(c: C): { kind?: Kind; target?: string; tier?: Tier } | { e
   return { kind, target, tier };
 }
 
-api.get("/v1/featured", async (c) => {
+api.get("/api/v1/featured", async (c) => {
   const filter = deviceFilter(c);
   if ("error" in filter) return filter.error;
   return c.json(await featured(c.env, filter));
 });
 
-api.get("/v1/gizlets", async (c) => {
+api.get("/api/v1/gizlets", async (c) => {
   const q = c.req.query("q")?.trim().slice(0, 100) || undefined;
   const category = c.req.query("category") || undefined;
   const mark = c.req.query("mark") || undefined;
@@ -187,7 +194,7 @@ async function gizletOr404(c: C): Promise<{ gizlet: GizletRow } | { error: Respo
   return { gizlet: g };
 }
 
-const GIZLET = "/v1/gizlets/github.com/:owner/:repo";
+const GIZLET = "/api/v1/gizlets/github.com/:owner/:repo";
 
 api.get(GIZLET, async (c) => {
   const r = await gizletOr404(c);
@@ -256,7 +263,7 @@ const MAX_UPDATES = 200;
  * and tier any more) or `id_changed`. Stale gizlets are refreshed in the background, as views
  * refresh them.
  */
-api.post("/v1/updates", async (c) => {
+api.post("/api/v1/updates", async (c) => {
   const body = await c.req.json<{ target?: unknown; tier?: unknown; installed?: unknown }>().catch(() => null);
   const target = body?.target;
   const tier = body?.tier ?? "lite";
@@ -319,7 +326,7 @@ api.post("/v1/updates", async (c) => {
 export const siteHosts = (env: Env) => [new URL(env.SITE_ORIGIN).host.toLowerCase(), ...siteDomains(env)];
 
 /** Any way of writing a repository, or a short link to a gizlet (gizlet.io/<id>). */
-api.get("/v1/resolve", async (c) => {
+api.get("/api/v1/resolve", async (c) => {
   const url = c.req.query("url") ?? "";
   let r = parseRepoAddress(url);
   const short = r ? null : shortLinkIn(url, siteHosts(c.env));
@@ -333,7 +340,7 @@ api.get("/v1/resolve", async (c) => {
     repo: r.key,
     owner: r.owner,
     name: r.name,
-    api_url: `${c.env.API_ORIGIN}/v1/gizlets/${r.key}`,
+    api_url: `${c.env.SITE_ORIGIN}/api/v1/gizlets/${r.key}`,
     share_url: `${c.env.SITE_ORIGIN}/${r.key}`,
     github_url: `https://github.com/${r.owner}/${r.name}`,
     ...(short ? { short_link: short } : {}),
@@ -341,14 +348,14 @@ api.get("/v1/resolve", async (c) => {
 });
 
 /** Every handheld we know of, supported or not, with how many accounts want it. */
-api.get("/v1/handhelds", async (c) => {
+api.get("/api/v1/handhelds", async (c) => {
   const status = c.req.query("status");
   if (status !== undefined && status !== "supported" && status !== "wanted") return apiError(c, 400, "bad_request", "status must be supported or wanted");
   const counts = await wantCounts(c.env);
   return c.json({ handhelds: HANDHELDS.filter((h) => !status || h.status === status).map((h) => handheldJson(h, counts.get(h.id) ?? 0)) });
 });
 
-api.post("/v1/publish", async (c) => {
+api.post("/api/v1/publish", async (c) => {
   const token = /^Bearer\s+(.+)$/i.exec(c.req.header("authorization") ?? "")?.[1];
   if (!token) return apiError(c, 401, "unauthorized", "send a GitHub Actions OIDC token: Authorization: Bearer <token>");
   let claims;
@@ -395,7 +402,7 @@ api.post("/v1/publish", async (c) => {
       repo: r.key,
       tag,
       status: rel.status,
-      status_url: `${c.env.API_ORIGIN}/v1/gizlets/${r.key}/releases/${encodeURIComponent(tag)}`,
+      status_url: `${c.env.SITE_ORIGIN}/api/v1/gizlets/${r.key}/releases/${encodeURIComponent(tag)}`,
       share_url: `${c.env.SITE_ORIGIN}/${r.key}`,
     },
     202,
@@ -404,7 +411,7 @@ api.post("/v1/publish", async (c) => {
 
 // --- Accounts ----------------------------------------------------------------------------------
 
-api.on(["GET", "POST"], "/v1/auth/*", authHandler);
+api.on(["GET", "POST"], "/api/v1/auth/*", authHandler);
 
 type MeUser = AccountUser;
 type AuthPool = ReturnType<typeof createAuth>["pool"];
@@ -421,7 +428,7 @@ async function signedIn(c: C, fn: (user: MeUser, pool: AuthPool) => Promise<Resp
 const noStore = { "cache-control": "no-store" };
 
 /** The signed-in user (session cookie or `Authorization: Bearer <token>`), with linked sign-in methods. */
-api.get("/v1/me", (c) =>
+api.get("/api/v1/me", (c) =>
   withAuth(c, async ({ auth, pool }) => {
     const session = await auth.api.getSession({ headers: c.req.raw.headers });
     if (!session) return apiError(c, 401, "unauthorized", "sign in first");
@@ -453,14 +460,14 @@ api.get("/v1/me", (c) =>
  * Gizlets in repositories of the user's linked GitHub account and its organizations, any
  * visibility, with their checks, short link and whether the user may set it (src/account.ts).
  */
-api.get("/v1/me/gizlets", (c) => signedIn(c, async (u, pool) => c.json(await myGizlets(c.env, pool, u), 200, noStore)));
+api.get("/api/v1/me/gizlets", (c) => signedIn(c, async (u, pool) => c.json(await myGizlets(c.env, pool, u), 200, noStore)));
 
 // --- Devices: consoles signed in through the device flow --------------------------------------
 
-api.get("/v1/me/devices", (c) => signedIn(c, async (u, pool) => c.json({ devices: await myDevices(pool, u.id) }, 200, noStore)));
+api.get("/api/v1/me/devices", (c) => signedIn(c, async (u, pool) => c.json({ devices: await myDevices(pool, u.id) }, 200, noStore)));
 
 /** Sign a device out: its session ends, so its token stops working. */
-api.delete("/v1/me/devices/:id", (c) =>
+api.delete("/api/v1/me/devices/:id", (c) =>
   signedIn(c, async (u, pool) => {
     if (!(await signOutDevice(pool, u.id, c.req.param("id")))) return apiError(c, 404, "not_found", "no such device");
     return c.body(null, 204);
@@ -484,7 +491,7 @@ function linkError(c: C, problem: LinkProblem, min = LINK_MIN) {
 const linkJson = (c: C, id: string, g: GizletRow) => ({ id, url: shortUrl(c.env, id), repo: g.repo, share_url: `${c.env.SITE_ORIGIN}/${g.repo}` });
 
 /** Where a short link leads. A 404 says whether the id could be claimed (`available`). */
-api.get("/v1/links/:id", async (c) => {
+api.get("/api/v1/links/:id", async (c) => {
   const id = normalizeLinkId(c.req.param("id"));
   const problem = linkProblem(id);
   if (problem) return linkError(c, problem);
@@ -498,7 +505,7 @@ api.get("/v1/links/:id", async (c) => {
   return c.json({ ...linkJson(c, id, r.gizlet), current: expires === null, expires_at: expires ? new Date(expires).toISOString() : null }, 200, noStore);
 });
 
-const MY_LINK = "/v1/me/gizlets/github.com/:owner/:repo/link";
+const MY_LINK = "/api/v1/me/gizlets/github.com/:owner/:repo/link";
 
 /**
  * The gizlet the route names, if the user may set its link now: admin or maintain on GitHub, asked
@@ -565,7 +572,7 @@ api.delete(MY_LINK, (c) =>
 const ratingOf = (g: Pick<GizletRow, "rating_count" | "rating_sum">) => ({ average: ratingAverage(g.rating_count, g.rating_sum), count: g.rating_count });
 
 /** The user's ratings, newest first. */
-api.get("/v1/me/ratings", (c) =>
+api.get("/api/v1/me/ratings", (c) =>
   signedIn(c, async (u) => {
     const { results } = await c.env.DB.prepare("SELECT repo, stars, updated_at FROM ratings WHERE user_id = ? ORDER BY updated_at DESC LIMIT 200")
       .bind(u.id)
@@ -574,7 +581,7 @@ api.get("/v1/me/ratings", (c) =>
   }),
 );
 
-const RATING = "/v1/me/ratings/github.com/:owner/:repo";
+const RATING = "/api/v1/me/ratings/github.com/:owner/:repo";
 
 /** The gizlet a rating is for: indexed, released and not blocked. */
 async function rateable(c: C): Promise<{ gizlet: GizletRow } | { error: Response }> {
@@ -629,9 +636,9 @@ api.delete(RATING, (c) =>
 // --- Wants: handhelds people ask Gizlet OS to support -------------------------------------------
 
 /** The handhelds the user wants, newest first. */
-api.get("/v1/me/wants", (c) => signedIn(c, async (u) => c.json({ wants: await myWants(c.env, u.id) }, 200, noStore)));
+api.get("/api/v1/me/wants", (c) => signedIn(c, async (u) => c.json({ wants: await myWants(c.env, u.id) }, 200, noStore)));
 
-const WANT = "/v1/me/wants/:handheld";
+const WANT = "/api/v1/me/wants/:handheld";
 
 async function wantState(c: C, h: Handheld, wanted: boolean) {
   const row = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM wants WHERE handheld = ?").bind(h.id).first<{ n: number }>();
@@ -642,7 +649,7 @@ async function wantState(c: C, h: Handheld, wanted: boolean) {
 api.put(WANT, (c) =>
   signedIn(c, async (u) => {
     const h = findHandheld(c.req.param("handheld"));
-    if (!h) return apiError(c, 404, "not_found", `no handheld ${c.req.param("handheld")}; see GET /v1/handhelds`);
+    if (!h) return apiError(c, 404, "not_found", `no handheld ${c.req.param("handheld")}; see GET /api/v1/handhelds`);
     if (h.status === "supported") return apiError(c, 409, "supported", `${h.name} is supported already: ${c.env.SITE_ORIGIN}/install/${h.id}`);
     await c.env.DB.prepare("INSERT INTO wants (handheld, user_id, created_at) VALUES (?, ?, ?) ON CONFLICT (handheld, user_id) DO NOTHING").bind(h.id, u.id, Date.now()).run();
     return wantState(c, h, true);
@@ -653,7 +660,7 @@ api.put(WANT, (c) =>
 api.delete(WANT, (c) =>
   signedIn(c, async (u) => {
     const h = findHandheld(c.req.param("handheld"));
-    if (!h) return apiError(c, 404, "not_found", `no handheld ${c.req.param("handheld")}; see GET /v1/handhelds`);
+    if (!h) return apiError(c, 404, "not_found", `no handheld ${c.req.param("handheld")}; see GET /api/v1/handhelds`);
     await c.env.DB.prepare("DELETE FROM wants WHERE handheld = ? AND user_id = ?").bind(h.id, u.id).run();
     return wantState(c, h, false);
   }),
@@ -661,7 +668,7 @@ api.delete(WANT, (c) =>
 
 // --- Curation (bearer ADMIN_TOKEN) -------------------------------------------------------------
 
-api.use("/v1/admin/*", async (c, next) => {
+api.use("/api/v1/admin/*", async (c, next) => {
   const expected = c.env.ADMIN_TOKEN;
   const got = /^Bearer\s+(.+)$/i.exec(c.req.header("authorization") ?? "")?.[1] ?? "";
   if (!expected || !(await timingSafeEqual(got, expected))) return apiError(c, 401, "unauthorized", "admin token required");
@@ -675,7 +682,7 @@ async function timingSafeEqual(a: string, b: string): Promise<boolean> {
 }
 
 /** Body: {"visibility": "listed" | "unlisted" | "blocked" | "auto", "reason"?: string}. */
-api.post("/v1/admin/gizlets/github.com/:owner/:repo/visibility", async (c) => {
+api.post("/api/v1/admin/gizlets/github.com/:owner/:repo/visibility", async (c) => {
   const r = ref(c);
   if (!r || !(await getGizlet(c.env, r.key))) return apiError(c, 404, "not_found", "gizlet is not indexed");
   const b = await c.req.json<{ visibility?: string; reason?: unknown }>().catch(() => null);
@@ -687,13 +694,13 @@ api.post("/v1/admin/gizlets/github.com/:owner/:repo/visibility", async (c) => {
   return c.json({ repo: g.repo, visibility: g.visibility, visibility_reason: g.visibility_reason, locked: g.visibility_locked === 1 });
 });
 
-const ADMIN_GIZLET = "/v1/admin/gizlets/github.com/:owner/:repo";
+const ADMIN_GIZLET = "/api/v1/admin/gizlets/github.com/:owner/:repo";
 
 /**
  * Set a short link by hand. Body: {"repo": "<GitHub repository address>"}. Any valid id, of any
  * length from LINK_MIN; one live for another gizlet moves. The gizlet's previous id is held 30 days.
  */
-api.put("/v1/admin/links/:id", async (c) => {
+api.put("/api/v1/admin/links/:id", async (c) => {
   const id = normalizeLinkId(c.req.param("id"));
   const problem = linkProblem(id);
   if (problem) return linkError(c, problem);
@@ -712,7 +719,7 @@ api.put("/v1/admin/links/:id", async (c) => {
 });
 
 /** Take a short link back at once: it stops working and anyone may claim it. */
-api.delete("/v1/admin/links/:id", async (c) => {
+api.delete("/api/v1/admin/links/:id", async (c) => {
   const res = await c.env.DB.prepare("DELETE FROM links WHERE id = ?").bind(normalizeLinkId(c.req.param("id"))).run();
   if (!res.meta.changes) return apiError(c, 404, "not_found", "no such link");
   return c.body(null, 204);
@@ -722,7 +729,7 @@ api.delete("/v1/admin/links/:id", async (c) => {
  * An account's shortest short link. Body: {"min_length": 3-32}. The account is named by its user
  * id, or by its email. Ids it already has stay.
  */
-api.put("/v1/admin/users/:user/link-min-length", async (c) => {
+api.put("/api/v1/admin/users/:user/link-min-length", async (c) => {
   const b = await c.req.json<{ min_length?: unknown }>().catch(() => null);
   const n = b?.min_length;
   if (typeof n !== "number" || !Number.isInteger(n) || n < LINK_MIN || n > LINK_MAX) return apiError(c, 400, "bad_request", `min_length must be ${LINK_MIN}-${LINK_MAX}`);

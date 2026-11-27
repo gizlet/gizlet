@@ -20,7 +20,7 @@ test("login return paths stay on this site", async () => {
 
 test("account mail needs the MAIL binding, except on local runs", async () => {
   const { authOptions } = await import("../../src/auth.ts");
-  const env = { SITE_ORIGIN: "https://gizlet.io", API_ORIGIN: "https://api.gizlet.io", GITHUB_API: "https://api.github.com", BETTER_AUTH_SECRET: "x", MAIL_FROM: "Gizlet <hello@gizlet.io>" };
+  const env = { SITE_ORIGIN: "https://gizlet.io", GITHUB_API: "https://api.github.com", BETTER_AUTH_SECRET: "x", MAIL_FROM: "Gizlet <hello@gizlet.io>" };
   const opts = (e: object) => authOptions({ ...env, ...e }, {} as never);
   for (const mail of [(o: ReturnType<typeof opts>) => o.emailAndPassword?.sendResetPassword, (o: ReturnType<typeof opts>) => o.emailVerification?.sendVerificationEmail]) {
     assert.equal(mail(opts({})), undefined);
@@ -35,11 +35,11 @@ test("account mail needs the MAIL binding, except on local runs", async () => {
 test("account mail goes out through the binding, in the request's language", async () => {
   const { authOptions } = await import("../../src/auth.ts");
   const sent: unknown[] = [];
-  const env = { SITE_ORIGIN: "https://gizlet.io", API_ORIGIN: "https://api.gizlet.io", GITHUB_API: "https://api.github.com", BETTER_AUTH_SECRET: "x", MAIL_FROM: "Gizlet <hello@gizlet.io>", MAIL: { send: async (m: unknown) => (sent.push(m), {}) } };
+  const env = { SITE_ORIGIN: "https://gizlet.io", GITHUB_API: "https://api.github.com", BETTER_AUTH_SECRET: "x", MAIL_FROM: "Gizlet <hello@gizlet.io>", MAIL: { send: async (m: unknown) => (sent.push(m), {}) } };
   const send = authOptions(env as never, {} as never).emailVerification!.sendVerificationEmail!;
   const user = { email: "Player@Example.com" } as never;
-  await send({ user, url: "https://gizlet.io/v1/auth/verify-email?token=t", token: "t" }, new Request("https://gizlet.io/", { headers: { "accept-language": "ja, en;q=0.5" } }));
-  await send({ user, url: "https://gizlet.io/v1/auth/verify-email?token=u", token: "u" }, new Request("https://gizlet.io/", { headers: { cookie: "lang=zh-CN", "accept-language": "ja" } }));
+  await send({ user, url: "https://gizlet.io/api/v1/auth/verify-email?token=t", token: "t" }, new Request("https://gizlet.io/", { headers: { "accept-language": "ja, en;q=0.5" } }));
+  await send({ user, url: "https://gizlet.io/api/v1/auth/verify-email?token=u", token: "u" }, new Request("https://gizlet.io/", { headers: { cookie: "lang=zh-CN", "accept-language": "ja" } }));
   const [ja, zh] = sent as { from: unknown; to: string; subject: string; text: string }[];
   assert.deepEqual(ja!.from, { name: "Gizlet", email: "hello@gizlet.io" });
   assert.equal(ja!.to, "Player@Example.com");
@@ -59,10 +59,10 @@ test("links in emails use the request's domain, if listed", async () => {
   const { linkOrigin, siteDomains } = await import("../../src/auth.ts");
   const env = { SITE_ORIGIN: "https://gizlet.io", SITE_DOMAINS: " gizlet.io, gizlet.xyz, https://Gizlet.Example/ " };
   const req = (url: string, forwarded?: string) => new Request(url, { headers: forwarded ? { "x-forwarded-host": forwarded } : {} });
-  const via = (host: string) => linkOrigin(env, req("https://gizlet.io/v1/auth/sign-up/email", host));
+  const via = (host: string) => linkOrigin(env, req("https://gizlet.io/api/v1/auth/sign-up/email", host));
   assert.deepEqual(siteDomains(env), ["gizlet.io", "gizlet.xyz", "gizlet.example"]);
   // Straight to the Worker: the request's own host.
-  assert.equal(linkOrigin(env, req("https://api.gizlet.io/v1/auth/sign-in/email")), "https://gizlet.io");
+  assert.equal(linkOrigin(env, req("https://gizlet.io/api/v1/auth/sign-in/email")), "https://gizlet.io");
   // Through a proxy: the host it names.
   assert.equal(via("gizlet.xyz"), "https://gizlet.xyz");
   assert.equal(via("API.gizlet.xyz"), "https://gizlet.xyz");
@@ -77,12 +77,12 @@ test("links in emails use the request's domain, if listed", async () => {
 test("the verification link moves to the request's domain, token and all", async () => {
   const { authOptions } = await import("../../src/auth.ts");
   const sent: { text: string }[] = [];
-  const env = { SITE_ORIGIN: "https://gizlet.io", API_ORIGIN: "https://api.gizlet.io", GITHUB_API: "https://api.github.com", BETTER_AUTH_SECRET: "x", MAIL_FROM: "Gizlet <hello@gizlet.io>", SITE_DOMAINS: "gizlet.io,gizlet.xyz", MAIL: { send: async (m: { text: string }) => (sent.push(m), {}) } };
+  const env = { SITE_ORIGIN: "https://gizlet.io", GITHUB_API: "https://api.github.com", BETTER_AUTH_SECRET: "x", MAIL_FROM: "Gizlet <hello@gizlet.io>", SITE_DOMAINS: "gizlet.io,gizlet.xyz", MAIL: { send: async (m: { text: string }) => (sent.push(m), {}) } };
   const send = authOptions(env as never, {} as never).emailVerification!.sendVerificationEmail!;
-  const url = "https://gizlet.io/v1/auth/verify-email?token=t&callbackURL=%2Flogin";
+  const url = "https://gizlet.io/api/v1/auth/verify-email?token=t&callbackURL=%2Flogin";
   await send({ user: { email: "p@example.com" } as never, url, token: "t" }, new Request("https://gizlet.io/", { headers: { "x-forwarded-host": "gizlet.xyz" } }));
   await send({ user: { email: "p@example.com" } as never, url, token: "t" }, new Request("https://gizlet.io/"));
-  assert.match(sent[0]!.text, /https:\/\/gizlet\.xyz\/v1\/auth\/verify-email\?token=t&callbackURL=%2Flogin/);
+  assert.match(sent[0]!.text, /https:\/\/gizlet\.xyz\/api\/v1\/auth\/verify-email\?token=t&callbackURL=%2Flogin/);
   assert.doesNotMatch(sent[0]!.text, /gizlet\.io/);
-  assert.match(sent[1]!.text, /https:\/\/gizlet\.io\/v1\/auth\/verify-email\?token=t/);
+  assert.match(sent[1]!.text, /https:\/\/gizlet\.io\/api\/v1\/auth\/verify-email\?token=t/);
 });

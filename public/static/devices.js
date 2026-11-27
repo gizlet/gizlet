@@ -42,7 +42,7 @@ function takePendingWant(id) {
   }
 }
 
-// "I want it" on a handheld we do not support yet: a want on the signed-in account (/v1/me/wants).
+// "I want it" on a handheld we do not support yet: a want on the signed-in account (/api/v1/me/wants).
 // Signed out, a dialog offers to sign in; that comes back here with ?want=<id>, which records the want
 // only if this browser started that sign-in from the dialog, so a link alone never records one.
 const wantButtons = [...document.querySelectorAll("button.want[data-device]")];
@@ -63,7 +63,7 @@ function setUpWants(buttons) {
     if (count !== undefined) b.previousElementSibling.textContent = count ? fmt(count === 1 ? t.wants.one : t.wants.other, { n: count }) : "";
   };
   // The ids the user wants; null when signed out, undefined when they could not be loaded.
-  const mine = fetch("/v1/me/wants", { credentials: "same-origin", cache: "no-store" })
+  const mine = fetch("/api/v1/me/wants", { credentials: "same-origin", cache: "no-store" })
     .then(async (res) => (res.ok ? new Set((await res.json()).wants.map((w) => w.id)) : res.status === 401 ? null : undefined))
     .catch(() => undefined);
 
@@ -84,7 +84,7 @@ function setUpWants(buttons) {
     b.disabled = true;
     say("");
     try {
-      const res = await fetch(`/v1/me/wants/${encodeURIComponent(b.dataset.device)}`, { method: wanted ? "PUT" : "DELETE", credentials: "same-origin" });
+      const res = await fetch(`/api/v1/me/wants/${encodeURIComponent(b.dataset.device)}`, { method: wanted ? "PUT" : "DELETE", credentials: "same-origin" });
       if (res.status === 401) return askToSignIn(b);
       if (!res.ok) return say(fmt(t.requestFailed, { status: res.status }));
       const data = await res.json();

@@ -8,9 +8,7 @@
   "preview_urls": true,
   "routes": [
     { "pattern": "gizlet.io", "custom_domain": true },
-    { "pattern": "www.gizlet.io", "custom_domain": true },
-    { "pattern": "dl.gizlet.io", "custom_domain": true },
-    { "pattern": "api.gizlet.io", "custom_domain": true }
+    { "pattern": "www.gizlet.io", "custom_domain": true }
   ],
   "assets": {
     "directory": "public",
@@ -50,8 +48,7 @@
   "triggers": { "crons": ["*/10 * * * *", "17 */6 * * *"] },
   "vars": {
     "SITE_ORIGIN": "https://gizlet.io",
-    "DL_ORIGIN": "https://dl.gizlet.io",
-    "API_ORIGIN": "https://api.gizlet.io",
+    "DL_ORIGIN": "https://gizlet.io/assets",
     "GITHUB_WEB": "https://github.com",
     "GITHUB_RAW": "https://raw.githubusercontent.com",
     "GITHUB_API": "https://api.github.com",
@@ -59,7 +56,7 @@
     "GITHUB_APP_SLUG": "gizlet",
     "REFRESH_AFTER_SECONDS": "120",
     "OIDC_ISSUER": "https://token.actions.githubusercontent.com",
-    "OIDC_AUDIENCE": "https://api.gizlet.io",
+    "OIDC_AUDIENCE": "https://gizlet.io/api",
     "KEEP_MIRRORED_RELEASES": "2",
     "DEV_HOST_OVERRIDE": "0",
     "MAIL_FROM": "Gizlet <hello@gizlet.io>"

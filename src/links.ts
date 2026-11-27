@@ -23,7 +23,7 @@ const LINK_ID = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 /** Paths the site serves, and words kept for later. */
 export const RESERVED = new Set([
   // Routes of src/site.ts and src/index.ts.
-  "account", "login", "device", "devices", "explore", "install", "flash", "open", "static", "favicon",
+  "account", "assets", "login", "device", "devices", "explore", "install", "flash", "open", "static", "favicon",
   // Kept for later.
   "about", "admin", "api", "app", "apps", "auth", "blog", "browse", "dashboard", "developer", "developers", "dl", "docs",
   "download", "downloads", "gizlet", "gizlets", "github", "help", "home", "legal", "link", "links", "logout", "mail", "me",

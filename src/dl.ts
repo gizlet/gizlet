@@ -1,11 +1,11 @@
-/** dl.gizlet.io: package and art downloads, from R2 or else GitHub. */
+/** Package, art and OS downloads from R2, with GitHub fallback for store files. */
 import { Hono, type Context } from "hono";
 import { packageUrl, type ReleaseRow } from "./db";
 import { deviceArt, deviceArtKey, storeDeviceArt } from "./device-art";
 import type { Env } from "./env";
 import { assetUrl, rawUrl, readCapped, reader } from "./github";
 import { artKey, contentType, indexedFiles, MAX_ART_BYTES } from "./mirror";
-import { latestOsTag, OS_FILE, OS_TAG } from "./os-release";
+import { OS_FILE, OS_TAG } from "./os-release";
 import { ensureGizlet, pickInstallRecovering } from "./registry";
 import { repoRef } from "./repo";
 import { isAssetName, isRepoPath, TARGET, type GizletToml, type Tier } from "./schema";
@@ -14,18 +14,37 @@ type App = { Bindings: Env };
 export const dl = new Hono<App>();
 
 const TAG = /^[A-Za-z0-9._+-]{1,100}$/;
-
-dl.get("/", (c) => c.redirect(c.env.SITE_ORIGIN, 302));
+const EDGE_CACHE_MAX_BYTES = 512_000_000;
+const IMMUTABLE = "public, max-age=31536000, immutable";
 
 /** Serve an R2 object with Range, conditional and immutable caching headers; null when it is not in R2. */
-async function fromR2(c: Context<App>, key: string, file: string, cacheControl: string, sha256: string | null, onDownload: () => void): Promise<Response | null> {
-  const obj = await c.env.BUCKET.get(key, { range: c.req.raw.headers, onlyIf: c.req.raw.headers });
+async function fromR2(c: Context<App>, key: string, file: string, cacheControl: string, sha256: string | null, onDownload: () => void, edgeCache = false): Promise<Response | null> {
+  const request = c.req.raw;
+  const cacheKey = edgeCache ? new Request(`${c.env.SITE_ORIGIN}/assets/_cache/v1/${key.split("/").map(encodeURIComponent).join("/")}`) : null;
+  if (cacheKey && !request.headers.has("if-range") && !request.headers.has("if-match") && !request.headers.has("if-unmodified-since")) {
+    const headers = new Headers();
+    for (const name of ["range", "if-none-match", "if-modified-since"]) {
+      const value = request.headers.get(name);
+      if (value) headers.set(name, value);
+    }
+    const cached = await caches.default.match(new Request(cacheKey, { headers })).catch(() => undefined);
+    if (cached) {
+      const response = new Response(request.method === "HEAD" ? null : cached.body, cached);
+      if (request.method === "HEAD") await cached.body?.cancel();
+      response.headers.set("cache-control", cacheControl);
+      response.headers.set("x-gizlet-edge-cache", "HIT");
+      if (response.status === 200 || response.status === 206) onDownload();
+      return response;
+    }
+  }
+  const obj = await c.env.BUCKET.get(key, { range: request.headers, onlyIf: request.headers });
   if (!obj) return null;
   const headers = new Headers();
   obj.writeHttpMetadata(headers);
   headers.set("etag", obj.httpEtag);
   headers.set("accept-ranges", "bytes");
   headers.set("x-content-type-options", "nosniff");
+  headers.set("content-security-policy", "sandbox; default-src 'none'");
   headers.set("cache-control", cacheControl);
   headers.set("access-control-allow-origin", "*");
   if (!headers.has("content-type")) headers.set("content-type", contentType(file));
@@ -43,17 +62,16 @@ async function fromR2(c: Context<App>, key: string, file: string, cacheControl: 
     headers.set("content-length", String(obj.size));
   }
   onDownload();
-  return new Response(c.req.method === "HEAD" ? null : obj.body, { status, headers });
+  const response = new Response(request.method === "HEAD" ? null : obj.body, { status, headers });
+  if (request.method === "HEAD") await obj.body.cancel();
+  if (cacheKey && request.method === "GET" && status === 200 && obj.size <= EDGE_CACHE_MAX_BYTES && !request.headers.has("range")) {
+    const stored = new Response(response.clone().body, response);
+    stored.headers.set("cache-control", IMMUTABLE);
+    c.executionCtx.waitUntil(caches.default.put(cacheKey, stored).catch((error) => console.warn("download cache write failed", error)));
+  }
+  if (cacheKey) response.headers.set("x-gizlet-edge-cache", "MISS");
+  return response;
 }
-
-dl.on(["GET", "HEAD"], "/releases/latest/:file", async (c) => {
-  const file = c.req.param("file");
-  if (file !== "flash.sh" && file !== "flash.ps1" && file !== "manifest.json") return c.text("Not found", 404);
-  const tag = await latestOsTag(c.env.BUCKET);
-  if (!tag) return c.text("Not found", 404);
-  c.header("cache-control", "public, max-age=60");
-  return c.redirect(`${c.env.DL_ORIGIN}/releases/${tag}/${file}`, 302);
-});
 
 dl.on(["GET", "HEAD"], "/releases/:tag/:file{.+}", async (c) => {
   const tag = c.req.param("tag");
@@ -63,7 +81,7 @@ dl.on(["GET", "HEAD"], "/releases/:tag/:file{.+}", async (c) => {
   if (file !== "manifest.json" && !(await c.env.BUCKET.head(`${prefix}manifest.json`))) {
     return c.text("Not found", 404);
   }
-  const response = await fromR2(c, prefix + file, file, "public, max-age=31536000, immutable", null, () => {});
+  const response = await fromR2(c, prefix + file, file, IMMUTABLE, null, () => {}, true);
   return response ?? c.text("Not found", 404);
 });
 
@@ -161,6 +179,7 @@ dl.on(["GET", "HEAD"], "/github.com/:owner/:repo/:tag/:file{.+}", async (c) => {
   const isPackage = files.packages.has(file) && isAssetName(file);
   let key: string;
   let cacheControl: string;
+  let edgeCache = false;
   if (isPackage) {
     // Packages are served only once their release has passed its checks.
     if (rel.status !== "ready") return c.text(`${r.key} ${tag} is still being checked`, 409);
@@ -169,7 +188,8 @@ dl.on(["GET", "HEAD"], "/github.com/:owner/:repo/:tag/:file{.+}", async (c) => {
     // A URL for bytes this tag no longer has: the client should ask the API again.
     if (pinned !== undefined && pinned !== rel.sha256) return c.text(`${file} has changed; its sha256 is now ${rel.sha256}`, 404);
     key = rel.object;
-    cacheControl = pinned ? "public, max-age=31536000, immutable" : "public, max-age=300";
+    cacheControl = "public, max-age=0, must-revalidate";
+    edgeCache = pinned !== undefined && !g.private;
   } else if (files.art.has(file)) {
     key = artKey(r.key, tag, file);
     cacheControl = "public, max-age=3600";
@@ -181,7 +201,7 @@ dl.on(["GET", "HEAD"], "/github.com/:owner/:repo/:tag/:file{.+}", async (c) => {
       c.executionCtx.waitUntil(c.env.DB.prepare("UPDATE gizlets SET downloads = downloads + 1 WHERE repo = ?").bind(r.key).run());
     }
   };
-  const res = await fromR2(c, key, file, cacheControl, isPackage ? rel.sha256 : null, countDownload);
+  const res = await fromR2(c, key, file, cacheControl, isPackage ? rel.sha256 : null, countDownload, edgeCache);
   if (res) return res;
   // Not mirrored (an older ready release, pruned from R2): hand off to GitHub. The client
   // checks the package against the sha256 the API gave it. A private repository's assets have

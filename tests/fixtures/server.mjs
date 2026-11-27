@@ -385,7 +385,7 @@ async function token(repo, ref, visibility = "public") {
   return new SignJWT({ repository: repo, repository_id: String(repoId(repo.toLowerCase())), repository_owner: repo.split("/")[0], repository_visibility: visibility, ref, event_name: "push" })
     .setProtectedHeader({ alg: "RS256", kid: "fixture" })
     .setIssuer(issuer)
-    .setAudience("https://api.gizlet.io")
+    .setAudience("https://gizlet.io/api")
     .setSubject(`repo:${repo}:ref:${ref}`)
     .setIssuedAt()
     .setExpirationTime("10m")

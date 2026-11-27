@@ -69,7 +69,7 @@ if (command === "migrate") {
   const pool = new pg.Pool({ connectionString: db.url, max: 1 });
   try {
     await migrate(pool);
-    const env = { SITE_ORIGIN: "https://gizlet.io", API_ORIGIN: "https://api.gizlet.io", GITHUB_API: "https://api.github.com", BETTER_AUTH_SECRET: "x".repeat(32), MAIL_FROM: "x" };
+    const env = { SITE_ORIGIN: "https://gizlet.io", GITHUB_API: "https://api.github.com", BETTER_AUTH_SECRET: "x".repeat(32), MAIL_FROM: "x" };
     const plan = await getMigrations(authOptions(env, pool), { throwOnUnsafe: true });
     const sql = (await plan.compileMigrations()).trim();
     if (!sql) {

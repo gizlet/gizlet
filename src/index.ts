@@ -8,52 +8,26 @@ import { site } from "./site";
 /** Must match the second cron in wrangler.jsonc. */
 const REFRESH_CRON = "17 */6 * * *";
 
-const HOST_PREFIX = /^\/_host\/([a-z0-9.-]+)(\/.*)?$/;
-
-/**
- * One Worker serves every gizlet.io host; the host picks the app. Local runs
- * (DEV_HOST_OVERRIDE=1) pick it with an X-Gizlet-Host header, or with a /_host/<host>/ path
- * prefix that browsers can follow, since every local host is localhost.
- */
-function route(req: Request, env: Env): { host: string; req: Request } {
-  const url = new URL(req.url);
-  if (env.DEV_HOST_OVERRIDE !== "1") return { host: url.hostname, req };
-  const m = HOST_PREFIX.exec(url.pathname);
-  if (m) {
-    url.pathname = m[2] ?? "/";
-    return { host: m[1]!, req: new Request(url, req) };
-  }
-  return { host: req.headers.get("x-gizlet-host") ?? url.hostname, req };
-}
-
-/** API routes the site's own pages call (the CSP allows no other origin), served on gizlet.io as on api.gizlet.io. */
-const isAccountPath = (path: string) => path.startsWith("/v1/auth/") || path === "/v1/me" || path.startsWith("/v1/me/") || path.startsWith("/v1/links/");
-
 export default {
   async fetch(request, env, ctx) {
-    const { host, req } = route(request, env);
-    const url = new URL(req.url);
+    const url = new URL(request.url);
+    if (url.hostname === "www.gizlet.io") return Response.redirect(`${env.SITE_ORIGIN}${url.pathname}${url.search}`, 301);
+    if (url.pathname === "/api/v1" || url.pathname.startsWith("/api/v1/")) return api.fetch(request, env, ctx);
+    if (url.pathname.startsWith("/assets/")) {
+      url.pathname = url.pathname.slice("/assets".length);
+      return dl.fetch(new Request(url, request), env, ctx);
+    }
     // Browsers and crawlers ask for /favicon.ico whatever the page links.
     if (url.pathname === "/favicon.ico") url.pathname = "/static/favicon.ico";
     if (url.pathname.startsWith("/static/")) {
-      const res = await env.ASSETS.fetch(new Request(url, req));
+      const res = await env.ASSETS.fetch(new Request(url, request));
       const out = new Response(res.body, res);
       // Fonts never change under one name; the stylesheet and scripts are revalidated on every
       // load (a 304 when unchanged), so a deploy shows at once and never pairs new pages with old CSS.
       out.headers.set("cache-control", url.pathname.startsWith("/static/fonts/") ? "public, max-age=31536000, immutable" : "no-cache");
       return out;
     }
-    switch (host) {
-      case "api.gizlet.io":
-        return api.fetch(req, env, ctx);
-      case "dl.gizlet.io":
-        return dl.fetch(req, env, ctx);
-      case "www.gizlet.io":
-        return Response.redirect(`${env.SITE_ORIGIN}${url.pathname}${url.search}`, 301);
-      default:
-        if (isAccountPath(url.pathname)) return api.fetch(req, env, ctx);
-        return site.fetch(req, env, ctx);
-    }
+    return site.fetch(request, env, ctx);
   },
 
   async queue(batch, env) {

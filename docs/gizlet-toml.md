@@ -169,4 +169,4 @@ The registry fails a package whose `manifest.json` is missing, is not a JSON obj
 
 ## Listing
 
-Passing the checks makes a release installable by its link, by anyone, on any device. Listing it in search, Explore and the featured lists is an editorial decision: an admin lists it through `POST /v1/admin/gizlets/github.com/{owner}/{repo}/visibility` (see the [README](../README.md#api)). Until then the API gives it `visibility` `unlisted` and a `visibility_reason`: its check warnings, or `awaiting editorial approval`.
+Passing the checks makes a release installable by its link, by anyone, on any device. Listing it in search, Explore and the featured lists is an editorial decision: an admin lists it through `POST /api/v1/admin/gizlets/github.com/{owner}/{repo}/visibility` (see the [README](../README.md#api)). Until then the API gives it `visibility` `unlisted` and a `visibility_reason`: its check warnings, or `awaiting editorial approval`.

@@ -1,10 +1,10 @@
 # Read-only checks against production after a deploy.
-GET https://api.gizlet.io/v1/healthz
+GET https://gizlet.io/api/v1/healthz
 HTTP 200
 [Asserts]
 jsonpath "$.ok" == true
 
-GET https://api.gizlet.io/v1
+GET https://gizlet.io/api/v1
 HTTP 200
 [Asserts]
 jsonpath "$.name" == "Gizlet API"
@@ -19,32 +19,32 @@ HTTP 301
 [Asserts]
 header "Location" == "https://gizlet.io/github.com/gizlet/gizlet"
 
-POST https://api.gizlet.io/v1/auth/device/code
+POST https://gizlet.io/api/v1/auth/device/code
 {"client_id": "gizlet-os"}
 HTTP 200
 [Asserts]
 jsonpath "$.verification_uri" == "https://gizlet.io/device"
 
-GET https://api.gizlet.io/v1/me
+GET https://gizlet.io/api/v1/me
 HTTP 401
 
-GET https://api.gizlet.io/v1/gizlets?sort=score&limit=1
+GET https://gizlet.io/api/v1/gizlets?sort=score&limit=1
 HTTP 200
 [Asserts]
 jsonpath "$.gizlets" exists
 
 # Kinds: every gizlet has one, and the list filters by it.
-GET https://api.gizlet.io/v1/gizlets?kind=app&limit=100
+GET https://gizlet.io/api/v1/gizlets?kind=app&limit=100
 HTTP 200
 [Asserts]
 jsonpath "$.gizlets[?(@.kind != 'app')]" not exists
 
-GET https://api.gizlet.io/v1/gizlets?kind=service
+GET https://gizlet.io/api/v1/gizlets?kind=service
 HTTP 200
 [Asserts]
 jsonpath "$.gizlets" exists
 
-GET https://api.gizlet.io/v1/gizlets?kind=rom
+GET https://gizlet.io/api/v1/gizlets?kind=rom
 HTTP 400
 
 GET https://gizlet.io/explore?kind=service&lang=en
@@ -52,5 +52,5 @@ HTTP 200
 [Asserts]
 xpath "string(//nav[@aria-label='Kind']/a[@aria-current='page'])" == "Services"
 
-GET https://api.gizlet.io/v1/me/ratings
+GET https://gizlet.io/api/v1/me/ratings
 HTTP 401

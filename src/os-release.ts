@@ -20,6 +20,14 @@ export async function latestOsTag(bucket: R2Bucket): Promise<string | null> {
   return null;
 }
 
+export async function latestOsRelease(bucket: R2Bucket, origin: string) {
+  const tag = await latestOsTag(bucket);
+  if (!tag) return null;
+  const base = `${origin}/releases/${tag}`;
+  const signature = await bucket.head(`releases/${tag}/manifest.json.sig`);
+  return { tag, manifest_url: `${base}/manifest.json`, signature_url: signature ? `${base}/manifest.json.sig` : null };
+}
+
 export async function latestR36sRelease(bucket: R2Bucket, origin: string) {
   const tag = await latestOsTag(bucket);
   if (!tag) return null;
@@ -35,6 +43,7 @@ export async function latestR36sRelease(bucket: R2Bucket, origin: string) {
   const base = `${origin}/releases/${tag}`;
   return {
     tag,
+    base,
     image: `${base}/${image.path}`,
     filename: image.path.split("/").pop()!,
     checksum: `${base}/${image.checksum}`,

@@ -52,6 +52,8 @@ pnpm exec wrangler d1 migrations apply gizlet --local --persist-to "$STATE/wrang
 
 pnpm exec wrangler r2 object put gizlet-assets/releases/v0.2.10/manifest.json \
   --file tests/fixtures/os-release.json --local --persist-to "$STATE/wrangler"
+pnpm exec wrangler r2 object put gizlet-assets/releases/v0.2.10/manifest.json.sig \
+  --file tests/fixtures/os-release.json --local --persist-to "$STATE/wrangler"
 pnpm exec wrangler r2 object put gizlet-assets/releases/v0.3.0/flash.sh \
   --file tests/fixtures/os-release.json --local --persist-to "$STATE/wrangler"
 
@@ -77,11 +79,11 @@ pnpm exec wrangler dev --port "$DEV_PORT" --ip 127.0.0.1 --persist-to "$STATE/wr
 pids+=($!)
 
 for _ in $(seq 1 120); do
-  curl -fsS -H 'x-gizlet-host: api.gizlet.io' "http://127.0.0.1:$DEV_PORT/v1/healthz" >/dev/null 2>&1 \
+  curl -fsS "http://127.0.0.1:$DEV_PORT/api/v1/healthz" >/dev/null 2>&1 \
     && curl -fsS "$FIXTURE/healthz" >/dev/null 2>&1 && break
   sleep 0.5
 done
-curl -fsS -H 'x-gizlet-host: api.gizlet.io' "http://127.0.0.1:$DEV_PORT/v1/healthz" >/dev/null || { cat "$STATE/dev.log"; exit 1; }
+curl -fsS "http://127.0.0.1:$DEV_PORT/api/v1/healthz" >/dev/null || { cat "$STATE/dev.log"; exit 1; }
 
 pattern=${1:-}
 status=0
