@@ -1,0 +1,5 @@
+{
+  "schema": 1,
+  "manifest": "{\"schema\":1,\"version\":\"0.1.0\",\"tag\":\"v0.1.0\",\"minimum_macos\":\"14.0\",\"notes\":{\"en\":\"Fixture\"},\"archive\":{\"path\":\"Gizlet-0.1.0.zip\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"bytes\":3},\"dmg\":{\"path\":\"Gizlet-0.1.0.dmg\",\"sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"bytes\":3}}",
+  "signature": "-----BEGIN SSH SIGNATURE-----\nfixture\n-----END SSH SIGNATURE-----\n"
+}

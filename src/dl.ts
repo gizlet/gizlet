@@ -6,6 +6,7 @@ import type { Env } from "./env";
 import { assetUrl, rawUrl, readCapped, reader } from "./github";
 import { artKey, contentType, indexedFiles, MAX_ART_BYTES } from "./mirror";
 import { OS_FILE, OS_TAG } from "./os-release";
+import { latestMacosRelease, MACOS_FILE, MACOS_LATEST, macosKey } from "./macos-release";
 import { ensureGizlet, pickInstallRecovering } from "./registry";
 import { repoRef } from "./repo";
 import { isAssetName, isRepoPath, TARGET, type GizletToml, type Tier } from "./schema";
@@ -82,6 +83,32 @@ dl.on(["GET", "HEAD"], "/releases/:tag/:file{.+}", async (c) => {
     return c.text("Not found", 404);
   }
   const response = await fromR2(c, prefix + file, file, IMMUTABLE, null, () => {}, true);
+  return response ?? c.text("Not found", 404);
+});
+
+/** The Launcher's update manifest: revalidated on every request, so a new release shows at once. */
+dl.on(["GET", "HEAD"], "/macos/latest.json", async (c) => {
+  const response = await fromR2(c, MACOS_LATEST, "latest.json", "no-cache", null, () => {});
+  return response ?? c.text("Not found", 404);
+});
+
+/** The newest disk image, for download buttons. */
+dl.on(["GET", "HEAD"], "/macos/download", async (c) => {
+  const latest = await latestMacosRelease(c.env.BUCKET);
+  if (!latest) return c.text("Not found", 404);
+  c.header("cache-control", "no-cache");
+  return c.redirect(`${c.env.SITE_ORIGIN}/assets/${macosKey(latest.tag, latest.dmg)}`, 302);
+});
+
+/** A version's files, which never change; served once its manifest, uploaded last, is there. */
+dl.on(["GET", "HEAD"], "/macos/releases/:tag/:file", async (c) => {
+  const tag = c.req.param("tag");
+  const file = c.req.param("file");
+  if (!OS_TAG.test(tag) || !MACOS_FILE.test(file)) return c.text("Not found", 404);
+  if (file !== "manifest.json" && !(await c.env.BUCKET.head(macosKey(tag, "manifest.json")))) {
+    return c.text("Not found", 404);
+  }
+  const response = await fromR2(c, macosKey(tag, file), file, IMMUTABLE, null, () => {}, true);
   return response ?? c.text("Not found", 404);
 });
 

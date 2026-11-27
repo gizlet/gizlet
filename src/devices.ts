@@ -86,7 +86,6 @@ export async function wantCounts(env: Env): Promise<Map<string, number>> {
 export const handheldJson = (h: Handheld, wants: number) => ({ id: h.id, name: h.name, maker: h.maker, soc: h.soc, screen: h.screen, status: h.status, wants });
 
 const DESKTOP = {
-  mac: [{ label: "", file: "Gizlet-macOS.dmg" }],
   win: [
     { label: "x64", file: "Gizlet-Windows-x64.msi" },
     { label: "Arm64", file: "Gizlet-Windows-arm64.msi" },
@@ -136,7 +135,7 @@ export function devicesPage(lang: Locale, query: { q?: string; status?: string }
   <div class="platform mac">
     <span class="screen-glyph" aria-hidden="true"><i></i></span>
     <div class="txt"><h3>${t.mac}</h3><p>${t.macNote}</p></div>
-    <div class="btns">${DESKTOP.mac.map((f) => html`<a class="btn cobalt" href="${OS_RELEASE}/${f.file}">${t.download}</a>`)}</div>
+    <div class="btns"><a class="btn cobalt" href="/assets/macos/download">${t.download}</a></div>
   </div>
   <div class="platform win">
     <span class="screen-glyph" aria-hidden="true"><i></i></span>
