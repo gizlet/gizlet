@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       pull_request_number:
-        description: Pull request to run for; leave empty to run on the selected branch.
+        description: Pull request number. Leave empty on main to test and deploy production.
         required: false
         default: ''
         type: string
@@ -134,6 +134,17 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Validate featured content
+        id: featured
+        env:
+          FEATURED_JSON: ${{ vars.FEATURED_JSON }}
+        run: |
+          node --input-type=module -e '
+            import { appendFileSync } from "node:fs";
+            import { parseFeaturedConfig } from "./src/featured-config.ts";
+            const collections = parseFeaturedConfig(process.env.FEATURED_JSON);
+            appendFileSync(process.env.GITHUB_OUTPUT, `json=${JSON.stringify(collections)}\n`);
+          '
       - name: Install sops and Hurl
         run: |
           base="https://github.com/getsops/sops/releases/download/${SOPS_VERSION}"
@@ -166,6 +177,7 @@ jobs:
         env:
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
           SITE_DOMAINS: ${{ vars.SITE_DOMAINS }}
+          FEATURED_JSON: ${{ steps.featured.outputs.json }}
           GITHUB_APP_PRIVATE_KEY: ${{ secrets.GIZLET_BOT_PRIVATE_KEY }}
         run: |
           secrets="$RUNNER_TEMP/worker-secrets.json"
@@ -176,8 +188,8 @@ jobs:
                 if (process.env.GITHUB_APP_PRIVATE_KEY) o.GITHUB_APP_PRIVATE_KEY = process.env.GITHUB_APP_PRIVATE_KEY;
                 process.stdout.write(JSON.stringify(o));
               })' > "$secrets")
-          vars=()
-          if [[ -n "$SITE_DOMAINS" ]]; then vars=(--var "SITE_DOMAINS:$SITE_DOMAINS"); fi
+          vars=(--var "FEATURED_JSON:$FEATURED_JSON")
+          if [[ -n "$SITE_DOMAINS" ]]; then vars+=(--var "SITE_DOMAINS:$SITE_DOMAINS"); fi
           pnpm exec wrangler deploy --secrets-file "$secrets" "${vars[@]}"
       - name: Smoke test production
         run: hurl --test --variable "run=$(date +%s)" tests/prod/*.hurl

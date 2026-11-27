@@ -1,18 +1,19 @@
-# Curation: hand-picked featured lists and visibility overrides.
-PUT {{base}}/v1/admin/collections/picks
-x-gizlet-host: api.gizlet.io
-Authorization: Bearer {{admin_token}}
-{"title": "Picks", "titles": {"zh-CN": "精选"}, "repos": ["github.com/fixture-org/hello-gizlet", "fixture-org/on-demand"]}
-HTTP 200
-[Asserts]
-jsonpath "$.repos" count == 2
-
-# Featured lists show listed gizlets only: on-demand is unlisted.
+# The featured variable names one listed, one unlisted and one missing gizlet.
 GET {{base}}/v1/featured
 x-gizlet-host: api.gizlet.io
 HTTP 200
 [Asserts]
-jsonpath "$.sections[?(@.id == 'picks')].gizlets[*].repo" == "github.com/fixture-org/hello-gizlet"
+jsonpath "$.hero[0].repo" == "github.com/fixture-org/hello-gizlet"
+jsonpath "$.sections[0].id" == "picks"
+jsonpath "$.sections[0].gizlets" count == 1
+jsonpath "$.sections[0].gizlets[0].repo" == "github.com/fixture-org/hello-gizlet"
+
+GET {{base}}/?lang=zh-CN
+x-gizlet-host: gizlet.io
+HTTP 200
+[Asserts]
+xpath "string(//a[@class='caption']/@href)" == "/github.com/fixture-org/hello-gizlet"
+xpath "string(//section[@id='gizlets']//h2[1])" == "编辑精选"
 
 # An admin can list it anyway.
 POST {{base}}/v1/admin/gizlets/github.com/fixture-org/on-demand/visibility
@@ -29,6 +30,15 @@ x-gizlet-host: api.gizlet.io
 HTTP 200
 [Asserts]
 jsonpath "$.gizlets" count == 1
+
+GET {{base}}/v1/featured
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.hero[0].repo" == "github.com/fixture-org/on-demand"
+jsonpath "$.sections[0].id" == "picks"
+jsonpath "$.sections[0].gizlets[0].repo" == "github.com/fixture-org/on-demand"
+jsonpath "$.sections[0].gizlets[1].repo" == "github.com/fixture-org/hello-gizlet"
 
 # Back to the checks' verdict.
 POST {{base}}/v1/admin/gizlets/github.com/fixture-org/on-demand/visibility
@@ -89,13 +99,8 @@ Authorization: Bearer {{admin_token}}
 {"visibility": "gone"}
 HTTP 400
 
-DELETE {{base}}/v1/admin/collections/picks
-x-gizlet-host: api.gizlet.io
-Authorization: Bearer {{admin_token}}
-HTTP 204
-
-PUT {{base}}/v1/admin/collections/picks
+POST {{base}}/v1/admin/gizlets/github.com/fixture-org/on-demand/visibility
 x-gizlet-host: api.gizlet.io
 Authorization: Bearer wrong
-{"title": "x", "repos": []}
+{"visibility": "listed"}
 HTTP 401

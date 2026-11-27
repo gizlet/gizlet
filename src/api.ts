@@ -575,33 +575,6 @@ async function timingSafeEqual(a: string, b: string): Promise<boolean> {
   return crypto.subtle.timingSafeEqual(x, y);
 }
 
-api.put("/v1/admin/collections/:id", async (c) => {
-  const id = c.req.param("id");
-  if (!/^[a-z0-9-]{1,40}$/.test(id)) return apiError(c, 400, "bad_request", "collection id must be [a-z0-9-]");
-  const b = await c.req.json<{ title?: string; titles?: Record<string, string>; layout?: string; position?: number; repos?: string[] }>().catch(() => null);
-  if (!b || typeof b.title !== "string" || !Array.isArray(b.repos)) return apiError(c, 400, "bad_request", "body needs title and repos");
-  const layout = b.layout ?? "row";
-  if (!["hero", "row", "grid"].includes(layout)) return apiError(c, 400, "bad_request", "layout must be hero, row or grid");
-  const repos = b.repos.map((x) => parseRepoAddress(String(x)));
-  if (repos.some((x) => !x)) return apiError(c, 400, "bad_request", "repos must be GitHub repository addresses");
-  await c.env.DB.batch([
-    c.env.DB.prepare(
-      "INSERT INTO collections (id, title, titles, layout, position) VALUES (?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET title = excluded.title, titles = excluded.titles, layout = excluded.layout, position = excluded.position",
-    ).bind(id, b.title, JSON.stringify(b.titles ?? {}), layout, b.position ?? 50),
-    c.env.DB.prepare("DELETE FROM collection_items WHERE collection_id = ?").bind(id),
-    ...repos.map((x, i) => c.env.DB.prepare("INSERT OR IGNORE INTO collection_items (collection_id, repo, position) VALUES (?, ?, ?)").bind(id, x!.key, i)),
-  ]);
-  return c.json({ id, title: b.title, layout, repos: repos.map((x) => x!.key) });
-});
-
-api.delete("/v1/admin/collections/:id", async (c) => {
-  await c.env.DB.batch([
-    c.env.DB.prepare("DELETE FROM collection_items WHERE collection_id = ?").bind(c.req.param("id")),
-    c.env.DB.prepare("DELETE FROM collections WHERE id = ?").bind(c.req.param("id")),
-  ]);
-  return c.body(null, 204);
-});
-
 /** Body: {"visibility": "listed" | "unlisted" | "blocked" | "auto", "reason"?: string}. */
 api.post("/v1/admin/gizlets/github.com/:owner/:repo/visibility", async (c) => {
   const r = ref(c);

@@ -61,6 +61,6 @@ HTTP 401
 [Asserts]
 jsonpath "$.error.code" == "unauthorized"
 
-POST {{base}}/v1/admin/collections/x
+POST {{base}}/v1/admin/gizlets/github.com/fixture-org/hello-gizlet/visibility
 x-gizlet-host: api.gizlet.io
 HTTP 401

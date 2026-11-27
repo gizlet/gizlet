@@ -54,7 +54,7 @@ One Cloudflare Worker serves every host:
 | `GET /v1/links/{id}` | Where a short link leads (`repo`, `share_url`, `current`, `expires_at`); a `404` says whether the id is `available` |
 | `GET /v1/me/ratings`; `GET`/`PUT`/`DELETE /v1/me/ratings/github.com/{owner}/{repo}` | The user's ratings; one gizlet's (`PUT` body `{"stars": 1-5}`) |
 | `GET /v1/me/wants`; `PUT`/`DELETE /v1/me/wants/{handheld}` | The handhelds the user wants, newest first (each with `wanted_at`); want one or take it back, answered with `{"handheld", "wanted", "wants"}` |
-| `PUT`/`DELETE /v1/admin/collections/{id}`, `POST /v1/admin/gizlets/github.com/{owner}/{repo}/visibility` | Curation, with `Authorization: Bearer $ADMIN_TOKEN`; the visibility body is `{"visibility": "listed" \| "unlisted" \| "blocked" \| "auto", "reason"?}`, and `listed` approves a gizlet for listing |
+| `POST /v1/admin/gizlets/github.com/{owner}/{repo}/visibility` | Listing approval with `Authorization: Bearer $ADMIN_TOKEN` and body `{"visibility": "listed" \| "unlisted" \| "blocked" \| "auto", "reason"?}` |
 | `PUT`/`DELETE /v1/admin/gizlets/github.com/{owner}/{repo}/marks/awesome` | The `awesome` mark (body `{"note"?}`), with the admin token |
 | `POST /v1/admin/gizlets/github.com/{owner}/{repo}/releases/{tag}/scan` | A malware scan report, with the admin token: `{"result": "clean" \| "infected", "revision"?, "engine"?, "report_url"?, "note"?}`; `409` when the tag was indexed again since `revision` |
 | `PUT`/`DELETE /v1/admin/links/{id}` | Set a short link (body `{"repo"}`), whatever its length and whoever has it; or take it back at once. With the admin token |
@@ -136,6 +136,29 @@ CI follows the [gizlet/.github](https://github.com/gizlet/.github) setup, as in 
 Build, test and deploy run on the runner the `RUNNERS` organization variable maps to `linux-x64`, falling back to GitHub's Ubuntu runner. Comment-triggered workflows run their copy on `main`, so a pull request that changes them is tested by the old ones.
 
 Cloudflare resources: Worker `gizlet` with custom domains for the four hosts, D1 `gizlet` and R2 bucket `gizlet-assets` (both in APAC), Queues `gizlet-mirror` and `gizlet-mirror-dlq`, Hyperdrive config `gizlet` for the Neon database (Singapore, direct endpoint) with query caching off, so a revoked session is never served from cache. Email Sending is enabled for `gizlet.io` (its bounce MX and SPF on `cf-bounce.gizlet.io`, DKIM and DMARC in the zone). The GitHub OAuth app's callback URL is `https://gizlet.io/v1/auth/callback/github`.
+
+## Publishing featured content
+
+Edit the `FEATURED_JSON` repository variable under **Settings → Secrets and variables → Actions → Variables**. The variable follows the same deploy flow as `SITE_DOMAINS`. In **Actions → CI → Run workflow**, select `main` and leave both inputs blank. The workflow validates the JSON before deploying it as a Worker binding. Only repository users with write access or higher can dispatch the workflow.
+
+```json
+[
+  {
+    "id": "hero",
+    "title": "Featured",
+    "layout": "hero",
+    "repos": ["gizlet/little-prince"]
+  },
+  {
+    "id": "staff-picks",
+    "title": "Staff picks",
+    "titles": { "zh-CN": "编辑精选" },
+    "repos": ["gizlet/overeaten", "gizlet/browser"]
+  }
+]
+```
+
+The arrays set collection and repository order. The optional `titles` object supplies translations. Layout defaults to `row` and also accepts `grid` or `hero`, with at most one hero collection. The homepage shows the first eligible hero entry. Repositories must be listed and have a ready release to appear. When the variable is unset or `[]`, the homepage uses its automatic lists and recent hero fallback. The normalized JSON must fit the Worker's 5 KB binding limit.
 
 ## License
 
