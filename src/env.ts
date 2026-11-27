@@ -17,7 +17,7 @@ export interface Env {
   GITHUB_RAW: string;
   /** api.github.com, or a fixture server in local tests. */
   GITHUB_API: string;
-  /** The GitHub App (gizlet-bot) that reads repositories it is installed on, private ones included. Off without both. */
+  /** The Gizlet GitHub App that reads repositories it is installed on, private ones included. Off without both. */
   GITHUB_APP_CLIENT_ID?: string;
   /** Its private key, PEM (PKCS#1 as GitHub issues it, or PKCS#8); a literal `\n` stands for a newline. */
   GITHUB_APP_PRIVATE_KEY?: string;

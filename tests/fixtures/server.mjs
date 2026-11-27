@@ -1,5 +1,5 @@
 // A stand-in for github.com, raw.githubusercontent.com, api.github.com (as the GitHub App
-// gizlet-bot sees it) and the Actions OIDC issuer, used by tests/run-local.sh. It serves the
+// the Gizlet App sees it) and the Actions OIDC issuer, used by tests/run-local.sh. It serves the
 // fixture repositories' files at each tag (gizlet.toml and art) and their releases with real
 // `.gzl` packages (zips with manifest.json and an entry executable), and signs OIDC tokens with a
 // throwaway key. tests/fixtures/repos/<name> are fixture-org/<name> as written by hand; the
@@ -528,6 +528,12 @@ createServer(async (req, res) => {
     if (!(await asApp())) return json(401, { message: "A JSON web token could not be decoded" });
     if (Number(parts[2]) === SUSPENDED) return json(403, { message: "This installation has been suspended" });
     if (Number(parts[2]) !== INSTALLATION) return json(404, { message: "Not Found" });
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const { permissions } = JSON.parse(Buffer.concat(chunks).toString() || "{}");
+    if (permissions?.contents !== "read" || permissions.metadata !== "read" || Object.keys(permissions).length !== 2) {
+      return json(422, { message: "The index must request only Contents and Metadata read permissions" });
+    }
     const t = `ghs_fixture${randomBytes(12).toString("hex")}`;
     tokens.add(t);
     return json(201, { token: t, expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString() });
