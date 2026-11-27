@@ -49,6 +49,8 @@ export function indexedFiles(spec: GizletToml): { packages: Set<string>; art: Se
 class Rejected extends Error {}
 /** The release was indexed again while this job ran. */
 class Superseded extends Error {}
+/** GitHub did not say which repository the path holds; the release waits until it does. */
+class Unverified extends UpstreamError {}
 
 const hex = (b: ArrayBuffer) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
 
@@ -127,13 +129,14 @@ async function infectedError(env: Env, job: MirrorJob): Promise<string | null> {
 /**
  * GitHub's id for the repository at the release's path now: null when there is none, undefined
  * when GitHub did not say. When `pinned`, the id the release was indexed under, the release is
- * rejected for another repository and asked about again later when GitHub does not say.
+ * rejected when GitHub names another repository, and waits (Unverified) when GitHub does not say:
+ * bytes read by path are another repository's once the path changes hands.
  */
 async function checkRepository(env: Env, src: Reader, ref: RepoRef, pinned: number | null, tag: string): Promise<number | null | undefined> {
   const info = await src.info().catch(() => null);
   const id = info ? info.id : await repositoryIdAt(env, ref).catch(() => undefined);
   if (pinned == null) return id;
-  if (id === undefined) throw new UpstreamError(`GitHub did not say which repository ${ref.key} is`);
+  if (id === undefined) throw new Unverified(`Waiting for GitHub to say which repository ${ref.key} is`);
   if (id !== pinned) throw new Rejected(`${ref.key} is no longer the GitHub repository ${tag} was indexed from`);
   return id;
 }
@@ -254,6 +257,12 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
       await deletePrefix(env, packagesPrefix(job.repo, job.tag, job.revision));
       await deletePrefix(env, `${deviceRoot(job.repo, job.tag)}r${job.revision}/`);
       return;
+    }
+    if (e instanceof Unverified) {
+      // Never failed for it: once the queue gives up, the cron asks again (requeueStuck).
+      await setStatus(env, job, "pending", e.message);
+      if (attempt >= MAX_ATTEMPTS) return;
+      throw e;
     }
     if (e instanceof Rejected || attempt >= MAX_ATTEMPTS) {
       if (!(await setStatus(env, job, "failed", e instanceof Error ? e.message : String(e)))) return;

@@ -546,3 +546,53 @@ x-gizlet-host: dl.gizlet.io
 HTTP 302
 [Asserts]
 header "Location" contains "/v1.0.0/"
+
+# GitHub's API cannot say which repository a pinned release's path holds while it is mirrored:
+# the release waits, neither failed nor served from bytes read by an unverified path, and is
+# mirrored once GitHub answers again.
+POST {{fixture}}/_fixture/api-down?repo=fixture-org/quiet-api
+HTTP 200
+
+GET {{fixture}}/token?repo=fixture-org/quiet-api&ref=refs/tags/v1.0.0
+HTTP 200
+[Captures]
+quiet_token: jsonpath "$.value"
+
+POST {{base}}/v1/publish
+x-gizlet-host: api.gizlet.io
+Authorization: Bearer {{quiet_token}}
+{}
+HTTP 202
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/quiet-api/releases/v1.0.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 40
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "pending"
+jsonpath "$.error" == "Waiting for GitHub to say which repository github.com/fixture-org/quiet-api is"
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/quiet-api/install?target=aarch64-unknown-linux-gnu&tier=lite
+x-gizlet-host: api.gizlet.io
+HTTP 409
+
+POST {{fixture}}/_fixture/api-down?repo=fixture-org/quiet-api&down=0
+HTTP 200
+
+# The queue asks again after 30 seconds.
+GET {{base}}/v1/gizlets/github.com/fixture-org/quiet-api/releases/v1.0.0
+x-gizlet-host: api.gizlet.io
+[Options]
+retry: 240
+retry-interval: 250ms
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "ready"
+
+GET {{base}}/v1/gizlets/github.com/fixture-org/quiet-api/install?target=aarch64-unknown-linux-gnu&tier=lite
+x-gizlet-host: api.gizlet.io
+HTTP 200
+[Asserts]
+jsonpath "$.repository_id" isInteger

@@ -357,6 +357,8 @@ addRelease("fixture-org/early-reuse", "1.0.0", { targets: handheld });
 // Its handheld release is indexed while GitHub cannot say which repository it is, like releases from
 // before repository ids; a newer one is built for x86-64 only (tests/hurl/11-device-store.hurl).
 addRelease("fixture-org/legacy", "1.0.0", { targets: handheld });
+// Published while GitHub's API cannot answer for it (tests/hurl/11-device-store.hurl).
+addRelease("fixture-org/quiet-api", "1.0.0", { targets: handheld });
 addRelease("fixture-org/mixed-tiers", "1.0.0", { targets: [["aarch64-unknown-linux-gnu", "full"], ["x86_64-unknown-linux-gnu", "lite"]] });
 addRelease("fixture-org/turncoat", "2.0.0", { targets: [["x86_64-unknown-linux-gnu", "lite"]] });
 addTag("fixture-org/no-index", "v1.0.0", new Map([["other.zip", Buffer.from("x")]]), new Map());
