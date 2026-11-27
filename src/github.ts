@@ -1,7 +1,7 @@
 /**
  * Reading releases from GitHub.
  *
- * Where the GitHub App (gizlet-bot) is installed, a repository is read through the REST API with
+ * Where the Gizlet GitHub App is installed, a repository is read through the REST API with
  * an installation token, which also reaches private repositories:
  *   GET /repos/<o>/<r>                          -> id, display casing, private
  *   GET /repos/<o>/<r>/releases/latest          -> the tag
@@ -522,7 +522,11 @@ function installationToken(env: Env, installation: number): Promise<string> {
   const hit = tokens.get(installation);
   if (hit && hit.until > Date.now()) return hit.token;
   const token = (async () => {
-    const res = await appFetch(env, `/app/installations/${installation}/access_tokens`, { method: "POST" });
+    const res = await appFetch(env, `/app/installations/${installation}/access_tokens`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ permissions: { contents: "read", metadata: "read" } }),
+    });
     if (!res.ok) {
       await res.body?.cancel();
       if (res.status === 401 || res.status === 403 || res.status === 404) throw new TokenDenied(`GitHub refused an installation token (${res.status})`);

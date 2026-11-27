@@ -171,14 +171,13 @@ jobs:
       # Secrets go up with the new version, so the first deploy needs no existing Worker.
       # SITE_DOMAINS (the domains links in our emails may use) is a repository variable, so
       # adding a domain needs no pull request: set it, then run this workflow on main.
-      # GITHUB_APP_PRIVATE_KEY is gizlet-bot's key, the organization secret the PR triage uses
-      # too; with it the Worker reads repositories the app is installed on, private ones included.
+      # GIZLET_APP_PRIVATE_KEY is the repository secret for the Store's GitHub App.
       - name: Deploy
         env:
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
           SITE_DOMAINS: ${{ vars.SITE_DOMAINS }}
           FEATURED_JSON: ${{ steps.featured.outputs.json }}
-          GITHUB_APP_PRIVATE_KEY: ${{ secrets.GIZLET_BOT_PRIVATE_KEY }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.GIZLET_APP_PRIVATE_KEY }}
         run: |
           secrets="$RUNNER_TEMP/worker-secrets.json"
           trap 'rm -f "$secrets"' EXIT

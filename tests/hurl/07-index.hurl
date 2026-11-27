@@ -244,7 +244,7 @@ Authorization: Bearer {{hidden_token}}
 HTTP 403
 [Asserts]
 jsonpath "$.error.code" == "app_not_installed"
-jsonpath "$.error.install_url" == "https://github.com/apps/gizlet-bot/installations/new"
+jsonpath "$.error.install_url" == "https://github.com/apps/gizlet/installations/new"
 
 # --- Refreshing on views ----------------------------------------------------------------------
 

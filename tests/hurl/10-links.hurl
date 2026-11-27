@@ -14,7 +14,7 @@ GET {{base}}/v1/gizlets/github.com/fixture-org/on-demand
 x-gizlet-host: api.gizlet.io
 HTTP 200
 
-# Private, read through gizlet-bot.
+# Private, read through the Gizlet App.
 GET {{base}}/v1/gizlets/github.com/fixture-org/secret-gizlet
 x-gizlet-host: api.gizlet.io
 HTTP 200
@@ -269,7 +269,7 @@ HTTP 302
 [Asserts]
 header "Location" == "/github.com/fixture-org/hello-gizlet"
 
-# A private repository: users' tokens cannot see it, so gizlet-bot reads their role there.
+# A private repository: users' tokens cannot see it, so the Gizlet App reads their role there.
 PUT {{base}}/v1/me/gizlets/github.com/fixture-org/secret-gizlet/link
 x-gizlet-host: api.gizlet.io
 Authorization: Bearer {{dev}}
