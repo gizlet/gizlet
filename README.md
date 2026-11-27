@@ -104,7 +104,8 @@ pnpm test:hurl sim        # the device simulation only
 | `tests/hurl/`, `tests/sim/`, `tests/prod/` | Local suite, device simulation, production smoke checks |
 | `tests/fixtures/` | The fake GitHub; `repos/<name>` are fixture repositories written by hand, served as `fixture-org/<name>` |
 | `scripts/dev.sh` | `pnpm dev` |
-| `mirror/`, `tests/mirror/` | An nginx reverse proxy that serves every host under another domain (`gizlet.xyz`, `api.gizlet.xyz`, ...), and its checks; see [mirror/README.md](mirror/README.md). Links in account emails use the domain the request came in on, if the `SITE_DOMAINS` repository variable lists it, else `gizlet.io` |
+
+Run a mirror on your own domain with [Gizlet Mirror](https://github.com/gizlet/gizlet-mirror). Account emails use the mirror domain when it is listed in the `SITE_DOMAINS` repository variable and use `gizlet.io` otherwise.
 
 ## Credentials and deployment
 
