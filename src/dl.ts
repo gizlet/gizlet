@@ -107,16 +107,19 @@ dl.on(["GET", "HEAD"], "/github.com/:owner/:repo/:tag/~device/:name", async (c) 
   const found = await serve();
   if (found) return found;
   // The mirrored copy only if this revision wrote it: a re-index that could not copy the art
-  // leaves the previous revision's in place. Otherwise the file in the repository at the tag.
+  // leaves the previous revision's in place. Otherwise the file in the repository at the tag, and
+  // failing that a copy mirrored before copies were labelled with their revision.
   const mirrored = await c.env.BUCKET.get(artKey(r.key, tag, art.source));
+  const labelled = mirrored?.customMetadata?.revision;
   let source: Uint8Array | ReadableStream<Uint8Array> | null = null;
-  if (mirrored?.customMetadata?.revision === String(rel.revision)) source = mirrored.body;
+  if (labelled === String(rel.revision)) source = mirrored!.body;
   else await mirrored?.body.cancel();
   if (!source) {
     const got = await (await reader(c.env, { owner: g.owner, name: g.name_repo, key: r.key })).file(tag, art.source);
     if (got.ok) source = await readCapped(got, MAX_ART_BYTES).catch(() => null);
     else await got.body?.cancel();
   }
+  if (!source && mirrored && labelled === undefined) source = (await c.env.BUCKET.get(artKey(r.key, tag, art.source)))?.body ?? null;
   if (!source || !(await storeDeviceArt(c.env, r.key, tag, rel.revision, name, art, source))) return c.text("Not found", 404);
   return (await serve()) ?? c.text("Not found", 404);
 });

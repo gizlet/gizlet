@@ -10,7 +10,7 @@
  */
 import { checkPackage } from "./check";
 import type { PackageRow, ReleaseRow } from "./db";
-import { deviceArt, storeDeviceArt } from "./device-art";
+import { deviceArt, deviceRoot, storeDeviceArt } from "./device-art";
 import type { Env, MirrorJob } from "./env";
 import { readCapped, reader, UpstreamError } from "./github";
 import { artKey } from "./r2";
@@ -207,6 +207,7 @@ export async function mirrorRelease(env: Env, job: MirrorJob, attempt: number): 
     if (e instanceof Superseded) {
       // A newer revision is being indexed; nothing this job wrote will be served.
       await deletePrefix(env, packagesPrefix(job.repo, job.tag, job.revision));
+      await deletePrefix(env, `${deviceRoot(job.repo, job.tag)}r${job.revision}/`);
       return;
     }
     if (e instanceof Rejected || attempt >= MAX_ATTEMPTS) {
