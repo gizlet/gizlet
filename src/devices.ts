@@ -87,10 +87,7 @@ export const handheldJson = (h: Handheld, wants: number) => ({ id: h.id, name: h
 
 const DESKTOP = {
   mac: [{ label: "", file: "Gizlet-macOS.dmg" }],
-  win: [
-    { label: "x64", file: "Gizlet-Windows-x64.msi" },
-    { label: "Arm64", file: "Gizlet-Windows-arm64.msi" },
-  ],
+  win: [{ label: "x64", href: "/assets/windows/latest/x64" }],
 };
 
 /** A handheld drawn in CSS, the cartridges' companion. `screen` is what it shows. */
@@ -141,7 +138,7 @@ export function devicesPage(lang: Locale, query: { q?: string; status?: string }
   <div class="platform win">
     <span class="screen-glyph" aria-hidden="true"><i></i></span>
     <div class="txt"><h3>${t.win}</h3><p>${t.winNote}</p></div>
-    <div class="btns">${DESKTOP.win.map((f, i) => html`<a class="btn${i === 0 ? " cobalt" : ""}" href="${OS_RELEASE}/${f.file}">${t.download} ${f.label}</a>`)}</div>
+    <div class="btns">${DESKTOP.win.map((f, i) => html`<a class="btn${i === 0 ? " cobalt" : ""}" href="${f.href}">${t.download} ${f.label}</a>`)}</div>
   </div>
 </div>
 

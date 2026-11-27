@@ -56,6 +56,10 @@ pnpm exec wrangler r2 object put gizlet-assets/releases/v0.2.10/manifest.json.si
   --file tests/fixtures/os-release.json --local --persist-to "$STATE/wrangler"
 pnpm exec wrangler r2 object put gizlet-assets/releases/v0.3.0/flash.sh \
   --file tests/fixtures/os-release.json --local --persist-to "$STATE/wrangler"
+pnpm exec wrangler r2 object put gizlet-assets/windows/update.json \
+  --file tests/fixtures/windows-update.json --content-type application/json --local --persist-to "$STATE/wrangler"
+pnpm exec wrangler r2 object put gizlet-assets/windows/releases/v0.1.0/GizletSetup-0.1.0-x64.exe \
+  --file tests/fixtures/windows-installer.exe --local --persist-to "$STATE/wrangler"
 
 pnpm exec wrangler dev --port "$DEV_PORT" --ip 127.0.0.1 --persist-to "$STATE/wrangler" --show-interactive-dev-session=false \
   --var DEV_HOST_OVERRIDE:1 \
