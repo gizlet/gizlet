@@ -1,5 +1,5 @@
 export interface Env {
-  /** The registry: gizlets, releases, packages, collections. */
+  /** The registry: gizlets, releases and packages. */
   DB: D1Database;
   /** Mirrored packages and store art, keyed github.com/<owner>/<repo>/<tag>/<file>. */
   BUCKET: R2Bucket;
@@ -45,6 +45,7 @@ export interface Env {
   MAIL_FROM: string;
   /** Domains links in our emails may use (src/auth.ts); set at deploy from the SITE_DOMAINS GitHub variable. */
   SITE_DOMAINS?: string;
+  FEATURED_JSON?: string;
 }
 
 export interface MirrorJob {

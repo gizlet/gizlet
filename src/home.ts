@@ -60,7 +60,8 @@ export async function homePage(env: Env, lang: Locale, badUrl?: string) {
     return fresh;
   });
   // Automatic sections by id; hand-picked collections by their own titles.
-  const title = (s: (typeof all)[number]) => t.home.sections[s.id] ?? localized(s.titles, s.title, lang);
+  const title = (s: (typeof all)[number]) =>
+    Object.hasOwn(t.home.sections, s.id) ? t.home.sections[s.id] : localized(s.titles, s.title, lang);
   const star = hero[0];
   const screen = star ? html`<span class="now">${art(star, true)}<b>${nameOf(star, lang)}</b></span>` : bootScreen;
   const shown8 = [star, ...sections.flatMap((x) => x.gizlets.slice(0, 8))];

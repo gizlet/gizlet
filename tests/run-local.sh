@@ -59,6 +59,7 @@ pnpm exec wrangler dev --port "$DEV_PORT" --ip 127.0.0.1 --persist-to "$STATE/wr
   --var DEV_HOST_OVERRIDE:1 \
   --var "SITE_ORIGIN:$SITE" \
   --var "SITE_DOMAINS:mirror.test" \
+  --var 'FEATURED_JSON:[{"id":"hero","title":"Hero","layout":"hero","repos":["fixture-org/on-demand","fixture-org/hello-gizlet"]},{"id":"picks","title":"Picks","titles":{"zh-CN":"编辑精选"},"repos":["fixture-org/on-demand","fixture-org/missing","fixture-org/hello-gizlet"]}]' \
   --var "GITHUB_WEB:$FIXTURE" \
   --var "GITHUB_RAW:$FIXTURE" \
   --var "GITHUB_API:$FIXTURE" \

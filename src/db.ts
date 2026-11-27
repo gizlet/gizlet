@@ -1,4 +1,5 @@
 import type { Env } from "./env";
+import { parseFeaturedConfig } from "./featured-config";
 import { compareVersions, tierRunsOn, type Control, type Kind, type Tier } from "./schema";
 import { ratingAverage } from "./score";
 
@@ -280,23 +281,17 @@ export async function listGizlets(env: Env, query: ListQuery): Promise<GizletRow
   return results;
 }
 
-interface CollectionRow {
-  id: string;
-  title: string;
-  titles: string;
-  layout: "hero" | "row" | "grid";
-  position: number;
-}
-
 /** Home lists: hand-picked collections plus automatic sections, all of listed gizlets. */
 export async function featured(env: Env) {
+  const collections = getFeaturedCollections(env.FEATURED_JSON);
+  const repos = [...new Set(collections.flatMap((collection) => collection.repos))];
   const listed = publicListed("g");
-  const [{ results: cols }, { results: items }, { results: recent }, { results: popular }] = (await env.DB.batch([
-    env.DB.prepare("SELECT * FROM collections ORDER BY position, id"),
-    env.DB.prepare(`SELECT ci.collection_id AS collection_id, g.* FROM collection_items ci JOIN gizlets g ON g.repo = ci.repo WHERE ${listed} ORDER BY ci.collection_id, ci.position`),
+  const [{ results: items = [] } = {}, { results: recent = [] } = {}, { results: popular = [] } = {}] = await env.DB.batch<GizletRow>([
+    env.DB.prepare(`SELECT g.* FROM json_each(?) AS pick JOIN gizlets g ON g.repo = pick.value WHERE ${listed}`).bind(JSON.stringify(repos)),
     env.DB.prepare(`SELECT g.* FROM gizlets g WHERE ${listed} ORDER BY g.updated_at DESC LIMIT 24`),
     env.DB.prepare(`SELECT g.* FROM gizlets g WHERE ${listed} AND g.downloads > 0 ORDER BY g.downloads DESC, g.updated_at DESC LIMIT 12`),
-  ])) as [D1Result<CollectionRow>, D1Result<GizletRow & { collection_id: string }>, D1Result<GizletRow>, D1Result<GizletRow>];
+  ]);
+  const byRepo = new Map(items.map((g) => [g.repo, g]));
   const section = (id: string, title: string, titles: Record<string, string>, layout: string, rows: GizletRow[]) => ({
     id,
     title,
@@ -304,7 +299,13 @@ export async function featured(env: Env) {
     layout,
     gizlets: rows.map((g) => summary(env, g)),
   });
-  const curated = cols.map((c) => section(c.id, c.title, parse(c.titles, {}), c.layout, items.filter((i) => i.collection_id === c.id)));
+  const curated = collections.map((collection) => {
+    const rows = collection.repos.flatMap((repo) => {
+      const gizlet = byRepo.get(repo);
+      return gizlet ? [gizlet] : [];
+    });
+    return section(collection.id, collection.title, collection.titles ?? {}, collection.layout, rows);
+  });
   const hero = curated.find((c) => c.layout === "hero")?.gizlets ?? [];
   const sections = [
     ...curated.filter((c) => c.layout !== "hero"),
@@ -315,4 +316,13 @@ export async function featured(env: Env) {
     section("popular", "Most downloaded", { "zh-CN": "下载最多" }, "row", popular),
   ].filter((s) => s.gizlets.length > 0);
   return { hero: hero.length ? hero : recent.slice(0, 3).map((g) => summary(env, g)), sections };
+}
+
+function getFeaturedCollections(raw?: string) {
+  try {
+    return parseFeaturedConfig(raw);
+  } catch (error) {
+    console.error(error);
+    return [];
+  }
 }
