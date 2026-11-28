@@ -247,10 +247,13 @@ export async function devicesPage(
 <div class="wrap devices">
 <h2 class="section-title">${t.desktopTitle}</h2>
 <div class="platforms">
-  <div class="platform mac">
+  <div class="platform mac" id="macos">
     ${icon("laptop")}
     <div class="txt"><h3>${t.mac}</h3><p>${t.macNote}</p></div>
-    <div class="btns"><a class="btn cobalt" href="/assets/macos/download">${t.download}</a></div>
+    <div class="btns">
+      <a class="btn cobalt" href="/assets/macos/download/arm64">${t.download} · ${t.macAppleSilicon}</a>
+      <a class="btn" href="/assets/macos/download/x86_64">${t.download} · Intel</a>
+    </div>
   </div>
   <div class="platform win">
     ${icon("desktop")}

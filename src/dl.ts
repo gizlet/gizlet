@@ -92,12 +92,15 @@ dl.on(["GET", "HEAD"], "/macos/latest.json", async (c) => {
   return response ?? c.text("Not found", 404);
 });
 
-/** The newest disk image, for download buttons. */
-dl.on(["GET", "HEAD"], "/macos/download", async (c) => {
+dl.on(["GET", "HEAD"], ["/macos/download", "/macos/download/:arch"], async (c) => {
+  const arch = c.req.param("arch");
+  if (arch !== undefined && arch !== "arm64" && arch !== "x86_64") return c.text("Not found", 404);
   const latest = await latestMacosRelease(c.env.BUCKET);
   if (!latest) return c.text("Not found", 404);
   c.header("cache-control", "no-cache");
-  return c.redirect(`${c.env.SITE_ORIGIN}/assets/${macosKey(latest.tag, latest.dmg)}`, 302);
+  if (!("universal" in latest) && arch === undefined) return c.redirect(`${c.env.SITE_ORIGIN}/install#macos`, 302);
+  const file = "universal" in latest ? latest.universal : arch === "arm64" ? latest.arm64 : latest.x86_64;
+  return c.redirect(`${c.env.SITE_ORIGIN}/assets/${macosKey(latest.tag, file)}`, 302);
 });
 
 /** A version's files, which never change; served once its manifest, uploaded last, is there. */
