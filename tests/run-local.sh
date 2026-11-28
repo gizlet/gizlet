@@ -56,6 +56,10 @@ pnpm exec wrangler r2 object put gizlet-assets/releases/v0.2.10/manifest.json.si
   --file tests/fixtures/os-release.json --local --persist-to "$STATE/wrangler"
 pnpm exec wrangler r2 object put gizlet-assets/releases/v0.3.0/flash.sh \
   --file tests/fixtures/os-release.json --local --persist-to "$STATE/wrangler"
+for key in macos/latest.json macos/releases/v0.1.0/manifest.json macos/releases/v0.1.0/Gizlet-0.1.0.dmg macos/releases/v0.2.0/Gizlet-0.2.0.dmg; do
+  pnpm exec wrangler r2 object put "gizlet-assets/$key" \
+    --file tests/fixtures/macos-latest.json --local --persist-to "$STATE/wrangler"
+done
 pnpm exec wrangler r2 object put gizlet-assets/windows/update.json \
   --file tests/fixtures/windows-update.json --content-type application/json --local --persist-to "$STATE/wrangler"
 pnpm exec wrangler r2 object put gizlet-assets/windows/releases/v0.1.0/GizletSetup-0.1.0-x64.exe \

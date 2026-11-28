@@ -12,8 +12,6 @@ import { prompt } from "./mark";
 import { icon } from "./icons";
 import type { R36sRelease } from "./os-release";
 
-const OS_RELEASE = "https://github.com/gizlet/os/releases/latest/download";
-
 export type Status = "supported" | "wanted";
 type PortProgress = "developing" | "voting" | "unpicked";
 interface Port {
@@ -125,7 +123,6 @@ export function handheldJson(entry: CatalogEntry, wants: number, ports: Readonly
 export const handheldImage = (entry: CatalogEntry, release: R36sRelease | null) => entry.id === "r36s" ? release?.image ?? null : null;
 
 const DESKTOP = {
-  mac: [{ label: "", file: "Gizlet-macOS.dmg" }],
   win: [{ label: "x64", href: "/assets/windows/latest/x64" }],
 };
 
@@ -253,7 +250,7 @@ export async function devicesPage(
   <div class="platform mac">
     ${icon("laptop")}
     <div class="txt"><h3>${t.mac}</h3><p>${t.macNote}</p></div>
-    <div class="btns">${DESKTOP.mac.map((f) => html`<a class="btn cobalt" href="${OS_RELEASE}/${f.file}">${t.download}</a>`)}</div>
+    <div class="btns"><a class="btn cobalt" href="/assets/macos/download">${t.download}</a></div>
   </div>
   <div class="platform win">
     ${icon("desktop")}
