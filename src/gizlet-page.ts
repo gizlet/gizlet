@@ -12,6 +12,7 @@ import type { Env } from "./env";
 import { art, shell } from "./home";
 import { localized, MESSAGES, rich, type Locale, type Messages } from "./i18n";
 import { renderMarkdown } from "./markdown";
+import { icon } from "./icons";
 import { patternClasses, themeClass } from "./theme";
 import { artKey } from "./mirror";
 import { BUTTONS, LINK_KINDS, type Control } from "./schema";
@@ -34,7 +35,7 @@ const size = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 102
 
 /** A button as the handheld labels it: face buttons by letter, the D-pad as a cross. */
 function glyph(b: Control["button"], t: Messages) {
-  if (b === "dpad") return html`<span class="key dpad" role="img" aria-label="${t.share.buttons.dpad}"></span>`;
+  if (b === "dpad") return html`<span class="key dpad" role="img" aria-label="${t.share.buttons.dpad}">${icon("plus")}</span>`;
   if (b === "start" || b === "select") return html`<span class="key wide">${t.share.buttons[b]}</span>`;
   if (b === "l" || b === "r") return html`<span class="key shoulder">${b.toUpperCase()}</span>`;
   return html`<span class="key face${b === "a" ? " a" : ""}">${b.toUpperCase()}</span>`;
@@ -64,7 +65,7 @@ export async function gizletPage(env: Env, g: GizletRow, d: Detail, lang: Locale
   return html`<section class="band gz-band${theme}${patternClasses(d)}">
   <div class="wrap gz-hero">
     <div class="copy">
-      <a class="back" href="/explore">← ${t.explore.title}</a>
+      <a class="back" href="/explore">${icon("arrow-left")} ${t.explore.title}</a>
       <p class="kicker">${category} · ${s.by(d.owner)}</p>
       <h1 class="display">${name}</h1>
       ${description ? html`<p class="lede">${description}</p>` : ""}
@@ -84,7 +85,7 @@ export async function gizletPage(env: Env, g: GizletRow, d: Detail, lang: Locale
 
 <div class="wrap gz-page">
 ${d.visibility === "unlisted"
-  ? html`<p class="gz-unlisted"><span class="pill wait">${s.unlisted}</span>${g.visibility_reason ? html` ${s.unlistedWhy} <code>${g.visibility_reason}</code>` : ""}</p>`
+  ? html`<p class="gz-unlisted"><span class="pill wait">${icon("circle")}${s.unlisted}</span>${g.visibility_reason ? html` ${s.unlistedWhy} <code>${g.visibility_reason}</code>` : ""}</p>`
   : ""}
 
 ${d.screenshots.length

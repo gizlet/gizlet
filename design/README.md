@@ -4,6 +4,8 @@
 
 ## Icon
 
+Navigation, actions, platform symbols and status indicators use the Fill weight of Phosphor Icons. Use `icon(name)` from `src/icons.ts` for a decorative glyph beside a text label. The site hosts its icon font and MIT license in `public/static/fonts/`. The font is a WOFF2 subset of `@phosphor-icons/web` 2.1.2. To update it, subset `src/fill/Phosphor-Fill.ttf` from that package with FontTools using the codepoints in the `.ph-*::before` rules in `site.css`.
+
 A cobalt (`#2b45ff`) handheld, tilted like the cartridges, whose dark (`#101114`) screen shows a sun yellow (`#ffd23a`) g and a white cursor, as at a shell prompt: a pocket Linux computer. It is all colour, so it holds on white, the site's grey and dark tabs without a dark-mode variant. Where a background is required, it is white.
 
 On the site the mark is inline (`src/mark.ts`), so the cursor can blink: in the header when the logo is hovered, and always on the boot screen of the handhelds drawn in CSS, which show only the g and cursor. Neither moves under `prefers-reduced-motion`.

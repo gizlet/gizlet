@@ -9,13 +9,14 @@ import { accountData, accountPage, type AccountUser } from "./account";
 import { siteHosts, withAuth } from "./api";
 import { dlUrl, gizletDetail } from "./db";
 import type { Env } from "./env";
-import { devicePage, devicesPage, findHandheld, wantCounts } from "./devices";
-import { latestOsTag, latestR36sRelease } from "./os-release";
+import { devicePage, devicesPage, findHandheld, portProgress, wantCounts } from "./devices";
+import { availableR36sRelease, latestOsTag } from "./os-release";
 import { explorePage } from "./explore";
 import { gizletPage } from "./gizlet-page";
 import { MAX_THEMES, patternHref, patternRule, THEME_FILE, THEME_VERSION, themeCss, themeHref } from "./theme";
 import { homePage } from "./home";
 import { mark } from "./mark";
+import { icon } from "./icons";
 import { DEFAULT_LOCALE, LOCALE_NAMES, LOCALES, localized, matchLocale, MESSAGES, requestLocale, rich, scriptMessages, type Locale, type Messages } from "./i18n";
 import { ensureGizlet } from "./registry";
 import { currentLink, LINK_MAX, LINK_MIN, resolveLink, shortLinkIn } from "./links";
@@ -49,15 +50,11 @@ function langHref(c: C, lang: Locale): string {
 const navLink = (c: C, path: string, text: string) =>
   html`<a href="${path}"${c.req.path === path || (path !== "/" && c.req.path.startsWith(`${path}/`)) ? raw(' aria-current="page"') : ""}>${text}</a>`;
 
-const globe = raw(
-  '<svg class="globe" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>',
-);
-
 /** The language switcher in the header: a disclosure that opens a list of this page in each language. */
 function langMenu(c: C) {
   const lang = langOf(c);
   const t = MESSAGES[lang];
-  return html`<details class="langs"><summary title="${t.nav.language}">${globe}<span class="visually-hidden">${t.nav.language}: </span><span class="lang-now">${LOCALE_NAMES[lang]}</span></summary><ul>${LOCALES.map((l) => html`<li><a href="${langHref(c, l)}" hreflang="${l}" lang="${l}"${l === lang ? raw(' aria-current="true"') : ""}>${LOCALE_NAMES[l]}</a></li>`)}</ul></details>`;
+  return html`<details class="langs"><summary title="${t.nav.language}">${icon("globe")}<span class="visually-hidden">${t.nav.language}: </span><span class="lang-now">${LOCALE_NAMES[lang]}</span>${icon("caret-down")}</summary><ul>${LOCALES.map((l) => html`<li><a href="${langHref(c, l)}" hreflang="${l}" lang="${l}"${l === lang ? raw(' aria-current="true"') : ""}>${LOCALE_NAMES[l]}${l === lang ? icon("check") : ""}</a></li>`)}</ul></details>`;
 }
 
 interface PageOptions {
@@ -86,6 +83,7 @@ function page(c: C, title: string, body: HtmlEscapedString | Promise<HtmlEscaped
 ${lang === "en" ? raw('<link rel="preload" href="/static/fonts/schibsted-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin>') : ""}
 ${LOCALES.map((l) => html`<link rel="alternate" hreflang="${l}" href="${here}?lang=${l}">\n`)}<link rel="alternate" hreflang="x-default" href="${here}">
 <link rel="stylesheet" href="/static/site.css">
+<link rel="preload" href="/static/fonts/phosphor-fill.woff2" as="font" type="font/woff2" crossorigin>
 ${styles.map((s) => html`<link rel="stylesheet" href="${s}">\n`)}${script ? html`${scriptMessages(t)}\n${raw(`<script type="module" src="/static/${script}"></script>`)}` : ""}
 </head>
 <body${wide ? raw(' class="home"') : ""}>
@@ -137,18 +135,21 @@ site.get("/explore", async (c) =>
 site.get("/devices", (c) => c.redirect(`/install${new URL(c.req.url).search}`, 301));
 site.get("/devices/:id", (c) => c.redirect(`/install/${encodeURIComponent(c.req.param("id"))}`, 301));
 
+const installRelease = (c: C) => availableR36sRelease(c.env.BUCKET, c.env.DL_ORIGIN);
+
 site.get("/install", async (c) => {
-  const body = devicesPage(langOf(c), { q: c.req.query("q"), status: c.req.query("status") }, await wantCounts(c.env));
+  const fragment = c.req.query("fragment") === "handhelds";
+  const query = { q: c.req.query("q"), status: c.req.query("status"), page: c.req.query("page"), fragment };
+  const [wants, ports] = await Promise.all([wantCounts(c.env), portProgress(c.env)]);
+  const body = await devicesPage(langOf(c), query, wants, ports, () => installRelease(c));
+  if (fragment) return c.html(body, 200, { "cache-control": "no-store" });
   return c.html(page(c, `${tr(c).devices.title} · Gizlet`, body, { wide: true, script: "devices.js" }));
 });
 
 site.get("/install/:id", async (c) => {
   const handheld = findHandheld(c.req.param("id"));
   if (handheld?.status !== "supported") return c.notFound();
-  const release = await latestR36sRelease(c.env.BUCKET, c.env.DL_ORIGIN).catch((error: unknown) => {
-    console.error("Could not load the R36S release", error);
-    return null;
-  });
+  const release = await installRelease(c);
   const d = devicePage(langOf(c), handheld.id, release);
   if (!d) return c.notFound();
   return c.html(page(c, `${d.name} · ${tr(c).devices.title} · Gizlet`, d.body, { wide: true, script: "devices.js" }));

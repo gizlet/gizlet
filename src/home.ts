@@ -9,6 +9,7 @@ import { bootScreen, handheld } from "./devices";
 import type { Env } from "./env";
 import { patternClasses, patternLink, themeClass, themeLink } from "./theme";
 import { heroTitle, localized, MESSAGES, rich, type Locale, type Messages } from "./i18n";
+import { icon } from "./icons";
 
 /** Where share pages live. */
 export const STORE_HOST = "store.gizlet.io";
@@ -80,7 +81,7 @@ export async function homePage(env: Env, lang: Locale, badUrl?: string) {
         </div>
         ${badUrl !== undefined ? html`<p class="error" role="alert">${t.home.openError(badUrl.slice(0, 200))}</p>` : ""}
       </form>
-      <div class="btns"><a class="btn sun" href="/explore">${t.home.browse}</a><a class="btn ghost" href="#make">${t.home.make}</a></div>
+      <div class="btns"><a class="btn sun" href="/explore">${t.home.browse}${icon("play")}</a><a class="btn ghost" href="#make">${t.home.make}</a></div>
     </div>
     <div class="rig">
       ${star
@@ -108,14 +109,14 @@ ${ticker(t)}
   <div class="row-head"><h2>${t.home.howTitle}</h2></div>
   <ol class="scenes">
     <li>
-      <div class="scene scene-chat"><div class="chat"><p class="you">${t.home.prompt}</p><p class="agent"><span>✓</span> gizlet skill<br><span>✓</span> snake/ ← gizlet/template<br><span>✓</span> linux-arm64 · linux-x64<br><span>✓</span> macos · windows</p></div></div>
+      <div class="scene scene-chat"><div class="chat"><p class="you">${t.home.prompt}</p><p class="agent">${icon("check")} gizlet skill<br>${icon("check")} snake/ ${icon("arrow-left")} gizlet/template<br>${icon("check")} linux-arm64 · linux-x64<br>${icon("check")} macos · windows</p></div></div>
       <div class="step"><span class="num">1</span><div><h3>${t.home.steps[0]!.title}</h3><p>${rich(t.home.steps[0]!.text(STORE_HOST))}</p></div></div>
     </li>
     <li>
       <div class="scene scene-term"><pre class="term"><span class="p">$</span> git tag v1.0.0
 <span class="p">$</span> git push --tags
-<span class="ok">✓</span> release v1.0.0
-<span class="ok">✓</span> ${STORE_HOST}</pre></div>
+<span class="ok">${icon("check")}</span> release v1.0.0
+<span class="ok">${icon("check")}</span> ${STORE_HOST}</pre></div>
       <div class="step"><span class="num">2</span><div><h3>${t.home.steps[1]!.title}</h3><p>${rich(t.home.steps[1]!.text(STORE_HOST))}</p></div></div>
     </li>
     <li>
@@ -135,11 +136,11 @@ ${ticker(t)}
     </div>
     <figure class="tree">
       <figcaption>${t.home.treeCaption}</figcaption>
-      <pre class="code"><code><b>snake/</b>
-├── .github/workflows/release.yml  <span class="c"># ${t.home.tree.workflow}</span>
-├── gizlet.toml                    <span class="c"># ${t.home.tree.index}</span>
-├── store/icon.png                 <span class="c"># ${t.home.tree.icon}</span>
-└── src/                           <span class="c"># ${t.home.tree.source}</span></code></pre>
+      <pre class="code"><code><b>${icon("folder")} snake/</b>
+  ${icon("file")} .github/workflows/release.yml  <span class="c"># ${t.home.tree.workflow}</span>
+  ${icon("file")} gizlet.toml                    <span class="c"># ${t.home.tree.index}</span>
+  ${icon("file")} store/icon.png                 <span class="c"># ${t.home.tree.icon}</span>
+  ${icon("folder")} src/                           <span class="c"># ${t.home.tree.source}</span></code></pre>
     </figure>
   </div>
 </section>
