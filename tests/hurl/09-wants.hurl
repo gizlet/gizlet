@@ -175,8 +175,8 @@ jsonpath "$.total" == 14
 GET {{base}}/api/v1/handhelds?status=catalog
 HTTP 200
 [Asserts]
-jsonpath "$.total" == 604
-jsonpath "$.pages" == 16
+jsonpath "$.total" == 596
+jsonpath "$.pages" == 15
 jsonpath "$.handhelds[0].id" == "batlexp-g350"
 jsonpath "$.handhelds[0].wants" == 1
 jsonpath "$.handhelds[*].id" not contains "k36"

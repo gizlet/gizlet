@@ -261,7 +261,15 @@ HTTP 200
 [Asserts]
 xpath "count(//li[@data-search])" == 40
 xpath "count(//li[@class='is-released'])" == 0
-xpath "string(//nav[@class='catalog-pages']/span)" == "Page 2 of 16"
+xpath "string(//nav[@class='catalog-pages']/span)" == "Page 2 of 15"
+
+GET {{base}}/install?status=unpicked&q=SF2000&lang=en
+HTTP 200
+[Asserts]
+xpath "count(//li[@data-search])" == 1
+xpath "count(//li[@data-search]//a[@href='https://handhelds.wiki/SF2000'])" == 1
+xpath "count(//li[@data-search]//a[@href='https://handhelds.space/handhelds/data-frog-sf2000'])" == 1
+xpath "string(//li[@data-search]//button/@data-device)" == "data-frog-sf2000"
 
 GET {{base}}/install?status=catalog&q=BATLEXP+G350&lang=zh-CN
 HTTP 200
