@@ -224,19 +224,56 @@ xpath "string(//h1)" == "Hello Gizlet"
 GET {{base}}/install?lang=en
 HTTP 200
 [Asserts]
-xpath "count(//table[@class='hh-table']//tr[@data-search])" > 10
+xpath "count(//ul[@class='hh-list']/li[@data-search])" == 1
 xpath "string(//a[@href='/install/r36s'])" contains "R36S"
+xpath "count(//button[@class='want' and @data-device])" == 0
+xpath "string(//li[@class='is-released']//a[contains(@href,'.img.gz')]/@href)" == "https://gizlet.io/assets/releases/v0.2.10/boards/gameconsole/r36s/gizlet-os-r36s.img.gz"
+xpath "count(//div[@id='handheld-results']//table)" == 0
+xpath "count(//section[@class='catalog-credits']//li)" == 4
+xpath "string(//section[@id='handhelds']//nav[@class='tabs']/a[1])" == "Released"
+xpath "string(//section[@id='handhelds']//nav[@class='tabs']/a[1]/@aria-current)" == "page"
+xpath "string(//section[@id='handhelds']//nav[@class='tabs']/a[2])" == "Developing"
+xpath "string(//section[@id='handhelds']//nav[@class='tabs']/a[3])" == "Voting"
+xpath "string(//section[@id='handhelds']//nav[@class='tabs']/a[4])" == "Unpicked"
 body contains "/static/devices.js"
 
-GET {{base}}/install?q=rg351&lang=en
+GET {{base}}/install?status=all&q=rg351&lang=en
 HTTP 200
 [Asserts]
-xpath "count(//tr[@data-search and not(@hidden)])" == 3
+xpath "count(//li[@data-search and not(@hidden)])" == 3
+xpath "count(//button[@class='want' and @data-device])" == 14
 
 GET {{base}}/install?status=supported&lang=en
 HTTP 200
 [Asserts]
-xpath "count(//tr[@data-search])" == 1
+xpath "count(//li[@data-search])" == 1
+
+GET {{base}}/install?status=catalog&lang=en
+HTTP 200
+[Asserts]
+xpath "count(//li[@data-search])" == 40
+xpath "count(//li[@class='is-released'])" == 0
+xpath "count(//button[@class='want' and @data-device])" == 40
+xpath "string(//nav[@class='catalog-pages']/a[@rel='next']/@href)" == "/install?status=unpicked&page=2#handhelds"
+
+GET {{base}}/install?status=catalog&page=2&lang=en
+HTTP 200
+[Asserts]
+xpath "count(//li[@data-search])" == 40
+xpath "count(//li[@class='is-released'])" == 0
+xpath "string(//nav[@class='catalog-pages']/span)" == "Page 2 of 16"
+
+GET {{base}}/install?status=catalog&q=BATLEXP+G350&lang=zh-CN
+HTTP 200
+[Asserts]
+xpath "count(//li[@data-search])" == 1
+xpath "count(//li[@data-search]/div[@class='hh-actions'])" == 1
+body not contains "未公布计划"
+body not contains "待评估"
+xpath "count(//li[@data-search]//a[contains(@href, '.img.gz')])" == 0
+body not contains "暂无镜像"
+xpath "count(//li[@data-search]//a[@href='https://handhelds.wiki/BATLEXP_G350'])" == 1
+xpath "count(//li[@data-search]//button[@data-device='batlexp-g350'])" == 1
 
 GET {{base}}/install/rg351p
 HTTP 404

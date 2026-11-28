@@ -53,3 +53,10 @@ export async function latestR36sRelease(bucket: R2Bucket, origin: string) {
 }
 
 export type R36sRelease = NonNullable<Awaited<ReturnType<typeof latestR36sRelease>>>;
+
+export function availableR36sRelease(bucket: R2Bucket, origin: string) {
+  return latestR36sRelease(bucket, origin).catch((error: unknown) => {
+    console.error("Could not load the R36S release", error);
+    return null;
+  });
+}

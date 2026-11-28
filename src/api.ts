@@ -3,11 +3,12 @@ import { cors } from "hono/cors";
 import { githubAccount, myDevices, myGizlets, myWants, signInMethods, signOutDevice, type AccountUser } from "./account";
 import { createAuth, devGithubUrl, devOutbox, siteDomains } from "./auth";
 import { featured, getGizlet, gizletDetail, LIST_SORTS, listGizlets, listReleases, packageJson, pickInstall, releaseJson, summary, VISIBILITIES, type GizletRow, type ListSort, type PackageRow, type ReleaseRow } from "./db";
-import { findHandheld, HANDHELDS, handheldJson, wantCounts, type Handheld } from "./devices";
+import { deviceView, findCatalogHandheld, findHandheld, handheldImage, handheldJson, listHandhelds, portProgress, wantCounts } from "./devices";
 import type { Env } from "./env";
 import { appCanManage, canManage, githubUser, NotFound, repositoryIdAt, reader, UpstreamError, UserTokenRejected } from "./github";
 import { adoptRepositoryId, claimLink, getLink, LINK_MAX, LINK_MIN, linkProblem, minLengthOf, normalizeLinkId, releaseLink, resolveLink, shortLinkIn, shortUrl, type LinkProblem } from "./links";
 import { reportInfected } from "./mirror";
+import { availableR36sRelease } from "./os-release";
 import { AuthError, verifyActionsToken } from "./oidc";
 import { latestOsRelease } from "./os-release";
 import { ensureGizlet, indexRelease, pickInstallRecovering, setVisibility } from "./registry";
@@ -107,7 +108,7 @@ api.get("/api/v1", (c) =>
       "POST /api/v1/updates",
       "GET /api/v1/resolve?url=",
       "GET /api/v1/links/{id}",
-      "GET /api/v1/handhelds?status=",
+      "GET /api/v1/handhelds?status=&q=&page=",
       "GET /api/v1/os/releases/latest",
       "POST /api/v1/publish",
       "/api/v1/auth/* (Better Auth: sign-up/email, sign-in/email, sign-in/social, device/code, device/token, ...)",
@@ -347,12 +348,31 @@ api.get("/api/v1/resolve", async (c) => {
   });
 });
 
-/** Every handheld we know of, supported or not, with how many accounts want it. */
 api.get("/api/v1/handhelds", async (c) => {
-  const status = c.req.query("status");
-  if (status !== undefined && status !== "supported" && status !== "wanted") return apiError(c, 400, "bad_request", "status must be supported or wanted");
-  const counts = await wantCounts(c.env);
-  return c.json({ handhelds: HANDHELDS.filter((h) => !status || h.status === status).map((h) => handheldJson(h, counts.get(h.id) ?? 0)) });
+  const requested = c.req.query("status");
+  const view = deviceView(requested);
+  if (requested !== undefined && !view) return apiError(c, 400, "bad_request", "status must be released, developing, voting or unpicked");
+  const [counts, ports] = await Promise.all([wantCounts(c.env), portProgress(c.env)]);
+  const listing = listHandhelds(view ?? "tracked", { q: c.req.query("q"), page: c.req.query("page") }, counts, ports);
+  const release = listing.rows.some((entry) => entry.id === "r36s") ? await availableR36sRelease(c.env.BUCKET, c.env.DL_ORIGIN) : null;
+  const handhelds = listing.rows.flatMap((entry) => {
+    const download_url = handheldImage(entry, release);
+    if (view === "released" && !download_url) return [];
+    const handheld = handheldJson(entry, counts.get(entry.id) ?? 0, ports);
+    return [{
+      ...handheld,
+      progress: handheld.status,
+      estimated_release_date: handheld.status === "developing" ? ports.get(entry.id)?.estimated_release_date ?? null : null,
+      can_vote: handheld.status !== "released",
+      download_url,
+    }];
+  });
+  return c.json({
+    handhelds,
+    page: listing.page,
+    pages: listing.pages,
+    total: view === "released" ? handhelds.length : listing.total,
+  });
 });
 
 api.post("/api/v1/publish", async (c) => {
@@ -640,29 +660,30 @@ api.get("/api/v1/me/wants", (c) => signedIn(c, async (u) => c.json({ wants: awai
 
 const WANT = "/api/v1/me/wants/:handheld";
 
-async function wantState(c: C, h: Handheld, wanted: boolean) {
-  const row = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM wants WHERE handheld = ?").bind(h.id).first<{ n: number }>();
-  return c.json({ handheld: h.id, wanted, wants: row?.n ?? 0 }, 200, { "cache-control": "no-store" });
+async function wantState(c: C, id: string, wanted: boolean) {
+  const row = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM wants WHERE handheld = ?").bind(id).first<{ n: number }>();
+  return c.json({ handheld: id, wanted, wants: row?.n ?? 0 }, 200, { "cache-control": "no-store" });
 }
 
 /** Want a handheld that is not supported yet. Wanting it again changes nothing. */
 api.put(WANT, (c) =>
   signedIn(c, async (u) => {
-    const h = findHandheld(c.req.param("handheld"));
-    if (!h) return apiError(c, 404, "not_found", `no handheld ${c.req.param("handheld")}; see GET /api/v1/handhelds`);
-    if (h.status === "supported") return apiError(c, 409, "supported", `${h.name} is supported already: ${c.env.SITE_ORIGIN}/install/${h.id}`);
-    await c.env.DB.prepare("INSERT INTO wants (handheld, user_id, created_at) VALUES (?, ?, ?) ON CONFLICT (handheld, user_id) DO NOTHING").bind(h.id, u.id, Date.now()).run();
-    return wantState(c, h, true);
+    const id = c.req.param("handheld");
+    const entry = findCatalogHandheld(id);
+    if (!entry) return apiError(c, 404, "not_found", `no handheld ${id}; see GET /api/v1/handhelds?status=unpicked`);
+    if (findHandheld(id)?.status === "supported") return apiError(c, 409, "supported", `${entry.name} is supported already: ${c.env.SITE_ORIGIN}/install/${id}`);
+    await c.env.DB.prepare("INSERT INTO wants (handheld, user_id, created_at) VALUES (?, ?, ?) ON CONFLICT (handheld, user_id) DO NOTHING").bind(id, u.id, Date.now()).run();
+    return wantState(c, id, true);
   }),
 );
 
 /** Take a want back, also once the handheld is supported. */
 api.delete(WANT, (c) =>
   signedIn(c, async (u) => {
-    const h = findHandheld(c.req.param("handheld"));
-    if (!h) return apiError(c, 404, "not_found", `no handheld ${c.req.param("handheld")}; see GET /api/v1/handhelds`);
-    await c.env.DB.prepare("DELETE FROM wants WHERE handheld = ? AND user_id = ?").bind(h.id, u.id).run();
-    return wantState(c, h, false);
+    const id = c.req.param("handheld");
+    if (!findCatalogHandheld(id)) return apiError(c, 404, "not_found", `no handheld ${id}; see GET /api/v1/handhelds?status=unpicked`);
+    await c.env.DB.prepare("DELETE FROM wants WHERE handheld = ? AND user_id = ?").bind(id, u.id).run();
+    return wantState(c, id, false);
   }),
 );
 
@@ -679,6 +700,36 @@ async function timingSafeEqual(a: string, b: string): Promise<boolean> {
   const enc = new TextEncoder();
   const [x, y] = await Promise.all([crypto.subtle.digest("SHA-256", enc.encode(a)), crypto.subtle.digest("SHA-256", enc.encode(b))]);
   return crypto.subtle.timingSafeEqual(x, y);
+}
+
+api.put("/api/v1/admin/handhelds/:handheld/port", async (c) => {
+  const id = c.req.param("handheld");
+  const device = findCatalogHandheld(id);
+  if (!device) return apiError(c, 404, "not_found", "handheld is not in the catalog");
+  if (findHandheld(id)?.status === "supported") return apiError(c, 409, "supported", `${device.name} is supported already`);
+  const body = await c.req.json<{ progress?: unknown; estimated_release_date?: unknown }>().catch(() => null);
+  const progress = body?.progress;
+  const estimate = body?.estimated_release_date;
+  if (estimate !== undefined && estimate !== null && !isCalendarDate(estimate)) {
+    return apiError(c, 400, "bad_request", "estimated_release_date must be a date in YYYY-MM-DD format or null");
+  }
+  if (progress !== "developing" && progress !== "voting" && progress !== "unpicked") {
+    return apiError(c, 400, "bad_request", "progress must be developing, voting or unpicked");
+  }
+  if (progress !== "developing" && estimate) {
+    return apiError(c, 400, "bad_request", "only a developing handheld can have an estimated release date");
+  }
+  const port = await c.env.DB.prepare(`INSERT INTO handheld_ports (handheld, progress, estimated_release_date) VALUES (?, ?, ?)
+    ON CONFLICT (handheld) DO UPDATE SET progress = excluded.progress,
+      estimated_release_date = CASE WHEN ? THEN excluded.estimated_release_date ELSE handheld_ports.estimated_release_date END
+    RETURNING estimated_release_date`).bind(id, progress, estimate ?? null, progress !== "developing" || estimate !== undefined ? 1 : 0).first<{ estimated_release_date: string | null }>();
+  return c.json({ handheld: id, progress, estimated_release_date: port?.estimated_release_date ?? null });
+});
+
+function isCalendarDate(value: unknown): value is string {
+  if (typeof value !== "string" || !/^[1-9]\d{3}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
 /** Body: {"visibility": "listed" | "unlisted" | "blocked" | "auto", "reason"?: string}. */

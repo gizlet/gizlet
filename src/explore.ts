@@ -7,6 +7,7 @@ import { listGizlets, summary } from "./db";
 import type { Env } from "./env";
 import { cart } from "./home";
 import { MESSAGES, type Locale } from "./i18n";
+import { icon } from "./icons";
 import { CATEGORIES, KINDS, type Category, type Kind } from "./schema";
 import { patternLink, themeLink } from "./theme";
 
@@ -41,7 +42,7 @@ export async function explorePage(env: Env, lang: Locale, query: { q?: string; k
     <form class="search" action="/explore" method="get" role="search">
       <label for="q" class="visually-hidden">${e.label}</label>
       <div class="addr">
-        <span class="glass" aria-hidden="true"></span>
+        ${icon("magnifying-glass")}
         <input id="q" name="q" type="search" value="${q ?? ""}" placeholder="${e.placeholder}" autocomplete="off">
         ${hidden("kind", kind)}${hidden("category", category)}
         <button type="submit">${e.search}</button>

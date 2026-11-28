@@ -7,11 +7,12 @@
 import { html, raw } from "hono/html";
 import type { Pool } from "pg";
 import { summary, type GizletRow } from "./db";
-import { findHandheld, handheld, handheldJson } from "./devices";
+import { findCatalogHandheld, handheld, handheldJson, portProgress } from "./devices";
 import type { Env } from "./env";
 import { UpstreamError, UserTokenRejected, userOrgs, userRepos } from "./github";
 import { art, shell } from "./home";
 import { localized, MESSAGES, rich, type Locale } from "./i18n";
+import { icon } from "./icons";
 import { currentLinks, minLengthOf, shortUrl } from "./links";
 import { patternClasses, patternHref, themeHref } from "./theme";
 
@@ -50,14 +51,14 @@ export async function signInMethods(pool: Pool, userId: string): Promise<{ id: s
 
 /** The handhelds the user wants, newest first, with how many people want each. */
 export async function myWants(env: Env, userId: string) {
-  const { results } = await env.DB.prepare(
+  const [{ results }, ports] = await Promise.all([env.DB.prepare(
     "SELECT w.handheld, w.created_at, (SELECT COUNT(*) FROM wants x WHERE x.handheld = w.handheld) AS n FROM wants w WHERE w.user_id = ? ORDER BY w.created_at DESC",
   )
     .bind(userId)
-    .all<{ handheld: string; created_at: number; n: number }>();
+    .all<{ handheld: string; created_at: number; n: number }>(), portProgress(env)]);
   return results.flatMap((w) => {
-    const h = findHandheld(w.handheld);
-    return h ? [{ ...handheldJson(h, w.n), wanted_at: new Date(w.created_at).toISOString() }] : [];
+    const h = findCatalogHandheld(w.handheld);
+    return h ? [{ ...handheldJson(h, w.n, ports), wanted_at: new Date(w.created_at).toISOString() }] : [];
   });
 }
 
@@ -196,7 +197,7 @@ export function accountPage(env: Env, lang: Locale, d: AccountData, githubEnable
   </section>
   <section class="acct-card">
     <h2>${t.email}</h2>
-    <p class="acct-email"><b>${user.email}</b>${user.emailVerified ? html` <span class="pill ok">${t.confirmed}</span>` : ""}</p>
+    <p class="acct-email"><b>${user.email}</b>${user.emailVerified ? html` <span class="pill ok">${icon("circle")}${t.confirmed}</span>` : ""}</p>
     <form id="email-form" class="acct-form">
       <label>${t.newEmail} <input name="email" type="email" autocomplete="email" required></label>
       <button type="submit" class="secondary">${t.sendLink}</button>
@@ -207,13 +208,13 @@ export function accountPage(env: Env, lang: Locale, d: AccountData, githubEnable
 
   const handhelds = html`<div class="acct-head"><h2>${t.wants}</h2><p>${t.wantsText}</p></div>
 <ul class="want-cards" id="wants"${d.wants.length ? "" : raw(" hidden")}>${d.wants.map((h, i) => {
-    const supported = h.status === "supported";
+    const supported = h.status === "released";
     return html`<li class="want-card">
   <div class="want-art">${handheld(html`<span class="hh-label">${h.name}</span>`, BODIES[i % BODIES.length], "tiny")}</div>
   <div class="want-txt">
     <h3>${h.name}</h3>
-    <p>${h.maker} · ${h.soc}</p>
-    <span class="pill ${supported ? "ok" : "wait"}">${supported ? t.supported : t.wantCount(h.wants)}</span>
+    ${h.maker || h.soc ? html`<p>${[h.maker, h.soc].filter(Boolean).join(" · ")}</p>` : ""}
+    <span class="pill ${supported ? "ok" : "wait"}">${icon("circle")}${supported ? t.supported : t.wantCount(h.wants)}</span>
   </div>
   <div class="want-acts">
     ${supported ? html`<a class="btn small sun" href="/install/${h.id}">${t.flash}</a>` : ""}
@@ -221,11 +222,11 @@ export function accountPage(env: Env, lang: Locale, d: AccountData, githubEnable
   </div>
 </li>`;
   })}</ul>
-<div class="empty" id="no-wants"${d.wants.length ? raw(" hidden") : ""}><div class="ghost-hh" aria-hidden="true"></div><p>${t.noWants}</p><a class="btn" href="/install#handhelds">${t.findHandhelds}</a></div>
+<div class="empty" id="no-wants"${d.wants.length ? raw(" hidden") : ""}>${icon("game-controller")}<p>${t.noWants}</p><a class="btn" href="/install?status=all#handhelds">${t.findHandhelds}</a></div>
 <div class="acct-head"><h2>${t.devices}</h2><p>${t.devicesText}</p></div>
 <ul class="device-list" id="devices"${d.devices.length ? "" : raw(" hidden")}>${d.devices.map((s) => {
     const name = t.deviceNames[s.client_id] ?? s.client_id;
-    return html`<li><span class="mini" aria-hidden="true"></span><div><b>${name}</b><small>${t.deviceTimes(day(s.signed_in_at), day(s.last_active_at))}</small></div><button type="button" class="secondary small signout-device" data-session="${s.id}" data-name="${name}">${t.signOutDevice}</button></li>`;
+  return html`<li>${icon("game-controller")}<div><b>${name}</b><small>${t.deviceTimes(day(s.signed_in_at), day(s.last_active_at))}</small></div><button type="button" class="secondary small signout-device" data-session="${s.id}" data-name="${name}">${t.signOutDevice}</button></li>`;
   })}</ul>
 <p class="acct-note" id="no-devices"${d.devices.length ? raw(" hidden") : ""}>${rich(t.noDevices)}</p>`;
 
@@ -242,7 +243,7 @@ export function accountPage(env: Env, lang: Locale, d: AccountData, githubEnable
   <span class="name">${nameOf(g)}</span>
   <span class="repo">${g.repo.replace(/^github\.com\//, "")}</span>
   <span class="meta">${g.version ? html`<span>v${g.version}</span>` : ""}<span>${t.visibility[g.visibility] ?? g.visibility}</span></span>
-  <span class="check check-${g.checks}"${g.release?.error ? html` title="${g.release.error}"` : ""}>${t.status[g.checks]}</span>
+  <span class="check check-${g.checks}"${g.release?.error ? html` title="${g.release.error}"` : ""}>${icon("circle")}${t.status[g.checks]}</span>
 </a>`;
 
   const gizlets = mine.github_login
@@ -272,7 +273,7 @@ ${mine.gizlets.length ? html`<div class="carts">${mine.gizlets.map(cartOf)}</div
   const linkable = mine.gizlets.filter((g) => g.visibility !== "blocked" && g.tag);
   const links = html`<div class="acct-head"><h2>${t.links}</h2><p>${t.linksText(host, mine.link_min_length)}</p><p class="note">${t.linksHold}</p></div>
 ${!mine.github_login
-  ? html`<p class="acct-note">${t.linksGithub} <a href="#gizlets">${t.tabs.gizlets} →</a></p>`
+  ? html`<p class="acct-note">${t.linksGithub} <a href="#gizlets">${t.tabs.gizlets} ${icon("arrow-right")}</a></p>`
   : linkable.length
     ? html`<ul class="link-rows">${linkable.map(linkRow)}</ul>`
     : html`<p class="acct-note">${t.linksEmpty}</p>`}`;
@@ -291,8 +292,8 @@ ${!mine.github_login
   <section class="acct-card">
     <h2>${t.methods}</h2>
     <ul class="methods">
-      ${hasPassword ? html`<li><span class="method-icon mail" aria-hidden="true"></span><div><b>${t.methodEmail}</b><small>${user.email}</small></div></li>` : ""}
-      <li><span class="method-icon gh" aria-hidden="true"></span><div><b>GitHub</b><small>${mine.github_login ? `@${mine.github_login}` : "—"}</small></div>
+      ${hasPassword ? html`<li><span class="method-icon mail">${icon("envelope-simple")}</span><div><b>${t.methodEmail}</b><small>${user.email}</small></div></li>` : ""}
+      <li><span class="method-icon gh">${icon("github-logo")}</span><div><b>GitHub</b><small>${mine.github_login ? `@${mine.github_login}` : "—"}</small></div>
         ${github ? html`<button type="button" class="secondary small" id="unlink-github" data-account="${github.id}">${t.unlinkGithub}</button>` : githubEnabled ? html`<button type="button" class="small link-github">${t.linkGithub}</button>` : ""}</li>
     </ul>
     ${github ? html`<p class="note">${t.unlinkText}</p>` : ""}

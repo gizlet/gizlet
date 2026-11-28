@@ -2,21 +2,21 @@
 import { fmt, t } from "./auth.js";
 
 const input = document.querySelector("#device-q");
-const table = document.querySelector(".hh-table");
-if (input && table) {
-  const rows = [...table.querySelectorAll("tbody tr[data-search]")];
-  const none = table.querySelector("tr.none");
-  input.addEventListener("input", () => {
-    const q = input.value.trim().toLowerCase();
-    let shown = 0;
-    for (const r of rows) {
-      const ok = !q || r.dataset.search.includes(q);
-      r.hidden = !ok;
-      if (ok) shown++;
-    }
-    if (none) none.hidden = shown > 0;
-  });
+const results = document.querySelector("#handheld-results");
+
+function filterHandhelds() {
+  const list = results?.querySelector(".hh-list[data-live-search]");
+  if (!input || !list) return;
+  const query = input.value.trim().toLowerCase();
+  const none = results.querySelector(".hh-empty");
+  let shown = false;
+  for (const row of list.querySelectorAll("li[data-search]")) {
+    row.hidden = !row.dataset.search.includes(query);
+    shown ||= !row.hidden;
+  }
+  if (none) none.hidden = shown;
 }
+input?.addEventListener("input", filterHandhelds);
 
 // The want a sign-in from the dialog is for. localStorage, since the email link of a sign-up opens in
 // another tab; kept as long as that link works.
@@ -45,12 +45,15 @@ function takePendingWant(id) {
 // "I want it" on a handheld we do not support yet: a want on the signed-in account (/api/v1/me/wants).
 // Signed out, a dialog offers to sign in; that comes back here with ?want=<id>, which records the want
 // only if this browser started that sign-in from the dialog, so a link alone never records one.
-const wantButtons = [...document.querySelectorAll("button.want[data-device]")];
-if (wantButtons.length) setUpWants(wantButtons);
+const wantDialog = document.querySelector("#want-signin");
+if (results && wantDialog) setUpWants(results, wantDialog);
 
-function setUpWants(buttons) {
+function setUpWants(results, dialog) {
   const say = (text) => (document.querySelector("#want-message").textContent = text);
-  const dialog = document.querySelector("#want-signin");
+  const numbers = new Intl.NumberFormat(document.documentElement.lang);
+  const votes = new Set();
+  const submitting = new Set();
+  const buttonFor = (id) => results.querySelector(`button.want[data-device="${CSS.escape(id)}"]`);
   const params = new URLSearchParams(location.search);
   const asked = params.get("want");
   const pending = asked !== null && takePendingWant(asked) ? asked : null;
@@ -58,14 +61,60 @@ function setUpWants(buttons) {
     params.delete("want");
     history.replaceState(history.state, "", `${location.pathname}${params.size ? `?${params}` : ""}${location.hash}`);
   }
-  const show = (b, wanted, count) => {
-    b.setAttribute("aria-pressed", String(wanted));
-    if (count !== undefined) b.previousElementSibling.textContent = count ? fmt(count === 1 ? t.wants.one : t.wants.other, { n: count }) : "";
+  const pressed = () => {
+    for (const button of results.querySelectorAll("button.want[data-device]")) {
+      button.setAttribute("aria-pressed", String(votes.has(button.dataset.device)));
+    }
   };
-  // The ids the user wants; null when signed out, undefined when they could not be loaded.
-  const mine = fetch("/api/v1/me/wants", { credentials: "same-origin", cache: "no-store" })
-    .then(async (res) => (res.ok ? new Set((await res.json()).wants.map((w) => w.id)) : res.status === 401 ? null : undefined))
-    .catch(() => undefined);
+  function loadMyVotes() {
+    return fetch("/api/v1/me/wants", { credentials: "same-origin", cache: "no-store" }).then(async (response) => {
+      if (!response.ok && response.status !== 401) return "unavailable";
+      const personal = response.ok ? (await response.json()).wants : [];
+      votes.clear();
+      for (const vote of personal) votes.add(vote.id);
+      pressed();
+      return response.ok ? "signedIn" : "signedOut";
+    }).catch(() => "unavailable");
+  }
+  let mine = loadMyVotes();
+
+  let snapshot = results.innerHTML;
+  let refreshRequest;
+  async function refresh() {
+    if (document.hidden || submitting.size || refreshRequest) return;
+    const request = new AbortController();
+    refreshRequest = request;
+    const url = new URL(location.href);
+    url.searchParams.set("fragment", "handhelds");
+    url.searchParams.set("lang", document.documentElement.lang);
+    try {
+      const response = await fetch(url, { cache: "no-store", signal: request.signal });
+      if (!response.ok) return;
+      const documentFragment = new DOMParser().parseFromString(await response.text(), "text/html");
+      const next = documentFragment.querySelector("#handheld-results");
+      if (request.signal.aborted || !next || next.innerHTML === snapshot) return;
+      const focused = document.activeElement?.closest("button.want")?.dataset.device;
+      snapshot = next.innerHTML;
+      results.replaceChildren(...next.childNodes);
+      filterHandhelds();
+      pressed();
+      if (focused) buttonFor(focused)?.focus({ preventScroll: true });
+    } catch {
+      return;
+    } finally {
+      if (refreshRequest === request) refreshRequest = undefined;
+    }
+  }
+  setInterval(refresh, 5000);
+  const resume = () => {
+    if (document.hidden) return;
+    if (!submitting.size) mine = loadMyVotes();
+    refresh();
+  };
+  document.addEventListener("visibilitychange", resume);
+  addEventListener("pageshow", (event) => {
+    if (event.persisted) resume();
+  });
 
   const askToSignIn = (b) => {
     const back = new URLSearchParams(location.search);
@@ -80,33 +129,47 @@ function setUpWants(buttons) {
     if (e.target === dialog) dialog.close();
   });
 
-  const want = async (b, wanted) => {
-    b.disabled = true;
+  const want = async (id, wanted, button) => {
+    if (submitting.has(id)) return;
+    submitting.add(id);
+    refreshRequest?.abort();
+    refreshRequest = undefined;
+    if (button) button.disabled = true;
     say("");
     try {
-      const res = await fetch(`/api/v1/me/wants/${encodeURIComponent(b.dataset.device)}`, { method: wanted ? "PUT" : "DELETE", credentials: "same-origin" });
-      if (res.status === 401) return askToSignIn(b);
+      const res = await fetch(`/api/v1/me/wants/${encodeURIComponent(id)}`, { method: wanted ? "PUT" : "DELETE", credentials: "same-origin" });
+      if (res.status === 401 && button) return askToSignIn(button);
       if (!res.ok) return say(fmt(t.requestFailed, { status: res.status }));
-      const data = await res.json();
-      show(b, data.wanted, data.wants);
+      const saved = await res.json();
+      if (saved.wanted) votes.add(id);
+      else votes.delete(id);
+      const current = buttonFor(id);
+      if (current) {
+        const count = numbers.format(saved.wants);
+        const label = fmt(saved.wants === 1 ? t.wants.one : t.wants.other, { n: count });
+        current.querySelector(".want-n").textContent = count;
+        current.setAttribute("aria-label", `${current.dataset.action} · ${current.dataset.name} · ${label}`);
+        current.setAttribute("aria-pressed", String(saved.wanted));
+      }
     } catch {
       say(fmt(t.requestFailed, { status: "?" }));
     } finally {
-      b.disabled = false;
+      submitting.delete(id);
+      if (button) button.disabled = false;
+      refresh();
     }
   };
 
-  for (const b of buttons) {
-    b.addEventListener("click", async () => {
-      if ((await mine) === null) return askToSignIn(b);
-      want(b, b.getAttribute("aria-pressed") !== "true");
-    });
-  }
-  mine.then((ids) => {
-    if (!ids) return;
-    for (const b of buttons) show(b, ids.has(b.dataset.device));
-    const back = pending && buttons.find((b) => b.dataset.device === pending);
-    if (back && !ids.has(pending)) want(back, true);
+  results.addEventListener("click", async (event) => {
+    const button = event.target.closest("button.want[data-device]");
+    if (!button) return;
+    const session = await mine;
+    if (session === "signedOut") return askToSignIn(button);
+    if (session === "unavailable") return say(fmt(t.requestFailed, { status: "?" }));
+    want(button.dataset.device, !votes.has(button.dataset.device), button);
+  });
+  mine.then((session) => {
+    if (session === "signedIn" && pending && !votes.has(pending)) want(pending, true, buttonFor(pending));
   });
 }
 
