@@ -4,8 +4,8 @@ GET {{base}}/api/v1/handhelds
 HTTP 200
 [Asserts]
 jsonpath "$.handhelds" count > 10
-jsonpath "$.handhelds[?(@.id == 'r36s')].status" == "supported"
-jsonpath "$.handhelds[?(@.id == 'r35s')].status" == "wanted"
+jsonpath "$.handhelds[?(@.id == 'r36s')].status" == "released"
+jsonpath "$.handhelds[?(@.id == 'r35s')].status" == "voting"
 jsonpath "$.handhelds[?(@.id == 'r35s')].wants" == 0
 
 GET {{base}}/api/v1/handhelds?status=supported
@@ -13,6 +13,8 @@ HTTP 200
 [Asserts]
 jsonpath "$.handhelds" count == 1
 jsonpath "$.handhelds[0].id" == "r36s"
+jsonpath "$.handhelds[0].can_vote" == false
+jsonpath "$.handhelds[0].download_url" endsWith "gizlet-os-r36s.img.gz"
 
 GET {{base}}/api/v1/handhelds?status=soon
 HTTP 400
@@ -101,18 +103,19 @@ HTTP 200
 jsonpath "$.handhelds[?(@.id == 'r35s')].wants" == 1
 
 # The table shows how many want each handheld, and has the sign-in dialog for signed-out visitors.
-GET {{base}}/install?lang=en
+GET {{base}}/install?status=all&lang=en
 HTTP 200
 [Asserts]
-xpath "string(//button[@data-device='r35s']/preceding-sibling::span[@class='want-n'])" == "1 person wants it"
-xpath "string(//button[@data-device='rg351p']/preceding-sibling::span[@class='want-n'])" == ""
+xpath "string(//button[@data-device='r35s']/span[@class='want-n'])" == "1"
+xpath "string(//button[@data-device='r35s']/@aria-label)" contains "1 person wants it"
+xpath "string(//button[@data-device='rg351p']/span[@class='want-n'])" == "0"
 xpath "string(//button[@data-device='r35s']/@data-name)" == "R35S"
 xpath "count(//dialog[@id='want-signin']//a[starts-with(@href, '/login?next=')])" == 1
 
-GET {{base}}/install?lang=zh-CN
+GET {{base}}/install?status=all&lang=zh-CN
 HTTP 200
 [Asserts]
-xpath "string(//button[@data-device='k36']/preceding-sibling::span[@class='want-n'])" == "1 人想要"
+xpath "string(//button[@data-device='k36']/span[@class='want-n'])" == "1"
 
 # The account page draws each as a card, newest first, with how many want it.
 GET {{base}}/account?lang=en
@@ -149,3 +152,51 @@ HTTP 200
 [Asserts]
 jsonpath "$.wants" count == 1
 jsonpath "$.wants[0].id" == "k36"
+
+PUT {{base}}/api/v1/me/wants/batlexp-g350
+Authorization: Bearer {{wanter}}
+HTTP 200
+[Asserts]
+jsonpath "$.wants" == 1
+
+PUT {{base}}/api/v1/me/wants/batlexp-g350
+Authorization: Bearer {{wanter}}
+HTTP 200
+[Asserts]
+jsonpath "$.wants" == 1
+
+GET {{base}}/api/v1/handhelds?status=all
+HTTP 200
+[Asserts]
+jsonpath "$.handhelds[0].id" == "k36"
+jsonpath "$.handhelds[0].wants" == 1
+jsonpath "$.total" == 14
+
+GET {{base}}/api/v1/handhelds?status=catalog
+HTTP 200
+[Asserts]
+jsonpath "$.total" == 596
+jsonpath "$.pages" == 15
+jsonpath "$.handhelds[0].id" == "batlexp-g350"
+jsonpath "$.handhelds[0].wants" == 1
+jsonpath "$.handhelds[*].id" not contains "k36"
+jsonpath "$.handhelds[*].id" not contains "r36s"
+
+GET {{base}}/install?status=catalog&lang=en
+HTTP 200
+[Asserts]
+xpath "string((//li[@data-search])[1]//button/@data-device)" == "batlexp-g350"
+xpath "count(//button[@data-device='k36'])" == 0
+xpath "string(//button[@data-device='batlexp-g350']/span[@class='want-n'])" == "1"
+
+GET {{base}}/api/v1/me/wants
+Authorization: Bearer {{wanter}}
+HTTP 200
+[Asserts]
+jsonpath "$.wants[0].id" == "batlexp-g350"
+
+DELETE {{base}}/api/v1/me/wants/batlexp-g350
+Authorization: Bearer {{wanter}}
+HTTP 200
+[Asserts]
+jsonpath "$.wants" == 0

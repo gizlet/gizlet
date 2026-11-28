@@ -45,7 +45,7 @@ One Cloudflare Worker serves every host:
 | `GET /api/v1/gizlets/github.com/{owner}/{repo}/install?target=&tier=` | The package to install on a device, with the gizlet's `kind` and GitHub's `repository_id` (`409 not_ready` while checks run) |
 | `POST /api/v1/updates` | Body `{"target", "tier", "installed": [{"repo", "repository_id", "id", "version"}]}` (at most 200; `repository_id` is the one `install` answered): each installed gizlet's `status`, `update` (with the `package`), `current`, `not_found`, `blocked`, `unverified` (no `repository_id`: install it again), `repository_changed`, `no_package` or `id_changed`. Only the GitHub repository a gizlet was installed from updates it, even after another one takes its path, and only with the same `id` |
 | `GET /api/v1/resolve?url=` | Any way of writing a repository, normalized; a short link on the site or a `SITE_DOMAINS` mirror (`gizlet.io/<id>`) resolves to its gizlet's repository, with `short_link` |
-| `GET /api/v1/handhelds?status=` | Every handheld (`status` is `supported` or `wanted`), with `wants`, how many accounts want it |
+| `GET /api/v1/handhelds?status=&q=&page=` | Filters by `released`, `developing`, `voting`, or `unpicked` (40 per page). Each handheld belongs to one status. Old filter URLs still work. With no filter, returns the original tracked list. Results include `status`, its alias `progress`, `wants`, `estimated_release_date`, `can_vote`, and `download_url`. |
 | `POST /api/v1/publish` | `202` with `status_url`; body `{"tag": "v1.2.3"}` or the tag from the token's ref |
 | `/api/v1/auth/*` | Better Auth: `sign-up/email`, `sign-in/email`, `verify-email`, `send-verification-email`, `sign-in/social`, `link-social`, `sign-out`, `device/code`, `device/token`, `device`, `device/approve`, `device/deny`, ... |
 | `GET /api/v1/me` | The signed-in user (with `link_min_length`), sign-in methods and their account ids (`accounts`, for `unlink-account`) |
@@ -59,6 +59,7 @@ One Cloudflare Worker serves every host:
 | `PUT`/`DELETE /api/v1/admin/gizlets/github.com/{owner}/{repo}/marks/awesome` | The `awesome` mark (body `{"note"?}`), with the admin token |
 | `POST /api/v1/admin/gizlets/github.com/{owner}/{repo}/releases/{tag}/scan` | A malware scan report, with the admin token: `{"result": "clean" \| "infected", "revision"?, "engine"?, "report_url"?, "note"?}`; `409` when the tag was indexed again since `revision` |
 | `PUT`/`DELETE /api/v1/admin/links/{id}` | Set a short link (body `{"repo"}`), whatever its length and whoever has it; or take it back at once. With the admin token |
+| `PUT /api/v1/admin/handhelds/{handheld}/port` | Set `{"progress": "developing" \| "voting" \| "unpicked"}` with the admin token. A developing handheld can have an `estimated_release_date` in `YYYY-MM-DD` format. Omit the date to keep it or pass `null` to clear it. Moving the device out of development clears the date. |
 | `PUT /api/v1/admin/users/{user id or email}/link-min-length` | An account's shortest short link, body `{"min_length": 3-32}`, with the admin token |
 
 Errors are `{"error": {"code", "message"}}`. A package's `size`, `sha256` and `url` are `null` until it is mirrored.
@@ -89,7 +90,7 @@ pnpm test:hurl sim        # the device simulation only
 | `src/i18n.ts` | The site's languages (English, Simplified Chinese, Traditional Chinese, Japanese): `?lang=` (remembered in a `lang` cookie), else the cookie, else `Accept-Language`; every string of the pages and their scripts, and which of a gizlet's own `names`/`descriptions` to show |
 | `src/home.ts` | The home page: the featured gizlets as cartridges, a box that opens any repository link (`/open?url=`), and how a gizlet is made |
 | `src/explore.ts` | `/explore`: listed gizlets with search, a kind filter (Apps, Services) and a category filter for apps (Games, Apps & tools), 24 a page (`EXPLORE_PAGE_SIZE`, 2 in the Hurl suite) |
-| `src/devices.ts` | `/install`: macOS and Windows downloads, the table of handhelds (supported, and requested with their want counts), and `/install/<id>` with the one-line flash command; `/flash/<id>` redirects to the writer script |
+| `src/devices.ts` | `/install`: desktop downloads and a searchable handheld list grouped by release, development, voting and community nomination. `/install/<id>` has the flash guide and `/flash/<id>` redirects to the writer. |
 | `src/gizlet-page.ts`, `src/markdown.ts` | A gizlet's page: cover, install link, screenshots, its about page rendered from Markdown, controls and details, in its `color` (served as `/_theme/<hex>.css`, since the CSP allows no inline styles). Everything comes from the Worker and `dl.`, so it works through a mirror |
 | `src/account.ts`, `public/static/account.js` | `/account` and the data behind `/api/v1/me/gizlets` and `/api/v1/me/devices` |
 | `src/links.ts` | Short links: the id rules, reserved words, claiming and resolving |
