@@ -1,0 +1,4 @@
+{
+  "manifest": "{\n  \"schema\": 1,\n  \"name\": \"gizlet-windows\",\n  \"version\": \"0.1.0\",\n  \"tag\": \"v0.1.0\",\n  \"commit\": \"0000000000000000000000000000000000000000\",\n  \"published_at\": \"2026-11-27T00:00:00Z\",\n  \"notes\": {\n    \"en\": \"Fixture.\"\n  },\n  \"installers\": {\n    \"x64\": {\n      \"path\": \"GizletSetup-0.1.0-x64.exe\",\n      \"sha256\": \"0000000000000000000000000000000000000000000000000000000000000000\",\n      \"size\": 15\n    }\n  }\n}\n",
+  "signature": "-----BEGIN SSH SIGNATURE-----\nfixture\n-----END SSH SIGNATURE-----\n"
+}

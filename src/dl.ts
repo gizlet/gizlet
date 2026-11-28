@@ -112,6 +112,47 @@ dl.on(["GET", "HEAD"], "/macos/releases/:tag/:file", async (c) => {
   return response ?? c.text("Not found", 404);
 });
 
+/**
+ * Gizlet Launcher for Windows, published by gizlet/windows's Release workflow under `windows/` in
+ * R2. `update.json` is the signed manifest running Launchers poll, revalidated on every request;
+ * installers are immutable, and served only when their name matches their release's tag.
+ */
+const WINDOWS_INSTALLER = /^GizletSetup-((?:0|[1-9][0-9]{0,8})(?:\.(?:0|[1-9][0-9]{0,8})){2})-(x64|arm64)\.exe$/;
+
+dl.on(["GET", "HEAD"], "/windows/update.json", async (c) => {
+  const response = await fromR2(c, "windows/update.json", "update.json", "no-cache", null, () => {});
+  return response ?? c.text("Not found", 404);
+});
+
+dl.on(["GET", "HEAD"], "/windows/releases/:tag/:file", async (c) => {
+  const tag = c.req.param("tag");
+  const file = c.req.param("file");
+  const match = WINDOWS_INSTALLER.exec(file);
+  if (!OS_TAG.test(tag) || !match || `v${match[1]}` !== tag) return c.text("Not found", 404);
+  const response = await fromR2(c, `windows/releases/${tag}/${file}`, file, IMMUTABLE, null, () => {}, true);
+  return response ?? c.text("Not found", 404);
+});
+
+/** The newest installer for an architecture, as the published update manifest names it. */
+dl.get("/windows/latest/:arch", async (c) => {
+  const arch = c.req.param("arch");
+  if (arch !== "x64" && arch !== "arm64") return c.text("Not found", 404);
+  const object = await c.env.BUCKET.get("windows/update.json");
+  const envelope = await object?.json<{ manifest?: unknown }>().catch(() => null);
+  let manifest: { tag?: unknown; installers?: Record<string, { path?: unknown }> } | null = null;
+  try {
+    manifest = typeof envelope?.manifest === "string" ? JSON.parse(envelope.manifest) : null;
+  } catch {
+    manifest = null;
+  }
+  const tag = manifest?.tag;
+  const path = manifest?.installers?.[arch]?.path;
+  const match = typeof path === "string" ? WINDOWS_INSTALLER.exec(path) : null;
+  if (typeof tag !== "string" || !OS_TAG.test(tag) || !match || `v${match[1]}` !== tag || match[2] !== arch) return c.text("Not found", 404);
+  c.header("cache-control", "public, max-age=60");
+  return c.redirect(`${c.env.SITE_ORIGIN}/assets/windows/releases/${tag}/${path}`, 302);
+});
+
 /** Redirect to the newest compatible package, given ?target= (and ?tier=) or X-Gizlet-Target. */
 dl.get("/github.com/:owner/:repo", async (c) => {
   const r = repoRef(c.req.param("owner"), c.req.param("repo"));
