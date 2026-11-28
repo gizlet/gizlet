@@ -66,15 +66,18 @@ function setUpWants(results, dialog) {
       button.setAttribute("aria-pressed", String(votes.has(button.dataset.device)));
     }
   };
+  let personalRequest;
   function loadMyVotes() {
-    return fetch("/api/v1/me/wants", { credentials: "same-origin", cache: "no-store" }).then(async (response) => {
+    if (personalRequest) return personalRequest;
+    personalRequest = fetch("/api/v1/me/wants", { credentials: "same-origin", cache: "no-store" }).then(async (response) => {
       if (!response.ok && response.status !== 401) return "unavailable";
       const personal = response.ok ? (await response.json()).wants : [];
       votes.clear();
       for (const vote of personal) votes.add(vote.id);
       pressed();
       return response.ok ? "signedIn" : "signedOut";
-    }).catch(() => "unavailable");
+    }).catch(() => "unavailable").finally(() => { personalRequest = undefined; });
+    return personalRequest;
   }
   let mine = loadMyVotes();
 
